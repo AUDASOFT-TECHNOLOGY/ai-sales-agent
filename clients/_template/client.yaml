@@ -1,0 +1,17 @@
+# Template for a new client. Data only. No secrets: reference env var NAMES.
+client_id: CHANGE_ME
+display_name: CHANGE ME
+mode: approval            # approval | autonomous | dry_run
+daily_action_limit: 20
+brain: CHANGE_ME_brain.brain:CHANGE_ME_Brain   # importable path: module:Class
+
+google_sheets:
+  spreadsheet_id: CHANGE_ME
+  prospects_tab: Prospects
+  actions_tab: Actions
+  log_tab: Log
+  column_mapping: {}      # core field -> sheet column header
+
+whatsapp:
+  token_env: CHANGE_ME_WHATSAPP_TOKEN
+  phone_number_id_env: CHANGE_ME_WHATSAPP_PHONE_NUMBER_ID

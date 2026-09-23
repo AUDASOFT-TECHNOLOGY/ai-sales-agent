@@ -1,0 +1,16 @@
+client_id: tounesimmo
+display_name: Tounesimmo
+mode: approval
+daily_action_limit: 20
+brain: tounesimmo_brain.brain:TounesimmoBrain
+
+google_sheets:
+  spreadsheet_id: TODO
+  prospects_tab: Prospects
+  actions_tab: Actions
+  log_tab: Log
+  column_mapping: {}
+
+whatsapp:
+  token_env: TOUNESIMMO_WHATSAPP_TOKEN
+  phone_number_id_env: TOUNESIMMO_WHATSAPP_PHONE_NUMBER_ID
