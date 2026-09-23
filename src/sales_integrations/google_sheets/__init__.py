@@ -1,1 +1,1 @@
-"""ProspectStore adapter for Google Sheets (batched reads/writes, column mapping)."""
+"""SalesRepository adapter for Google Sheets (batched reads/writes, column mapping)."""

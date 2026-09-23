@@ -1,0 +1,16 @@
+"""Port implemented by every Business Brain (Naga, Tounesimmo, ...)."""
+
+from typing import Protocol, runtime_checkable
+
+from sales_core.contracts import BrainDecision, BrainRequest
+
+
+@runtime_checkable
+class Brain(Protocol):
+    """Decides what to do for one prospect. Client knowledge lives entirely behind this call.
+
+    A Brain receives its collaborators (e.g. an `LLMProvider`) at construction time, never
+    through the request, so the Core stays independent of how a Brain reaches its model.
+    """
+
+    def decide(self, request: BrainRequest) -> BrainDecision: ...
