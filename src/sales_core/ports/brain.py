@@ -1,8 +1,10 @@
-"""Port implemented by every Business Brain (Naga, Tounesimmo, ...)."""
+"""Port implemented by every Business Brain (one per client)."""
 
+from collections.abc import Callable, Mapping
 from typing import Protocol, runtime_checkable
 
 from sales_core.contracts import BrainDecision, BrainRequest
+from sales_core.ports.llm import LLMProvider
 
 
 @runtime_checkable
@@ -14,3 +16,8 @@ class Brain(Protocol):
     """
 
     def decide(self, request: BrainRequest) -> BrainDecision: ...
+
+
+# Entry point every Brain package exposes (named by `brain.factory` in client configuration).
+# It receives the client's own LLM provider and its opaque Brain settings.
+type BrainFactory = Callable[[LLMProvider, Mapping[str, object]], Brain]

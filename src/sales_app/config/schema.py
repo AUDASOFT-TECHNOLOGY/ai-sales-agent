@@ -1,0 +1,159 @@
+"""The shape of clients/<client_id>/client.yaml. Unknown keys are rejected so typos fail loudly."""
+
+import re
+from datetime import time
+from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    StringConstraints,
+    field_validator,
+)
+
+from sales_core.approval import ApprovalMode
+
+NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+
+Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+WEEKDAY_INDEX = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+DEFAULT_DAYS: tuple[Weekday, ...] = ("mon", "tue", "wed", "thu", "fri", "sat")  # Sunday off
+
+_PLACEHOLDERS = {"todo", "change_me", "changeme", "tbd", "xxx"}
+_FACTORY = re.compile(r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$")
+_CLOCK = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+_CLIENT_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
+class _Section(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+def _reject_placeholder(value: str) -> str:
+    if value.strip().lower() in _PLACEHOLDERS or "CHANGE_ME" in value:
+        raise ValueError("is still a placeholder")
+    return value
+
+
+class BrainSection(_Section):
+    factory: str  # "package.module:callable", resolved at startup, never imported statically
+    settings: dict[str, Any] = Field(default_factory=dict)  # opaque, handed to the Brain as-is
+
+    @field_validator("factory")
+    @classmethod
+    def _check_factory(cls, value: str) -> str:
+        if not _FACTORY.match(value):
+            raise ValueError("must look like 'package.module:callable'")
+        return _reject_placeholder(value)
+
+
+class SheetsSection(_Section):
+    provider: NonEmpty = "google_sheets"
+    spreadsheet_id: NonEmpty
+    prospects_tab: NonEmpty = "Prospects"
+    actions_tab: NonEmpty = "Actions"
+    messages_tab: NonEmpty = "Messages"
+    log_tab: NonEmpty = "Log"
+    column_mapping: dict[str, str] = Field(default_factory=dict)  # '<tab>.<field>' -> sheet header
+    credentials_env: EnvName = "GOOGLE_APPLICATION_CREDENTIALS"
+
+    @field_validator("spreadsheet_id")
+    @classmethod
+    def _check_id(cls, value: str) -> str:
+        return _reject_placeholder(value)
+
+
+class LLMSection(_Section):
+    provider: NonEmpty = "openai"
+    api_key_env: EnvName = "OPENAI_API_KEY"
+    model: NonEmpty
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, value: str) -> str:
+        return _reject_placeholder(value)
+
+
+class WhatsAppSection(_Section):
+    provider: NonEmpty = "whatsapp"
+    token_env: EnvName
+    phone_number_id_env: EnvName
+    app_secret_env: EnvName  # signs webhook requests; may be shared by clients of one Meta app
+    api_version: NonEmpty = "v21.0"
+
+    @field_validator("token_env", "phone_number_id_env", "app_secret_env")
+    @classmethod
+    def _check_env(cls, value: str) -> str:
+        return _reject_placeholder(value)
+
+
+class ScheduleSection(_Section):
+    # Quote the time in YAML: an unquoted 10:30 is read as the number 630.
+    daily_at: StrictStr = "09:00"
+    days: tuple[Weekday, ...] = DEFAULT_DAYS
+    # Extra planning passes after the daily cycle: pick up prospects added to the sheet, and
+    # follow-ups or callbacks that fall due later in the day, while the daily quota lasts.
+    prepare_every_minutes: int = Field(default=60, ge=5, le=1440)
+    dispatch_every_minutes: int = Field(default=5, ge=1, le=1440)
+    recover_every_minutes: int = Field(default=15, ge=1, le=1440)
+
+    @field_validator("daily_at")
+    @classmethod
+    def _check_daily_at(cls, value: str) -> str:
+        if not _CLOCK.match(value):
+            raise ValueError("must be a quoted 'HH:MM' time, e.g. \"09:00\"")
+        return value
+
+    @field_validator("days")
+    @classmethod
+    def _check_days(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            raise ValueError("must list at least one day")
+        if len(set(value)) != len(value):
+            raise ValueError("lists a day twice")
+        return value
+
+    @property
+    def daily_time(self) -> time:
+        hours, minutes = self.daily_at.split(":")
+        return time(int(hours), int(minutes))
+
+    @property
+    def weekdays(self) -> frozenset[int]:
+        return frozenset(WEEKDAY_INDEX[d] for d in self.days)
+
+
+class ClientFile(_Section):
+    client_id: str
+    display_name: NonEmpty
+    enabled: bool = True
+    mode: ApprovalMode = ApprovalMode.DRY_RUN  # safest default
+    timezone: NonEmpty  # IANA name; the planner's day boundary and the scheduler both use it
+    daily_action_limit: int = Field(default=20, ge=1, le=1000)
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    opt_out_keywords: tuple[NonEmpty, ...] = ("stop",)
+    brain: BrainSection
+    sheets: SheetsSection
+    llm: LLMSection
+    whatsapp: WhatsAppSection
+    schedule: ScheduleSection = Field(default_factory=ScheduleSection)
+
+    @field_validator("client_id")
+    @classmethod
+    def _check_client_id(cls, value: str) -> str:
+        if not _CLIENT_ID.match(value):
+            raise ValueError("must be lowercase letters, digits, '-' or '_'")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (KeyError, ValueError) as error:
+            raise ValueError(f"unknown timezone {value!r}") from error
+        return value

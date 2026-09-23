@@ -1,16 +1,41 @@
+# Tounesimmo. Disabled until the placeholders below are replaced (see clients/_template/client.yaml).
 client_id: tounesimmo
 display_name: Tounesimmo
+enabled: false
 mode: approval
+timezone: Africa/Tunis
 daily_action_limit: 20
-brain: tounesimmo_brain.brain:TounesimmoBrain
+max_attempts: 3
+opt_out_keywords: ["stop"]
 
-google_sheets:
+brain:
+  factory: tounesimmo_brain.brain:create_brain
+  settings: {}
+
+sheets:
+  provider: google_sheets
   spreadsheet_id: TODO
   prospects_tab: Prospects
   actions_tab: Actions
+  messages_tab: Messages
   log_tab: Log
   column_mapping: {}
+  credentials_env: GOOGLE_APPLICATION_CREDENTIALS
+
+llm:
+  provider: openai
+  api_key_env: OPENAI_API_KEY
+  model: TODO
 
 whatsapp:
+  provider: whatsapp
   token_env: TOUNESIMMO_WHATSAPP_TOKEN
   phone_number_id_env: TOUNESIMMO_WHATSAPP_PHONE_NUMBER_ID
+  app_secret_env: TOUNESIMMO_WHATSAPP_APP_SECRET
+
+schedule:
+  daily_at: "09:00"
+  days: [mon, tue, wed, thu, fri, sat]
+  prepare_every_minutes: 60
+  dispatch_every_minutes: 5
+  recover_every_minutes: 15

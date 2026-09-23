@@ -69,3 +69,182 @@ def test_fakes_use_only_stdlib_and_core():
     allowed = set(sys.stdlib_module_names) | {"sales_core", "sales_integrations"}
     extra = _imported_top_levels(SRC / "sales_integrations" / "fakes") - allowed
     assert not extra, f"fakes import {sorted(extra)}"
+
+
+# ---- the application layer ---------------------------------------------------------------
+
+VENDOR_AND_STORAGE = {
+    "openai", "google", "googleapiclient", "gspread", "psycopg2", "psycopg", "sqlalchemy",
+    "redis", "celery", "apscheduler", "sqlite3", "pymongo",
+}  # fmt: skip
+# Commercial vocabulary: decisions and lifecycle belong to the Brain and the Core, never here.
+COMMERCIAL_VOCABULARY = {
+    "DecisionType", "BrainDecision", "ProspectStatus", "SalesActionType", "ActionStatus",
+    "MessageDraft", "ActionPriority", "Scheduling", "Prospect", "SalesAction",
+}  # fmt: skip
+
+
+def _identifiers(package_dir: Path) -> set[str]:
+    names: set[str] = set()
+    for py in package_dir.rglob("*.py"):
+        for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                names.add(node.attr)
+            elif isinstance(node, ast.alias):
+                names.add(node.name.split(".")[-1])
+    return names
+
+
+def test_the_app_never_imports_a_brain_package():
+    assert not _imported_top_levels(SRC / "sales_app") & set(_brain_packages())
+
+
+def test_the_app_contains_no_vendor_or_storage_code():
+    assert not _imported_top_levels(SRC / "sales_app") & VENDOR_AND_STORAGE
+
+
+def test_the_app_uses_no_commercial_vocabulary():
+    assert not _identifiers(SRC / "sales_app") & COMMERCIAL_VOCABULARY
+
+
+def test_no_client_names_appear_in_the_app_or_the_core():
+    for package in ("sales_app", "sales_core"):
+        for py in (SRC / package).rglob("*.py"):
+            text = py.read_text(encoding="utf-8").lower()
+            for client in ("naga", "tounesimmo"):
+                assert client not in text, f"{client} mentioned in {py.relative_to(ROOT)}"
+
+
+def test_the_scheduler_only_knows_the_clock_and_the_registry():
+    """It triggers the Engine; choosing prospects (the Planner) is out of its reach."""
+    scheduler = SRC / "sales_app" / "scheduler.py"
+    tree = ast.parse(scheduler.read_text(encoding="utf-8"))
+    imported = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0
+    }
+    assert {m for m in imported if m.startswith("sales_core")} == {"sales_core.ports"}
+    assert not any(m.startswith("sales_integrations") for m in imported)
+
+
+def test_the_webhook_route_reaches_the_core_only_through_the_engine_and_ports():
+    tree = ast.parse((SRC / "sales_app" / "api" / "app.py").read_text(encoding="utf-8"))
+    core = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("sales_core")
+    }
+    assert core == {"sales_core.engine", "sales_core.ports"}
+    assert not any(
+        isinstance(node, ast.ImportFrom) and (node.module or "").startswith("sales_integrations")
+        for node in ast.walk(tree)
+    )
+
+
+def test_configuration_lives_in_the_app_not_the_core():
+    assert not (SRC / "sales_core" / "config").exists()
+    assert not (SRC / "sales_core" / "registry.py").exists()
+    assert (SRC / "sales_app" / "registry.py").exists()
+
+
+# ---- the Google Sheets adapter must not leak into the Core or the app --------------------------
+
+GOOGLE_LIBRARIES = {"google", "googleapiclient", "httplib2", "gspread"}
+SHEETS_VOCABULARY = ("sheet", "google", "gspread")  # substrings that must not appear in Core code
+SHEETS_ADAPTER = SRC / "sales_integrations" / "google_sheets"
+
+
+def _defined_and_used_names(package_dir: Path) -> set[str]:
+    """Every identifier in the code (not comments or docstrings): names, attributes, defs, args."""
+    names: set[str] = set()
+    for py in package_dir.rglob("*.py"):
+        for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                names.add(node.attr)
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                names.add(node.name)
+            elif isinstance(node, ast.arg):
+                names.add(node.arg)
+            elif isinstance(node, ast.alias):
+                names.add(node.name.split(".")[-1])
+            elif isinstance(node, ast.keyword) and node.arg:
+                names.add(node.arg)
+    return names
+
+
+def test_the_core_knows_nothing_about_google_or_spreadsheets():
+    core = SRC / "sales_core"
+    assert not _imported_top_levels(core) & GOOGLE_LIBRARIES
+    offenders = {
+        name
+        for name in _defined_and_used_names(core)
+        if any(word in name.lower() for word in SHEETS_VOCABULARY)
+    }
+    assert not offenders, f"sales_core uses Sheets/Google vocabulary: {sorted(offenders)}"
+
+
+def test_google_libraries_are_imported_by_one_module_only():
+    importers = {
+        py.relative_to(SRC).as_posix()
+        for py in (SRC).rglob("*.py")
+        if _imported_top_levels_of_file(py) & GOOGLE_LIBRARIES
+    }
+    assert importers == {"sales_integrations/google_sheets/api.py"}
+
+
+def _imported_top_levels_of_file(path: Path) -> set[str]:
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            found.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            found.add(node.module.split(".")[0])
+    return found
+
+
+def test_the_sheets_adapter_depends_only_on_the_core_and_itself():
+    allowed = set(sys.stdlib_module_names) | GOOGLE_LIBRARIES | {"sales_core", "sales_integrations"}
+    assert not _imported_top_levels(SHEETS_ADAPTER) - allowed
+    for module in _imported_modules(SHEETS_ADAPTER):
+        if module.startswith("sales_integrations"):
+            assert module.startswith("sales_integrations.google_sheets"), module
+        if module.startswith("sales_core"):
+            # contracts and ports only: the adapter never reaches into the planner or engine
+            assert module.split(".")[1] in {"contracts", "ports"} if "." in module else True, module
+
+
+def test_the_pure_adapter_modules_import_no_google_library():
+    for name in ("codecs.py", "layout.py", "repository.py", "errors.py"):
+        assert not _imported_top_levels_of_file(SHEETS_ADAPTER / name) & GOOGLE_LIBRARIES, name
+
+
+def test_only_the_wiring_table_of_the_app_knows_the_sheets_adapter():
+    for py in (SRC / "sales_app").rglob("*.py"):
+        uses = any(
+            m.startswith("sales_integrations.google_sheets") for m in _imported_modules_of_file(py)
+        )
+        assert uses == (py.name == "integrations.py" and py.parent.name == "wiring"), py.name
+
+
+def _imported_modules_of_file(path: Path) -> set[str]:
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            found.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            found.add(node.module)
+    return found
+
+
+def test_the_engine_and_planner_do_not_depend_on_any_adapter():
+    for part in ("engine", "planner", "safety", "approval"):
+        assert not {
+            m
+            for m in _imported_modules(SRC / "sales_core" / part)
+            if m.startswith("sales_integrations")
+        }

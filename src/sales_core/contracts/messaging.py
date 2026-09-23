@@ -47,6 +47,17 @@ class InboundMessage:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class InboundEvent:
+    """An inbound message plus the key that says which client account it was addressed to."""
+
+    routing_key: str  # e.g. the receiving phone-number id; mapped to a client by the app layer
+    message: InboundMessage
+
+    def __post_init__(self) -> None:
+        require_text(self.routing_key, "routing_key")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SendResult:
     """Outcome of a send attempt. Expected failures are reported here, not raised."""
 

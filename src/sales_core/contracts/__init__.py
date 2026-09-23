@@ -21,7 +21,7 @@ from sales_core.contracts.enums import (
 )
 from sales_core.contracts.ids import ActionId, ClientId, ConversationId, MessageId, ProspectId
 from sales_core.contracts.llm import LLMMessage, LLMRequest, LLMResponse
-from sales_core.contracts.messaging import InboundMessage, OutboundMessage, SendResult
+from sales_core.contracts.messaging import InboundEvent, InboundMessage, OutboundMessage, SendResult
 from sales_core.contracts.prospect import ContactInfo, Prospect, Scheduling
 
 __all__ = [
@@ -40,6 +40,7 @@ __all__ = [
     "ConversationId",
     "DecisionType",
     "Direction",
+    "InboundEvent",
     "InboundMessage",
     "LLMMessage",
     "LLMRequest",

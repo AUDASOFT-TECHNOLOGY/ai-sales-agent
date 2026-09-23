@@ -1,17 +1,46 @@
-# Template for a new client. Data only. No secrets: reference env var NAMES.
-client_id: CHANGE_ME
-display_name: CHANGE ME
-mode: approval            # approval | autonomous | dry_run
-daily_action_limit: 20
-brain: CHANGE_ME_brain.brain:CHANGE_ME_Brain   # importable path: module:Class
+# Template for a new client. Copy to clients/<client_id>/client.yaml (this directory is never
+# loaded). Data only: secrets are referenced by environment variable NAME, never written here.
+# Unknown keys are rejected at startup.
 
-google_sheets:
+client_id: CHANGE_ME              # lowercase; must equal the directory name
+display_name: CHANGE ME
+enabled: false                    # set true once every value below is real
+mode: dry_run                     # dry_run | approval | autonomous (default dry_run)
+                                  # SALES_AGENT_MODE_CEILING caps this in the deployment
+timezone: UTC                     # IANA name, e.g. Africa/Tunis
+daily_action_limit: 20
+max_attempts: 3
+opt_out_keywords: ["stop"]        # add this client's own words
+
+brain:
+  factory: CHANGE_ME_brain.brain:create_brain   # module:callable, called as (llm, settings)
+  settings: {}                                  # opaque, passed to the Brain
+
+sheets:
+  provider: google_sheets
   spreadsheet_id: CHANGE_ME
   prospects_tab: Prospects
   actions_tab: Actions
+  messages_tab: Messages
   log_tab: Log
-  column_mapping: {}      # core field -> sheet column header
+  column_mapping: {}              # '<tab>.<field>' -> your header, e.g. prospects.phone: Mobile
+  credentials_env: GOOGLE_APPLICATION_CREDENTIALS
+
+llm:
+  provider: openai
+  api_key_env: OPENAI_API_KEY
+  model: CHANGE_ME
 
 whatsapp:
+  provider: whatsapp
   token_env: CHANGE_ME_WHATSAPP_TOKEN
   phone_number_id_env: CHANGE_ME_WHATSAPP_PHONE_NUMBER_ID
+  app_secret_env: CHANGE_ME_WHATSAPP_APP_SECRET
+  api_version: v21.0
+
+schedule:
+  daily_at: "09:00"               # client-local time; QUOTE it (unquoted 10:30 reads as a number)
+  days: [mon, tue, wed, thu, fri, sat]   # Sunday is off by default
+  prepare_every_minutes: 60
+  dispatch_every_minutes: 5
+  recover_every_minutes: 15
