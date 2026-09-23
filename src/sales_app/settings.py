@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SALES_AGENT_", extra="ignore")
 
     clients_dir: Path = Path("clients")
+    # Versioned client settings (see sales_app.config_store). Holds client business data and
+    # changes at runtime, so it lives outside git and belongs in server backups.
+    config_dir: Path = Path("config")
     log_level: str = "INFO"
     # Highest mode any client may run in, whatever its client.yaml says. Autonomy needs an
     # explicit deployment decision: SALES_AGENT_MODE_CEILING=autonomous.

@@ -113,6 +113,11 @@ schedule: { daily_at: "09:00", days: [mon, tue, wed, thu, fri, sat],
      client, judged on its *effective* mode).
   6. The Brain imports, its factory runs, and the result satisfies the `Brain` protocol.
 
+Since the ConfigStore block, the client-editable part of this file (everything except the operator
+wiring) can instead come from a versioned store; see
+[client-configuration-design.md](client-configuration-design.md) section F. `client.yaml` as
+described here remains valid, and remains the source for a client with no published version.
+
 ## 3. Client registry
 
 `ClientRegistry` owns `client_id -> ClientRuntime`. A `ClientRuntime` holds the `Engine`, the config,

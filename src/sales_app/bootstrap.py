@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sales_app.config import clamp_mode, load_client_configs
+from sales_app.config_store import ConfigStore, FileConfigStore
 from sales_app.errors import ConfigurationError
 from sales_app.registry import ClientRegistry
 from sales_app.scheduler import Scheduler
@@ -21,6 +22,7 @@ from sales_integrations.system import SystemClock
 class Application:
     settings: Settings
     registry: ClientRegistry
+    config_store: ConfigStore  # kept for the CLI and, later, runtime refresh and the Admin API
     scheduler: Scheduler
     parsers: Mapping[str, WebhookParser]  # channel provider name -> webhook parser
     clock: Clock
@@ -38,6 +40,7 @@ def build_application(
     executor: Executor | None = None,
     mode_ceiling: ApprovalMode | None = None,
     require_clients: bool = True,
+    config_store: ConfigStore | None = None,
 ) -> Application:
     """Load, validate and wire everything, or raise a ConfigurationError listing every problem.
 
@@ -54,7 +57,10 @@ def build_application(
         else clamp_mode(mode_ceiling, settings.mode_ceiling)
     )
 
-    loaded = load_client_configs(settings.clients_dir, env=environment, mode_ceiling=ceiling)
+    store = config_store if config_store is not None else FileConfigStore(settings.config_dir)
+    loaded = load_client_configs(
+        settings.clients_dir, env=environment, mode_ceiling=ceiling, store=store
+    )
     errors = list(loaded.errors)
     if require_clients and not loaded.clients and not errors:
         errors.append(f"no enabled clients found in {settings.clients_dir}")
@@ -82,6 +88,7 @@ def build_application(
     return Application(
         settings=settings,
         registry=registry,
+        config_store=store,
         scheduler=Scheduler(registry, clock, executor=executor),
         parsers=parsers,
         clock=clock,

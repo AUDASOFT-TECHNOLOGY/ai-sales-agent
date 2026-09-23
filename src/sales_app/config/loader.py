@@ -8,14 +8,21 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
 from pydantic import ValidationError
 
+from sales_app.config.resolution import (
+    CONFIG_FILENAME,
+    check_document,
+    merge_document,
+    read_wiring,
+    strip_settings,
+    where,
+)
 from sales_app.config.schema import ClientFile
 from sales_app.config.secrets import Secrets
+from sales_app.config_store import ConfigStore, ConfigStoreError
+from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_core.approval import ApprovalMode
-
-CONFIG_FILENAME = "client.yaml"
 
 # Safest first: a client's effective mode is the safer of its own and the deployment ceiling.
 MODE_ORDER = (ApprovalMode.DRY_RUN, ApprovalMode.APPROVAL, ApprovalMode.AUTONOMOUS)
@@ -29,6 +36,8 @@ class ClientConfig:
     directory: Path
     effective_mode: ApprovalMode
     secrets: Secrets
+    config_version: int | None = None  # the stored version in force; None: settings from the file
+    config_source: str = "file"  # "store" or "file"
 
     @property
     def client_id(self) -> str:
@@ -54,8 +63,21 @@ def clamp_mode(requested: ApprovalMode, ceiling: ApprovalMode) -> ApprovalMode:
     return MODE_ORDER[min(MODE_ORDER.index(requested), MODE_ORDER.index(ceiling))]
 
 
+@dataclass(frozen=True, slots=True)
+class Resolution:
+    """What became of one client directory: a config, "disabled", or a list of problems."""
+
+    config: ClientConfig | None = None
+    disabled: bool = False
+    errors: tuple[str, ...] = ()
+
+
 def load_client_configs(
-    clients_dir: Path, *, env: Mapping[str, str], mode_ceiling: ApprovalMode
+    clients_dir: Path,
+    *,
+    env: Mapping[str, str],
+    mode_ceiling: ApprovalMode,
+    store: ConfigStore | None = None,
 ) -> LoadedConfig:
     if not clients_dir.is_dir():
         return LoadedConfig((), (), (f"clients directory not found: {clients_dir}",))
@@ -67,39 +89,71 @@ def load_client_configs(
         p for p in clients_dir.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))
     )
     for directory in directories:
-        config, is_disabled, problems = _load_one(directory, env, mode_ceiling)
-        errors.extend(problems)
-        if is_disabled:
+        resolution = resolve_client_config(
+            directory, env=env, mode_ceiling=mode_ceiling, store=store
+        )
+        errors.extend(resolution.errors)
+        if resolution.disabled:
             disabled.append(directory.name)
-        elif config is not None:
-            clients.append(config)
+        elif resolution.config is not None:
+            clients.append(resolution.config)
     errors.extend(_cross_client_errors(clients))
     return LoadedConfig(tuple(clients), tuple(disabled), tuple(errors))
 
 
-def _load_one(
-    directory: Path, env: Mapping[str, str], mode_ceiling: ApprovalMode
-) -> tuple[ClientConfig | None, bool, list[str]]:
+def resolve_client_config(
+    directory: Path,
+    *,
+    env: Mapping[str, str],
+    mode_ceiling: ApprovalMode,
+    store: ConfigStore | None = None,
+) -> Resolution:
+    """Build one client's immutable config from its `client.yaml` and, if a version was published,
+    its stored settings. Pure and side-effect free: it never raises for bad configuration and never
+    touches anything already running, so a caller can keep its current config when this fails."""
     name = directory.name
-    path = directory / CONFIG_FILENAME
-    if not path.is_file():
-        return None, False, [f"{name}: {CONFIG_FILENAME} not found"]
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (yaml.YAMLError, OSError, UnicodeDecodeError) as error:
-        return None, False, [f"{name}: cannot read {CONFIG_FILENAME}: {error}"]
-    if not isinstance(raw, dict):
-        return None, False, [f"{name}: {CONFIG_FILENAME} must contain a mapping"]
+    raw, problem = read_wiring(directory)
+    if problem is not None or raw is None:
+        return Resolution(errors=(problem or f"{name}: cannot read {CONFIG_FILENAME}",))
 
     if raw.get("enabled", True) is False:
-        return None, True, []  # deliberately excluded: not validated, not built
+        return Resolution(disabled=True)  # deliberately excluded: not validated, not built
+
+    version = None
+    if store is not None and CLIENT_ID_PATTERN.match(name):
+        try:
+            version = store.current(name)
+        except ConfigStoreError as error:
+            return Resolution(errors=(f"{name}: configuration store: {error}",))
+
+    if version is not None:
+        document_errors = check_document(version.document)
+        if document_errors:
+            return Resolution(
+                errors=tuple(
+                    f"{name}: configuration version {version.version}: {e}" for e in document_errors
+                )
+            )
+        candidate = merge_document(strip_settings(raw), version.document)
+    else:
+        candidate = raw
 
     try:
-        spec = ClientFile.model_validate(raw)
+        spec = ClientFile.model_validate(candidate)
     except ValidationError as error:
-        return None, False, [f"{name}: {_where(problem)}" for problem in error.errors()]
+        problems = [f"{name}: {where(p)}" for p in error.errors()]
+        if version is not None:
+            problems.append(
+                f"{name}: settings in force come from configuration version {version.version}"
+            )
+        elif any(_is_missing_setting(p) for p in error.errors()):
+            problems.append(
+                f"{name}: no configuration version is published; run "
+                f"'sales-agent config import {name}' or 'sales-agent config publish {name} FILE'"
+            )
+        return Resolution(errors=tuple(problems))
 
-    problems: list[str] = []
+    problems = []
     if spec.client_id != name:
         problems.append(f"{name}: client_id {spec.client_id!r} must equal the directory name")
 
@@ -107,13 +161,29 @@ def _load_one(
     secrets, missing = _resolve_secrets(spec, effective, env)
     problems.extend(f"{name}: {message}" for message in missing)
     if problems:
-        return None, False, problems
-    return ClientConfig(spec, directory, effective, secrets), False, []
+        return Resolution(errors=tuple(problems))
+    config = ClientConfig(
+        spec,
+        directory,
+        effective,
+        secrets,
+        config_version=version.version if version is not None else None,
+        config_source="store" if version is not None else "file",
+    )
+    return Resolution(config=config)
 
 
-def _where(problem: Mapping[str, object]) -> str:
-    location = ".".join(str(part) for part in problem["loc"])  # type: ignore[union-attr]
-    return f"{location or 'file'}: {problem['msg']}"
+_SETTINGS_LOCATIONS = {
+    ("display_name",),
+    ("timezone",),
+    ("sheets", "spreadsheet_id"),
+    ("llm", "model"),
+}
+
+
+def _is_missing_setting(problem: Mapping[str, object]) -> bool:
+    location = tuple(problem["loc"])  # type: ignore[arg-type]
+    return problem["type"] == "missing" and location in _SETTINGS_LOCATIONS
 
 
 def _resolve_secrets(

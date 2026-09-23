@@ -17,7 +17,7 @@ Business Brains (`brains/`) and client configuration (`clients/`).
 | `clients/` | Per-client configuration (data only, no secrets) |
 | `brains/` | Business Brains, one independent package per client |
 | `tests/` | Tests for the generic Core, including architecture rules |
-| `docs/` | Architecture, Brain contract, Sheet schema |
+| `docs/` | Architecture, Brain contract, Sheet schema, configuration and Web Admin design |
 
 See [docs/architecture.md](docs/architecture.md) for the dependency rules.
 
@@ -40,8 +40,19 @@ Client configuration lives in `clients/<id>/client.yaml` (see `clients/_template
 environment variables named there (see `.env.example`). Clients ship `enabled: false`.
 `SALES_AGENT_MODE_CEILING` (default `approval`) caps every client's mode.
 
+Client settings (display name, sheet, schedule, limits, Brain settings) can be versioned outside
+`client.yaml`: `uv run sales-agent config import|publish|show|history|diff|rollback <client>`. The
+versions live under `config/` (`SALES_AGENT_CONFIG_DIR`, git-ignored); secrets and operator wiring stay
+in the environment and `client.yaml`. Without a published version, `client.yaml` is used as before.
+
 See [docs/sales-app-design.md](docs/sales-app-design.md) and
 [docs/engine-design.md](docs/engine-design.md).
+
+Product direction: Google Sheets is the operational CRM for the MVP. A future Web Admin
+(Configuration, CRM, Dashboard) will talk only to an Admin API in `sales_app`; the CEO report and the
+Dashboard will share one KPI computation. Not built yet: see
+[docs/web-admin-product-design.md](docs/web-admin-product-design.md) and
+[docs/client-configuration-design.md](docs/client-configuration-design.md).
 
 Status: planner, engine, application layer and the Google Sheets adapter are implemented and
 tested (Sheets against an in-memory stand-in and a mocked HTTP transport). The Business Brains are

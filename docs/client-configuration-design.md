@@ -1,7 +1,17 @@
 # Client configuration design
 
-Status: **proposal, nothing implemented.** No code changes until the decisions in section E are
-approved. The current YAML keeps working unchanged in the meantime.
+Status: **the decisions in section E are approved; the `ConfigStore` and the `config` CLI are
+implemented (section F).** The Brain settings schema, `ContactPolicy`, the CEO report, runtime
+refresh, the Admin API and the Web Admin are still proposals. The current YAML keeps working
+unchanged.
+
+Scope note: this document covers the **Configuration** module of the future Web Admin. The overall
+product direction (Configuration + CRM + Dashboard, MVP versus future, shared KPI source, Admin API
+boundary) is in [web-admin-product-design.md](web-admin-product-design.md). Where the two differ,
+that document wins; in particular the module list in section 7 below is a first sketch, superseded by
+its three-module structure. The order of work in decision 10 was confirmed there (section 9): items
+(a) and (c), the Google Sheets adapter and the `ConfigStore` with its CLI, are done. The Brain settings
+schema comes next.
 
 Goal: a future Web Admin lets each client configure its own Sales Agent (sheet, offers, strategy,
 schedule, CEO report...) **without code changes and without a database in the MVP**, while the Core
@@ -359,7 +369,9 @@ and the Engine are untouched because they only ever see ports and immutable obje
    next to its factory, so the Web Admin can render and validate forms.
 6. **New Core `ContactPolicy` guardrails** (minimum gap, maximum touches, sending window) and the
    clamp-versus-refuse rule in 4.4, to be built before autonomous mode is offered.
-7. **CEO daily report as a new capability:** metrics computed by the Core from Sheet data,
+7. **CEO daily report as a new capability** (its metrics must come from the same KPI computation as
+   the Web Dashboard, see [web-admin-product-design.md](web-admin-product-design.md) section 5):
+   metrics computed by the Core from Sheet data,
    optional narrative from the Brain, delivered as a WhatsApp template to a non-prospect recipient
    by a new scheduler trigger. Confirm scope and whether it precedes or follows the Sheets adapter.
 8. **Apply-changes behaviour:** poll the current version each tick, rebuild the client's runtime when
@@ -371,3 +383,70 @@ and the Engine are untouched because they only ever see ports and immutable obje
     not depend on this design; (b) commit the current work; (c) `ConfigStore` and the `config` CLI;
     (d) Brain settings schema; (e) `ContactPolicy`; (f) report; (g) Admin API and Web Admin;
     (h) PostgreSQL only when needed.
+
+## F. Implemented: ConfigStore (MVP)
+
+Code: `src/sales_app/config_store/` (port and stores), `src/sales_app/config/resolution.py` (settings
+document rules), `src/sales_app/config_cli.py` (`sales-agent config`). `sales_core` is untouched.
+
+**Port.** `ConfigStore` (in `sales_app`, not the Core) stores opaque JSON documents, append-only and
+numbered 1, 2, 3 with no gaps: `current`, `get`, `history`, `publish(..., expected_parent)`. A stale
+`expected_parent` raises `ConfigConflictError`. The latest version is the current one; a rollback is
+the old document published again as a new version. Implementations: `FileConfigStore` (MVP) and
+`InMemoryConfigStore` (tests). A PostgreSQL store later is another implementation of the same
+protocol, in an adapter package because `sales_app` may not import database libraries.
+
+**Files.** `<config dir>/<client_id>/versions/000001.json ...`, default `config/`
+(`SALES_AGENT_CONFIG_DIR`), git-ignored, to be backed up. Each file is an envelope (client, version,
+parent, UTC time, author, note, SHA-256 checksum) around the document. A version appears atomically
+(temporary file hard-linked into place, which cannot replace an existing version), so a `config
+publish` from a second process is safe while the agent runs. On read, a bad checksum, an unreadable
+file, a renamed file or a gap in the numbering is `ConfigCorruptError`; nothing is guessed, and a
+corrupt history never accepts a new version. Reading never creates the directory.
+
+**What a document holds.** Only client-editable keys, with a `schema_version` (currently 1) and the
+same key names as `client.yaml`:
+
+```
+schema_version, display_name, timezone, mode, daily_action_limit, opt_out_keywords,
+sheets{spreadsheet_id, prospects_tab, actions_tab, messages_tab, log_tab, column_mapping},
+llm{model}, schedule{daily_at, days}, brain{settings}
+```
+
+Everything else stays in `client.yaml` (operator wiring): `client_id`, `enabled`, `brain.factory`,
+providers, secret variable names, `whatsapp.*`, `max_attempts`, the poll intervals. A document that
+contains any of them, an unknown key, or a key that looks like a secret (`password`, `token`,
+`api_key`... as whole words; `max_tokens` is fine) is refused. Secret values stay in the
+environment. `paused` and `reports` are not in schema 1; they arrive with their features.
+
+**Validation.** `ClientFile` remains the single schema. A document is checked for structure (above),
+then merged with the operator wiring and validated by `ClientFile`, so every existing rule applies
+(placeholders, timezone, ranges, `HH:MM`). Every error is collected. `publish` stores the *normalized*
+document, so defaults such as `mode: dry_run` are explicit in the history. Not yet checked at
+publish time: the Brain's own settings schema (next block), guardrails beyond today's ranges
+(`ContactPolicy`), and a connection test.
+
+**Resolution and precedence.** `resolve_client_config(directory, env, mode_ceiling, store)` builds
+one client's immutable `ClientConfig`. If the store has a version for the client, its document
+supplies the settings-owned keys and any settings left in `client.yaml` are ignored (never blended:
+keys the document omits take `ClientFile`'s defaults). If it has none, `client.yaml` is used exactly
+as before, so existing files keep working. `ClientConfig.config_version` and `config_source` say
+which, and appear in `/health/clients` and `sales-agent validate`. The mode ceiling, the secrets
+check and the cross-client checks apply as before.
+
+**Invalid configuration.** `publish` and `rollback` refuse an invalid document and write nothing.
+The resolver never raises and never mutates a running config; a bad version simply yields errors, so
+a caller that holds a running config can keep it. At startup, an invalid or unreadable current
+version fails fast with every problem listed, like any other configuration error; the operator
+rolls back.
+
+**CLI.** `sales-agent config validate | publish | show | history | diff | rollback | import`
+(exit 0 ok, 1 store problem, 2 invalid input). `import` seeds version 1 from the settings already in
+`client.yaml`. The typical migration is `config import <client>`, after which the settings in
+`client.yaml` are no longer read.
+
+**Prepared, not built.** Runtime refresh: `Application.config_store` is kept, the resolver is a pure
+function, and configs are immutable and versioned, so a later refresh loop can call the resolver,
+build a new runtime beside the old one, and swap only on success (section 6). Nothing polls the
+store yet, so a new version takes effect at the next start. Also not built: `ConfigService`, the
+Admin API, the Web Admin, `config_version` in Engine audit events.

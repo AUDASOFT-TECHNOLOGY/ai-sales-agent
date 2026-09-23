@@ -248,3 +248,47 @@ def test_the_engine_and_planner_do_not_depend_on_any_adapter():
             for m in _imported_modules(SRC / "sales_core" / part)
             if m.startswith("sales_integrations")
         }
+
+
+# ---- versioned client settings (ConfigStore) -----------------------------------------------------
+
+CONFIG_STORE = SRC / "sales_app" / "config_store"
+
+
+def test_the_config_store_is_plain_python_that_knows_only_itself():
+    """Stdlib only: a database-backed store belongs in an adapter, never in this package."""
+    allowed = set(sys.stdlib_module_names) | {"sales_app"}
+    assert _imported_top_levels(CONFIG_STORE) <= allowed
+    for module in _imported_modules(CONFIG_STORE):
+        if module.startswith("sales_app"):
+            assert module.startswith("sales_app.config_store"), module
+
+
+def test_the_core_knows_nothing_about_configuration_storage():
+    core = SRC / "sales_core"
+    offenders = {
+        name
+        for name in _defined_and_used_names(core)
+        if name in {"ConfigStore", "ConfigVersion", "FileConfigStore", "InMemoryConfigStore"}
+        or "config_store" in name.lower()
+    }
+    assert not offenders, f"sales_core mentions the config store: {sorted(offenders)}"
+    assert "sales_app" not in _imported_top_levels(core)
+
+
+def test_the_engine_planner_and_integrations_do_not_use_the_config_store():
+    for package in ("sales_core", "sales_integrations"):
+        assert not any(
+            module.startswith("sales_app") for module in _imported_modules(SRC / package)
+        ), package
+
+
+def test_only_the_composition_layer_reads_the_store_and_only_the_cli_writes_to_it():
+    """Reading happens in the loader and bootstrap; publishing is an operator command."""
+    writers = {
+        py.relative_to(SRC).as_posix()
+        for py in (SRC / "sales_app").rglob("*.py")
+        if ".publish(" in py.read_text(encoding="utf-8")
+        and "config_store" not in py.relative_to(SRC).as_posix()
+    }
+    assert writers == {"sales_app/config_cli.py"}

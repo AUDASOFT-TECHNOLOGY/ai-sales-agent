@@ -19,3 +19,6 @@ service-account*.json
 .DS_Store
 Thumbs.db
 .idea/
+
+# Versioned client settings written at runtime (client business data; back it up, do not commit)
+/config/

@@ -18,6 +18,26 @@ sales_app ──► sales_core ◄── sales_integrations
 
 `tests/architecture/` enforces these rules.
 
+## Layers and the future Web Admin
+
+| Layer | Role |
+|---|---|
+| `sales_core` | generic contracts, ports, planner, engine, safety (and, later, the KPI computation) |
+| `brains/*` | client-specific strategy, wording, cadence |
+| `sales_integrations` | adapters: Google Sheets, OpenAI, WhatsApp (later possibly PostgreSQL) |
+| `sales_app` | composition root, scheduler, webhook (and, later, the Admin API) |
+| Web Admin (future) | browser UI; talks **only** to the Admin API in `sales_app` |
+
+MVP: Google Sheets is the operational CRM; there is no UI, no Admin API and no database. Future: the
+Web Admin (Configuration, CRM, Dashboard) becomes the official interface, the CEO WhatsApp report
+and the Dashboard share one KPI computation, and PostgreSQL may replace the Sheet behind the same
+ports without touching `sales_core`. See [web-admin-product-design.md](web-admin-product-design.md).
+
+Client settings are stored as versioned JSON through the `ConfigStore` port in `sales_app`
+(`sales_app/config_store/`); `sales_core` never sees it. Operator wiring and secrets stay in
+`client.yaml` and the environment. See [client-configuration-design.md](client-configuration-design.md)
+section F.
+
 ## MVP data store
 
 Google Sheets is the operational store. Consequences the design must respect:

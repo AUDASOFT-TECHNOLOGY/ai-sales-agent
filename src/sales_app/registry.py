@@ -71,6 +71,8 @@ class ClientRegistry:
                     "mode": str(config.effective_mode),
                     "configured_mode": str(config.spec.mode),
                     "mode_clamped": config.mode_clamped,
+                    "config_version": config.config_version,
+                    "config_source": config.config_source,
                     **runtime.health.snapshot(),
                 }
             )

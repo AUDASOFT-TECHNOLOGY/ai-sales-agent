@@ -1,4 +1,4 @@
-"""Command line: `sales-agent validate | serve | run`.
+"""Command line: `sales-agent validate | serve | run | config`.
 
 Exit codes: 0 success, 1 a job reported failure, 2 invalid configuration,
 3 another instance is already running.
@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dotenv import load_dotenv
 
 from sales_app.bootstrap import Application, build_application, describe_modes
+from sales_app.config_cli import add_config_parser, run_config
 from sales_app.errors import ConfigurationError
 from sales_app.lockfile import InstanceAlreadyRunningError, InstanceLock
 from sales_app.logs import configure_logging
@@ -35,6 +36,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _validate(settings)
         if args.command == "serve":
             return _serve(settings)
+        if args.command == "config":
+            return run_config(settings, args)
         return _run(settings, args)
     except ConfigurationError as error:
         _print_errors(error)
@@ -46,6 +49,7 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("validate", help="check every client's configuration, start nothing")
     commands.add_parser("serve", help="run the scheduler and the webhook server")
+    add_config_parser(commands)
     run = commands.add_parser("run", help="run one job for one client, once")
     run.add_argument("--client", required=True)
     run.add_argument("--job", required=True, choices=[j.value for j in Job])
@@ -56,9 +60,12 @@ def _parser() -> argparse.ArgumentParser:
 def _validate(settings: Settings) -> int:
     application = build_application(settings, require_clients=False)
     modes = describe_modes(application)
+    versions = {e["client_id"]: e.get("config_version") for e in application.registry.health()}
     for entry in modes:
         note = f" (configured {entry['configured_mode']}, clamped)" if entry["mode_clamped"] else ""
-        print(f"ok  {entry['client_id']}: mode {entry['mode']}{note}")
+        version = versions.get(entry["client_id"])
+        source = f" [config v{version}]" if version is not None else ""
+        print(f"ok  {entry['client_id']}: mode {entry['mode']}{note}{source}")
     skipped = [e["client_id"] for e in application.registry.health() if e["status"] == "disabled"]
     if skipped:
         print(f"skipped (enabled: false): {', '.join(str(c) for c in skipped)}")
