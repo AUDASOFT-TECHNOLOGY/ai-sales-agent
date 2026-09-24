@@ -1,8 +1,8 @@
 # Brain settings: the "consultative sales" family
 
 Status: **the settings schema, its validation and its ConfigStore integration are implemented**
-(`src/sales_brain_kit/`, `src/sales_app/config/`). The Brain that *uses* these settings (discovery
-planner, fact ledger, conversation pipeline) is not built yet. Design background:
+(`src/sales_brain_kit/`, `src/sales_app/config/`). The Brain that *uses* these settings, the generic
+consultative sales Brain, is implemented too: see [brain-kit.md](brain-kit.md). Design background:
 [web-admin-product-design.md](web-admin-product-design.md) and
 [client-configuration-design.md](client-configuration-design.md).
 
@@ -18,7 +18,8 @@ planner, fact ledger, conversation pipeline) is not built yet. Design background
 
 `sales_core` never imports the kit and knows no product, discovery or follow-up vocabulary (an
 architecture test enforces it). A Brain without a `SETTINGS_SPEC` keeps opaque settings exactly as
-before. The two client Brains are still scaffolds and declare none.
+before. The two client Brains are still scaffolds and declare none; the generic Brain is built from any
+valid settings with `sales_brain_kit.create_brain`.
 
 Another Brain family can bring its own schema through the same hook; a future Web Admin only calls
 `json_schema()` and renders forms.
@@ -121,8 +122,29 @@ off, what to do with unknown senders, anti-abuse limits, allowed decisions):
   `unknown_contacts.max_new_per_day` caps the prospects created that way per local day.
   `when_disabled`, `allowed_decisions` and `limits` are stored and validated but not enforced yet.
 
-## 7. Not implemented yet
+## 7. How the Brain uses each section
 
-The Brain that reads these settings (fact ledger, discovery planner, LLM pipeline), Core facts and
-the `interest` concept, enforcement of the remaining `inbound` limits, the
-Admin API and Web Admin, ContactPolicy, and any real client content.
+| Section | Used by the Brain for |
+|---|---|
+| `business`, `communication` | the system instructions (who speaks, voice, principles), languages, message limits (length, questions, emoji, greeting) |
+| `objectives`, `stages` | the primary goal handed to the model; the only stage labels a decision may set |
+| `catalog` | which products may be offered, source-interest mapping (`Product` column to interest), presentation limits, product detail given to the model |
+| `discovery` | what each next step requires (`sufficiency`), the question budget, stop signals, shortcuts, hypotheses policy, `when_no_product.outbound` |
+| `conversation` | answer-first, calls to action, global objections, intent behaviours (`handoff`, `honour_and_close`, `ignore`, ...) |
+| `follow_up` | the cadence (delay per situation), stop conditions; a product's own cadence wins |
+| `incoming` | inbound goals, greeting, topics, out-of-scope handling, `no_product` |
+| `handoff` | triggers, the message the prospect is told, whether a briefing is required |
+| `adaptation` | packs and dimensions chosen by observed facts, provenance level, extra protected attributes |
+
+**The `interest` convention.** `interest` is a reserved fact key. A prospect's interest in a
+product is recorded as facts with key `interest` and a value naming the product (id, name or alias),
+one per product; the fact's status gives the level (confirmed, discovered = probable, hypothesis =
+possible). The lead's source columns can give the same through `catalog.source_interest`. A
+requirement's `accept` is the weakest level that satisfies `interest`.
+
+## 8. Not implemented yet
+
+Fact extraction and recording by the Brain, rebuttal counting (`after_rebuttals`), provider
+templates (`templates`), `conversation.media_handling`, enforcement of the remaining `inbound`
+limits, the Admin API and Web Admin, ContactPolicy, and any real client content.
+`discovery.when_no_product.inbound` is superseded by `incoming.no_product` and is not read.

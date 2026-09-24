@@ -17,7 +17,7 @@ Business Brains (`brains/`) and client configuration (`clients/`).
 | `clients/` | Per-client configuration (data only, no secrets) |
 | `brains/` | Business Brains, one independent package per client |
 | `tests/` | Tests for the generic Core, including architecture rules |
-| `src/sales_brain_kit/` | Shared, client-agnostic Brain building blocks (settings schema and validation) |
+| `src/sales_brain_kit/` | Shared, client-agnostic Brain: settings schema and validation, and the generic consultative sales Brain |
 | `docs/` | Architecture, Brain contract and settings, Sheet schema, configuration and Web Admin design |
 
 See [docs/architecture.md](docs/architecture.md) for the dependency rules.
@@ -56,5 +56,6 @@ Dashboard will share one KPI computation. Not built yet: see
 [docs/client-configuration-design.md](docs/client-configuration-design.md).
 
 Status: planner, engine, application layer and the Google Sheets adapter are implemented and
-tested (Sheets against an in-memory stand-in and a mocked HTTP transport). The Business Brains are
-not built yet. See [docs/sheet-schema.md](docs/sheet-schema.md) for the spreadsheet layout.
+tested (Sheets against an in-memory stand-in and a mocked HTTP transport). The generic Brain Kit is
+implemented ([docs/brain-kit.md](docs/brain-kit.md)); the client Brains are not built yet. See
+[docs/sheet-schema.md](docs/sheet-schema.md) for the spreadsheet layout.

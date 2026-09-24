@@ -16,9 +16,10 @@ sales_app ──► sales_core ◄── sales_integrations
   the Core injects the `LLMProvider`.
 - `sales_app` is the composition root, the only place where everything is wired together.
 - Brains never import each other.
-- `sales_brain_kit` is the shared, client-agnostic building block for Brains (today: the settings
-  schema and `BrainSettingsSpec` of the "consultative sales" family). It imports only `sales_core`
-  and pydantic, knows no client, and is never imported by `sales_core`, `sales_integrations` or
+- `sales_brain_kit` is the shared, client-agnostic building block for Brains: the settings schema
+  and `BrainSettingsSpec` of the "consultative sales" family and the generic Brain that runs on
+  them (`sales_brain_kit/consultative`, see [brain-kit.md](brain-kit.md)). It imports only
+  `sales_core` (contracts and ports only, for its runtime) and pydantic, knows no client, and is never imported by `sales_core`, `sales_integrations` or
   `sales_app` (which finds a Brain's `SETTINGS_SPEC` with `importlib`). Brains may import it.
   See [brain-settings.md](brain-settings.md).
 
@@ -30,7 +31,7 @@ sales_app ──► sales_core ◄── sales_integrations
 |---|---|
 | `sales_core` | generic contracts, ports, planner, engine, safety (and, later, the KPI computation) |
 | `brains/*` | client-specific strategy, wording, cadence |
-| `sales_brain_kit` | shared Brain family: settings schema and validation (later the discovery logic) |
+| `sales_brain_kit` | shared Brain family: settings schema and validation, and the generic consultative sales Brain (catalog, discovery, strategy, follow-up cadence, prompt, validation) |
 | `sales_integrations` | adapters: Google Sheets, OpenAI, WhatsApp (later possibly PostgreSQL) |
 | `sales_app` | composition root, scheduler, webhook (and, later, the Admin API) |
 | Web Admin (future) | browser UI; talks **only** to the Admin API in `sales_app` |

@@ -60,8 +60,32 @@ another value later); the newest is the current one. Recording is the separate a
 an observation is identified by `fact_identity`, so recording it twice keeps one. Nothing extracts
 or applies facts yet, and repositories do not persist the origin.
 
+## The generic Brain that implements it
+
+The first real Brain is the shared, client-agnostic **consultative sales** Brain in
+`sales_brain_kit` (`ConsultativeSalesBrain`, built by `create_brain(llm, settings)`, a
+`BrainFactory`). It turns `BrainRequest` + settings + facts + conversation into a `BrainDecision`
+and uses the contract exactly as it is, with no Core change. See [brain-kit.md](brain-kit.md) for
+its responsibilities and design. In terms of this contract:
+
+- **The Brain proposes, the Core disposes.** A `BrainDecision` is a proposal. Approval, safety,
+  opt-out, quota, persistence, idempotency, sending and scheduling execution stay in the Core; the
+  Brain sends nothing, writes nothing and holds no quota.
+- **Facts are read, never written.** Status semantics are kept: confirmed is relied on, discovered
+  is known but unconfirmed, a hypothesis guides and is never asserted or promoted. Product interest
+  is read from facts under the key `interest` (the value names a catalog product; the status gives
+  the level) and from the lead's source columns.
+- **Origin.** The Brain reads `request.conversation.origin`. Because the Engine marks every reply
+  `inbound`, the Brain refines it from the history (our message first: outbound-started); `unknown`
+  is never guessed. Inbound replies never consume outbound quota, which is the Core's rule.
+- **Follow-up cadence** is the Brain's: it fills `next_follow_up_at` and `next_action_type` from the
+  client's configuration; the Planner picks what is due and the Core stores and executes it.
+- **Failure is safe.** A model answer that is not usable never becomes a decision: the Brain raises
+  `BrainOutputError` (after one retry with the reasons) and the Engine records the failure against
+  the action. `BrainDecision.metadata` carries short operational labels only, never reasoning.
+
 ## Not part of the contract yet
 
-Product interests, constraints on what a decision may be, applying facts from a decision, extracting
-them, and persisting the origin. They will extend `BrainRequest` and `BrainDecision` additively when
-the Core work for them lands.
+Constraints on what a decision may be, applying facts from a decision (a Brain cannot yet propose
+facts), extracting them, and persisting the origin. They will extend `BrainRequest` and
+`BrainDecision` additively when the Core work for them lands.

@@ -384,3 +384,56 @@ def test_the_sheets_adapter_implements_the_generic_facts_ports_from_the_core():
     imported = _imported_modules(SHEETS_ADAPTER)
     assert "sales_core.contracts" in imported
     assert not {m for m in imported if m.startswith("sales_core.engine")}
+
+
+# ---- the consultative Brain runtime stays generic and small-surfaced ---------------------------------
+
+RUNTIME = KIT / "consultative"
+# Words that would tie the runtime to a client, a market or a language.
+CLIENT_SPECIFIC_WORDS = (
+    "naga", "tounesimmo", "immobili", "real estate", "arabic", "french", "english", "tunisia",
+    "derja", "dinar", "tnd",
+)  # fmt: skip
+
+
+def test_the_brain_runtime_uses_the_core_only_through_contracts_and_the_llm_port():
+    """It is a Brain: it reads contracts and reaches its model through the injected port. It never
+    reaches into the Engine, Planner, safety or approval, which are the Core's to run."""
+    for module in _imported_modules(RUNTIME):
+        if module.startswith("sales_core"):
+            assert module in {"sales_core.contracts", "sales_core.ports"}, module
+
+
+def test_the_brain_runtime_hard_codes_no_client_market_or_language():
+    for py in RUNTIME.rglob("*.py"):
+        text = py.read_text(encoding="utf-8").lower()
+        for word in CLIENT_SPECIFIC_WORDS:
+            assert word not in text, f"{word!r} appears in {py.relative_to(ROOT)}"
+
+
+def test_the_brain_runtime_builds_no_scheduler_quota_or_persistence_of_its_own():
+    forbidden_imports = {"threading", "asyncio", "sched", "sqlite3", "socket", "subprocess", "os"}
+    assert not _imported_top_levels(RUNTIME) & forbidden_imports
+    names = {name.lower() for name in _defined_and_used_names(RUNTIME)}
+    for word in ("quota", "daily_limit", "append_facts", "save_actions", "update_prospects"):
+        assert not any(word in name for name in names), word
+
+
+def test_the_brain_runtime_never_sends_or_writes_anything():
+    """Effects are the Core's: the Brain holds no channel, repository or facts writer."""
+    names = _defined_and_used_names(RUNTIME)
+    for forbidden in ("MessagingChannel", "SalesRepository", "FactsWriter", "send"):
+        assert forbidden not in names, forbidden
+
+
+def test_the_brain_runtime_has_one_way_dependencies():
+    """Foundations (facts, language, catalog, history) never import the layers above them."""
+    order = [
+        "errors", "facts", "language", "catalog", "history", "interest", "selection",
+        "discovery", "follow_up", "strategy", "context", "output", "prompt", "validation",
+        "decision", "brain",
+    ]  # fmt: skip
+    for index, name in enumerate(order):
+        later = {f"sales_brain_kit.consultative.{other}" for other in order[index + 1 :]}
+        imported = _imported_modules_of_file(RUNTIME / f"{name}.py")
+        assert not imported & later, f"{name} imports a module above it: {sorted(imported & later)}"
