@@ -12,6 +12,7 @@ from pydantic import (
     StrictStr,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 
 from sales_core.approval import ApprovalMode
@@ -41,7 +42,10 @@ def _reject_placeholder(value: str) -> str:
 
 class BrainSection(_Section):
     factory: str  # "package.module:callable", resolved at startup, never imported statically
-    settings: dict[str, Any] = Field(default_factory=dict)  # opaque, handed to the Brain as-is
+    settings: dict[str, Any] = Field(
+        default_factory=dict
+    )  # handed to the Brain (validated by its spec)
+    settings_version: int = Field(default=1, ge=1)  # which version of the Brain's settings schema
 
     @field_validator("factory")
     @classmethod
@@ -127,6 +131,64 @@ class ScheduleSection(_Section):
         return frozenset(WEEKDAY_INDEX[d] for d in self.days)
 
 
+# What the agent may decide in a conversation the prospect started (enforced by the Core later).
+InboundDecision = Literal[
+    "send_message", "schedule_follow_up", "handoff_to_human", "close", "no_action"
+]
+ALL_INBOUND_DECISIONS: tuple[InboundDecision, ...] = (
+    "send_message",
+    "schedule_follow_up",
+    "handoff_to_human",
+    "close",
+    "no_action",
+)
+
+
+class SpontaneousSection(_Section):
+    """Conversations a prospect starts. Off unless the client turns it on."""
+
+    enabled: bool = False
+    when_disabled: Literal["store_and_flag", "handoff"] = "store_and_flag"
+    allowed_decisions: tuple[InboundDecision, ...] = ALL_INBOUND_DECISIONS
+
+    @field_validator("allowed_decisions")
+    @classmethod
+    def _check_decisions(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            raise ValueError("must allow at least one decision")
+        if len(set(value)) != len(value):
+            raise ValueError("lists a decision twice")
+        return value
+
+
+class UnknownContactsSection(_Section):
+    """People who write and are not in the Sheet. A prospect is created only for `engage`."""
+
+    policy: Literal["ignore", "engage"] = "ignore"
+    max_new_per_day: int = Field(default=30, ge=0, le=1000)
+
+
+class InboundLimitsSection(_Section):
+    max_replies_per_prospect_per_day: int = Field(default=20, ge=1, le=200)
+
+
+class InboundSection(_Section):
+    """Policy for inbound conversations. Stored and validated now; the Engine enforces it in a
+    later block, so today it changes nothing at runtime."""
+
+    spontaneous_conversations: SpontaneousSection = Field(default_factory=SpontaneousSection)
+    unknown_contacts: UnknownContactsSection = Field(default_factory=UnknownContactsSection)
+    limits: InboundLimitsSection = Field(default_factory=InboundLimitsSection)
+
+    @model_validator(mode="after")
+    def _engage_needs_spontaneous(self) -> "InboundSection":
+        if self.unknown_contacts.policy == "engage" and not self.spontaneous_conversations.enabled:
+            raise ValueError(
+                "unknown_contacts.policy 'engage' requires spontaneous_conversations.enabled"
+            )
+        return self
+
+
 class ClientFile(_Section):
     client_id: str
     display_name: NonEmpty
@@ -141,6 +203,7 @@ class ClientFile(_Section):
     llm: LLMSection
     whatsapp: WhatsAppSection
     schedule: ScheduleSection = Field(default_factory=ScheduleSection)
+    inbound: InboundSection = Field(default_factory=InboundSection)
 
     @field_validator("client_id")
     @classmethod

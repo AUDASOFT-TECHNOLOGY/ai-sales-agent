@@ -1,10 +1,20 @@
 """Combining operator wiring (client.yaml) with a stored settings document into one client spec.
 
 `ClientFile` stays the single schema and the single place where values are validated. A stored
-document holds only the client-editable keys (`SETTINGS_KEYS`); everything else in `client.yaml`
-(providers, secret variable names, WhatsApp accounts, the Brain package, poll intervals) is
-operator wiring that a document may never set. Nothing here touches the filesystem except reading
-`client.yaml`, and nothing is cached: callers get fresh, immutable results.
+document holds only the client-editable keys; everything else in `client.yaml` (providers, secret
+variable names, WhatsApp accounts, the Brain package, poll intervals) is operator wiring that a
+document may never set. Nothing here touches the filesystem except reading `client.yaml`, and
+nothing is cached: callers get fresh, immutable results.
+
+Document schema versions:
+
+- **1**: client settings and opaque Brain settings.
+- **2** (current): adds the `inbound` policy and `brain.settings_version`, and the Brain's settings
+  are validated by the Brain's own `SETTINGS_SPEC` when it has one.
+
+A version-1 document keeps loading: it is upgraded in memory, and, because it predates the inbound
+policy, it keeps today's behaviour (replies handled, unknown senders ignored). A version-2
+document that says nothing gets the safe defaults instead (spontaneous conversations off).
 """
 
 import re
@@ -18,15 +28,17 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from sales_app.config.brain_settings import prepare_brain_settings
 from sales_app.config.schema import ClientFile
 from sales_app.config_store.models import freeze_document, thaw_document
 
 CONFIG_FILENAME = "client.yaml"
-SETTINGS_SCHEMA_VERSION = 1
+SETTINGS_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = (1, 2)
 
 # What a stored settings document may contain. Anything else is operator-owned or unknown.
 SETTINGS_TOP_KEYS = ("display_name", "timezone", "mode", "daily_action_limit", "opt_out_keywords")
-SETTINGS_SECTION_KEYS: Mapping[str, tuple[str, ...]] = {
+_SECTIONS_V1: Mapping[str, tuple[str, ...]] = {
     "sheets": (
         "spreadsheet_id",
         "prospects_tab",
@@ -39,6 +51,15 @@ SETTINGS_SECTION_KEYS: Mapping[str, tuple[str, ...]] = {
     "schedule": ("daily_at", "days"),
     "brain": ("settings",),
 }
+SETTINGS_SECTION_KEYS: Mapping[str, tuple[str, ...]] = {
+    **_SECTIONS_V1,
+    "brain": ("settings", "settings_version"),
+    "inbound": ("spontaneous_conversations", "unknown_contacts", "limits"),
+}
+_SECTIONS_BY_VERSION = {1: _SECTIONS_V1, 2: SETTINGS_SECTION_KEYS}
+
+# Behaviour before the inbound policy existed: known prospects' messages are handled.
+LEGACY_INBOUND: Mapping[str, Any] = {"spontaneous_conversations": {"enabled": True}}
 
 # Whole words that mark a key as holding a secret (`max_tokens` is fine, `token` is not).
 _SECRET_WORDS = {"password", "passwd", "secret", "token", "apikey", "credential", "credentials"}
@@ -74,6 +95,13 @@ def where(problem: Mapping[str, object]) -> str:
     return f"{location or 'file'}: {problem['msg']}"
 
 
+def with_legacy_inbound(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """A `client.yaml` from before the inbound policy keeps today's behaviour."""
+    data = dict(raw)
+    data.setdefault("inbound", deepcopy(dict(LEGACY_INBOUND)))
+    return data
+
+
 def strip_settings(raw: Mapping[str, Any]) -> dict[str, Any]:
     """The operator wiring alone: `client.yaml` without the keys a stored document owns."""
     wiring = deepcopy(dict(raw))
@@ -105,8 +133,19 @@ def merge_document(wiring: Mapping[str, Any], document: Mapping[str, Any]) -> di
     return merged
 
 
+def upgrade_document(document: Mapping[str, Any]) -> dict[str, Any]:
+    """The current-schema form of a structurally valid document (see the module docstring)."""
+    upgraded = thaw_document(document)
+    if upgraded.get("schema_version") == 1:
+        upgraded["schema_version"] = SETTINGS_SCHEMA_VERSION
+        upgraded["inbound"] = deepcopy(dict(LEGACY_INBOUND))
+        if isinstance(upgraded.get("brain"), dict):
+            upgraded["brain"].setdefault("settings_version", 1)
+    return upgraded
+
+
 def extract_document(spec: ClientFile) -> dict[str, Any]:
-    """The settings-owned part of a validated spec, with every value explicit."""
+    """The settings-owned part of a validated spec, in the current schema, every value explicit."""
     return {
         "schema_version": SETTINGS_SCHEMA_VERSION,
         "display_name": spec.display_name,
@@ -124,7 +163,11 @@ def extract_document(spec: ClientFile) -> dict[str, Any]:
         },
         "llm": {"model": spec.llm.model},
         "schedule": {"daily_at": spec.schedule.daily_at, "days": list(spec.schedule.days)},
-        "brain": {"settings": deepcopy(dict(spec.brain.settings))},
+        "inbound": spec.inbound.model_dump(mode="json"),
+        "brain": {
+            "settings_version": spec.brain.settings_version,
+            "settings": deepcopy(dict(spec.brain.settings)),
+        },
     }
 
 
@@ -135,21 +178,22 @@ def check_document(document: object) -> list[str]:
         return ["document must be a JSON object"]
     errors: list[str] = []
     version = document.get("schema_version")
-    if version != SETTINGS_SCHEMA_VERSION or isinstance(version, bool):
-        errors.append(f"schema_version: must be {SETTINGS_SCHEMA_VERSION}, got {version!r}")
+    if isinstance(version, bool) or version not in SUPPORTED_SCHEMA_VERSIONS:
+        errors.append(
+            f"schema_version: must be one of {list(SUPPORTED_SCHEMA_VERSIONS)}, got {version!r}"
+        )
+    sections = _SECTIONS_BY_VERSION.get(version, SETTINGS_SECTION_KEYS)  # type: ignore[arg-type]
     for key, value in document.items():
-        if key == "schema_version":
+        if key == "schema_version" or key in SETTINGS_TOP_KEYS:
             continue
-        if key in SETTINGS_TOP_KEYS:
-            continue
-        if key in SETTINGS_SECTION_KEYS:
+        if key in sections:
             if not isinstance(value, Mapping):
                 errors.append(f"{key}: must be an object")
                 continue
             errors.extend(
                 f"{key}.{inner}: is not a client setting (operator-owned or unknown)"
                 for inner in value
-                if inner not in SETTINGS_SECTION_KEYS[key]
+                if inner not in sections[key]
             )
             continue
         errors.append(f"{key}: is not a client setting (operator-owned or unknown)")
@@ -188,6 +232,18 @@ def _looks_secret(key: str) -> bool:
     )
 
 
+def _finish(client_id: str, candidate: ClientFile) -> SettingsCheck:
+    """Last steps shared by publishing and importing: identity, the Brain's own rules, extraction."""
+    if candidate.client_id != client_id:
+        return SettingsCheck(
+            None, None, (f"client_id {candidate.client_id!r} must equal the directory name",)
+        )
+    prepared, problems = prepare_brain_settings(candidate, require_module=True)
+    if problems:
+        return SettingsCheck(None, None, problems)
+    return SettingsCheck(prepared, extract_document(prepared), ())
+
+
 def validate_settings_document(
     client_id: str, wiring: Mapping[str, Any], document: object
 ) -> SettingsCheck:
@@ -197,24 +253,18 @@ def validate_settings_document(
         return SettingsCheck(None, None, tuple(errors))
     assert isinstance(document, Mapping)
     try:
-        spec = ClientFile.model_validate(merge_document(strip_settings(wiring), document))
+        candidate = ClientFile.model_validate(
+            merge_document(strip_settings(wiring), upgrade_document(document))
+        )
     except ValidationError as error:
         return SettingsCheck(None, None, tuple(where(p) for p in error.errors()))
-    if spec.client_id != client_id:
-        return SettingsCheck(
-            None, None, (f"client_id {spec.client_id!r} must equal the directory name",)
-        )
-    return SettingsCheck(spec, extract_document(spec), ())
+    return _finish(client_id, candidate)
 
 
 def import_document(client_id: str, raw: Mapping[str, Any]) -> SettingsCheck:
     """The settings a full `client.yaml` already contains, as a document (to seed version 1)."""
     try:
-        spec = ClientFile.model_validate(dict(raw))
+        candidate = ClientFile.model_validate(with_legacy_inbound(raw))
     except ValidationError as error:
         return SettingsCheck(None, None, tuple(where(p) for p in error.errors()))
-    if spec.client_id != client_id:
-        return SettingsCheck(
-            None, None, (f"client_id {spec.client_id!r} must equal the directory name",)
-        )
-    return SettingsCheck(spec, extract_document(spec), ())
+    return _finish(client_id, candidate)

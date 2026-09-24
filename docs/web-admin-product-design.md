@@ -178,7 +178,7 @@ Recorded so nobody assumes they exist. Resolutions are in section 10.
 
 1. `ConfigStore` and the `config` CLI. **Done** (see
    [client-configuration-design.md](client-configuration-design.md) section F).
-2. Brain settings schema.
+2. Brain settings schema. **Done** (see [brain-settings.md](brain-settings.md)).
 3. `ContactPolicy` / guardrails.
 4. CEO report, built on the shared KPI computation in `sales_core`. **Prerequisite, before any KPI
    code:** a short design step that defines the exact KPI fields, their ownership and their storage

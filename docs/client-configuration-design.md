@@ -1,8 +1,9 @@
 # Client configuration design
 
 Status: **the decisions in section E are approved; the `ConfigStore` and the `config` CLI are
-implemented (section F).** The Brain settings schema, `ContactPolicy`, the CEO report, runtime
-refresh, the Admin API and the Web Admin are still proposals. The current YAML keeps working
+implemented (section F), and so are the Brain settings schema and the document schema 2 (section
+F.1).** `ContactPolicy`, the CEO report, runtime refresh, the Admin API and the Web Admin are still
+proposals. The current YAML keeps working
 unchanged.
 
 Scope note: this document covers the **Configuration** module of the future Web Admin. The overall
@@ -11,7 +12,7 @@ boundary) is in [web-admin-product-design.md](web-admin-product-design.md). Wher
 that document wins; in particular the module list in section 7 below is a first sketch, superseded by
 its three-module structure. The order of work in decision 10 was confirmed there (section 9): items
 (a) and (c), the Google Sheets adapter and the `ConfigStore` with its CLI, are done. The Brain settings
-schema comes next.
+schema (decision 5) is done too: see [brain-settings.md](brain-settings.md).
 
 Goal: a future Web Admin lets each client configure its own Sales Agent (sheet, offers, strategy,
 schedule, CEO report...) **without code changes and without a database in the MVP**, while the Core
@@ -450,3 +451,22 @@ function, and configs are immutable and versioned, so a later refresh loop can c
 build a new runtime beside the old one, and swap only on success (section 6). Nothing polls the
 store yet, so a new version takes effect at the next start. Also not built: `ConfigService`, the
 Admin API, the Web Admin, `config_version` in Engine audit events.
+
+### F.1 Document schema 2 and Brain settings
+
+Implemented after the ConfigStore; details in [brain-settings.md](brain-settings.md).
+
+- **Schema 2** adds `brain.settings_version` and an `inbound` section (spontaneous conversations,
+  unknown-contact policy, anti-abuse limits, allowed decisions). New documents default to the safe
+  side (spontaneous conversations off, unknown contacts ignored, and a prospect is created for an
+  unknown sender only with policy `engage`). The `inbound` policy is stored and validated but **not
+  yet enforced by the Engine**.
+- **Schema 1 keeps working.** It is upgraded in memory, keeping today's behaviour (replies handled,
+  unknown senders ignored), and it cannot contain schema 2 keys. `client.yaml` files without an
+  `inbound` section behave the same way, and `config import` writes that behaviour explicitly.
+  Stored versions are never rewritten.
+- **Brain settings are validated by the Brain's own `SETTINGS_SPEC`** (a module attribute next to
+  its factory, found with `importlib`) when it has one, at publish time and at load time, and the
+  normalised latest version is what is stored and passed to the Brain. A Brain without a spec keeps
+  opaque settings. Invalid Brain settings are never written, and never disturb a running
+  configuration.

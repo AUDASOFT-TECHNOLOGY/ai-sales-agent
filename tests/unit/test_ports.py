@@ -7,6 +7,7 @@ Brain and a store can be written without any client, vendor or integration impor
 from collections.abc import Collection, Sequence
 from datetime import datetime
 
+import pytest
 from factories import NOW, make_brain_request, make_prospect
 
 from sales_core.contracts import (
@@ -29,7 +30,14 @@ from sales_core.contracts import (
     SendResult,
     SendStatus,
 )
-from sales_core.ports import Brain, Clock, LLMProvider, MessagingChannel, SalesRepository
+from sales_core.ports import (
+    Brain,
+    BrainSettingsSpec,
+    Clock,
+    LLMProvider,
+    MessagingChannel,
+    SalesRepository,
+)
 
 
 class EchoBrain:
@@ -178,3 +186,47 @@ def test_channel_reports_structured_results():
     )
     assert result.ok and result.external_id == "ext-1"
     assert len(channel.sent) == 1
+
+
+class TestBrainSettingsSpec:
+    """A settings spec is a shape any Brain family can satisfy; nothing else is required."""
+
+    class MinimalSpec:
+        family = "minimal"
+        schema_version = 1
+
+        def json_schema(self):
+            return {"type": "object"}
+
+        def validate(self, settings, version):
+            return [] if "ok" in settings else ["ok: is required"]
+
+        def prepare(self, settings, version):
+            if "ok" not in settings:
+                raise ValueError("ok: is required")
+            return dict(settings)
+
+    def test_any_object_with_the_right_shape_qualifies(self):
+        assert isinstance(self.MinimalSpec(), BrainSettingsSpec)
+
+    def test_objects_missing_a_part_do_not(self):
+        class NoPrepare:
+            family = "x"
+            schema_version = 1
+
+            def json_schema(self):
+                return {}
+
+            def validate(self, settings, version):
+                return []
+
+        assert not isinstance(NoPrepare(), BrainSettingsSpec)
+        assert not isinstance("a string", BrainSettingsSpec)
+        assert not isinstance(None, BrainSettingsSpec)
+
+    def test_the_contract_is_only_about_settings_and_versions(self):
+        spec = self.MinimalSpec()
+        assert spec.validate({}, 1) == ["ok: is required"]
+        assert spec.prepare({"ok": 1}, 1) == {"ok": 1}
+        with pytest.raises(ValueError):
+            spec.prepare({}, 1)

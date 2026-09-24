@@ -40,7 +40,7 @@ class TestValidDocuments:
         result = check(document())
         assert result.errors == ()
         assert result.document == {
-            "schema_version": 1,
+            "schema_version": 2,
             "display_name": "Alpha",
             "timezone": "Africa/Tunis",
             "mode": "dry_run",  # the safe default, now explicit in the history
@@ -56,7 +56,22 @@ class TestValidDocuments:
             },
             "llm": {"model": "test-model"},
             "schedule": {"daily_at": "09:00", "days": ["mon", "tue", "wed", "thu", "fri", "sat"]},
-            "brain": {"settings": {"tone": "warm"}},
+            "inbound": {  # a new (schema 2) document that says nothing: the safe defaults
+                "spontaneous_conversations": {
+                    "enabled": False,
+                    "when_disabled": "store_and_flag",
+                    "allowed_decisions": [
+                        "send_message",
+                        "schedule_follow_up",
+                        "handoff_to_human",
+                        "close",
+                        "no_action",
+                    ],
+                },
+                "unknown_contacts": {"policy": "ignore", "max_new_per_day": 30},
+                "limits": {"max_replies_per_prospect_per_day": 20},
+            },
+            "brain": {"settings_version": 1, "settings": {"tone": "warm"}},
         }
 
     def test_normalizing_twice_changes_nothing(self):
@@ -136,7 +151,7 @@ class TestWhatIsNotASetting:
     def test_a_document_must_be_an_object(self, bad):
         assert check(bad).errors == ("document must be a JSON object",)
 
-    @pytest.mark.parametrize("version", [None, 0, 2, "1", True])
+    @pytest.mark.parametrize("version", [None, 0, 3, "2", "1", True])
     def test_the_schema_version_must_be_the_supported_one(self, version):
         doc = document()
         if version is None:

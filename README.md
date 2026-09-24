@@ -17,7 +17,8 @@ Business Brains (`brains/`) and client configuration (`clients/`).
 | `clients/` | Per-client configuration (data only, no secrets) |
 | `brains/` | Business Brains, one independent package per client |
 | `tests/` | Tests for the generic Core, including architecture rules |
-| `docs/` | Architecture, Brain contract, Sheet schema, configuration and Web Admin design |
+| `src/sales_brain_kit/` | Shared, client-agnostic Brain building blocks (settings schema and validation) |
+| `docs/` | Architecture, Brain contract and settings, Sheet schema, configuration and Web Admin design |
 
 See [docs/architecture.md](docs/architecture.md) for the dependency rules.
 

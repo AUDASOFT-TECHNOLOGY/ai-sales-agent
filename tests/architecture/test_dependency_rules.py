@@ -292,3 +292,52 @@ def test_only_the_composition_layer_reads_the_store_and_only_the_cli_writes_to_i
         and "config_store" not in py.relative_to(SRC).as_posix()
     }
     assert writers == {"sales_app/config_cli.py"}
+
+
+# ---- the shared Brain kit (sales_brain_kit) ----------------------------------------------------------
+
+KIT = SRC / "sales_brain_kit"
+
+
+def _class_names(package_dir: Path) -> set[str]:
+    return {
+        node.name
+        for py in package_dir.rglob("*.py")
+        for node in ast.walk(ast.parse(py.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ClassDef)
+    }
+
+
+def test_nothing_below_the_kit_imports_it():
+    """The kit builds on the Core; the Core, the adapters and the app never depend on it."""
+    for package in ("sales_core", "sales_integrations"):
+        assert "sales_brain_kit" not in _imported_top_levels(SRC / package), package
+    # sales_app finds a Brain's spec with importlib, never with a static import.
+    assert "sales_brain_kit" not in _imported_top_levels(SRC / "sales_app")
+
+
+def test_the_kit_imports_only_the_standard_library_pydantic_and_the_core():
+    allowed = set(sys.stdlib_module_names) | {"sales_core", "sales_brain_kit", "pydantic"}
+    assert _imported_top_levels(KIT) <= allowed
+
+
+def test_the_kit_knows_no_client_and_none_of_the_layers_above_it():
+    forbidden = {"sales_app", "sales_integrations", *_brain_packages()}
+    assert not _imported_top_levels(KIT) & forbidden
+    for py in KIT.rglob("*.py"):
+        text = py.read_text(encoding="utf-8").lower()
+        for client in ("naga", "tounesimmo"):
+            assert client not in text, f"{client} mentioned in {py.relative_to(ROOT)}"
+
+
+def test_the_core_holds_none_of_the_kits_business_vocabulary():
+    """Products, discovery and follow-up strategy are Brain settings; the Core never names them."""
+    kit_classes = _class_names(KIT) - {"Model"}
+    leaked = kit_classes & _defined_and_used_names(SRC / "sales_core")
+    assert not leaked, f"sales_core uses kit vocabulary: {sorted(leaked)}"
+
+
+def test_the_settings_port_in_the_core_is_generic():
+    """BrainSettingsSpec is a shape only: it may not import a schema library or the kit."""
+    imported = _imported_top_levels(SRC / "sales_core" / "ports" / "brain.py")
+    assert imported <= set(sys.stdlib_module_names) | {"sales_core"}

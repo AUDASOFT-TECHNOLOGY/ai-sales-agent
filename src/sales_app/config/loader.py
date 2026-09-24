@@ -10,13 +10,16 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from sales_app.config.brain_settings import prepare_brain_settings
 from sales_app.config.resolution import (
     CONFIG_FILENAME,
     check_document,
     merge_document,
     read_wiring,
     strip_settings,
+    upgrade_document,
     where,
+    with_legacy_inbound,
 )
 from sales_app.config.schema import ClientFile
 from sales_app.config.secrets import Secrets
@@ -134,9 +137,9 @@ def resolve_client_config(
                     f"{name}: configuration version {version.version}: {e}" for e in document_errors
                 )
             )
-        candidate = merge_document(strip_settings(raw), version.document)
+        candidate = merge_document(strip_settings(raw), upgrade_document(version.document))
     else:
-        candidate = raw
+        candidate = with_legacy_inbound(raw)  # a client.yaml predates the inbound policy
 
     try:
         spec = ClientFile.model_validate(candidate)
@@ -156,6 +159,15 @@ def resolve_client_config(
     problems = []
     if spec.client_id != name:
         problems.append(f"{name}: client_id {spec.client_id!r} must equal the directory name")
+
+    # A Brain that declares settings rules gets its settings validated and normalised here. An
+    # unimportable Brain module is left for the runtime build to report, with more context.
+    spec, brain_problems = prepare_brain_settings(spec, require_module=False)
+    problems.extend(f"{name}: {message}" for message in brain_problems)
+    if brain_problems and version is not None:
+        problems.append(
+            f"{name}: settings in force come from configuration version {version.version}"
+        )
 
     effective = clamp_mode(spec.mode, mode_ceiling)
     secrets, missing = _resolve_secrets(spec, effective, env)
