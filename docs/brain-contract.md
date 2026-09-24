@@ -53,11 +53,15 @@ default to "nothing", so existing Brains and callers are unaffected.
 
 The Engine fills them in per request: `origin` is `inbound` for a reply to a prospect's message,
 `outbound` for a first contact and otherwise what the repository reports (`unknown`); `facts` come
-from an optional `FactsReader` (`sales_core.ports`) and are empty without one. Nothing extracts or
-persists facts, and repositories do not persist the origin.
+from an optional `FactsReader` (`sales_core.ports`) and are empty without one: every recorded
+observation of the prospect, oldest first. The same key can appear several times (it may take
+another value later); the newest is the current one. Recording is the separate append-only
+`FactsWriter` port, implemented by the Google Sheets adapter (`Facts` tab) and the fake repository;
+an observation is identified by `fact_identity`, so recording it twice keeps one. Nothing extracts
+or applies facts yet, and repositories do not persist the origin.
 
 ## Not part of the contract yet
 
-Product interests, constraints on what a decision may be, applying facts from a decision, and
-persisting facts or the origin. They will extend `BrainRequest` and `BrainDecision` additively when
+Product interests, constraints on what a decision may be, applying facts from a decision, extracting
+them, and persisting the origin. They will extend `BrainRequest` and `BrainDecision` additively when
 the Core work for them lands.

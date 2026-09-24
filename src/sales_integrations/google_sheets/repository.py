@@ -1,4 +1,5 @@
-"""Google Sheets implementation of the `SalesRepository` port. See docs/sheet-schema.md.
+"""Google Sheets implementation of the `SalesRepository`, `FactsReader` and `FactsWriter` ports.
+See docs/sheet-schema.md.
 
 Sheets has no transactions and humans edit it while the agent runs, so this adapter is defensive:
 
@@ -31,10 +32,12 @@ from sales_core.contracts import (
     ClientId,
     Conversation,
     ConversationId,
+    Fact,
     Message,
     Prospect,
     ProspectId,
     SalesAction,
+    fact_identity,
 )
 from sales_integrations.google_sheets import codecs
 from sales_integrations.google_sheets.api import SheetsApi
@@ -357,6 +360,45 @@ class GoogleSheetsRepository:
             rows = [codecs.row_values(header, codecs.encode_audit(e, self._zone)) for e in events]
             self._api.append(self._sid, quote_tab(header.title), rows)
 
+    # ---- facts (FactsReader, FactsWriter) ----------------------------------------------
+
+    def get_facts(self, prospect_id: ProspectId) -> Sequence[Fact]:
+        with self._lock:
+            table = self._facts_table_if_any()
+            if table is None:
+                return []  # a spreadsheet set up before facts existed has none yet
+            found = [f for f in self._read_facts(table) if f.stored.prospect_id == prospect_id]
+            found.sort(key=lambda f: (f.stored.fact.recorded_at, f.row))
+            return [f.stored.fact for f in found]
+
+    def append_facts(self, prospect_id: ProspectId, facts: Sequence[Fact]) -> None:
+        if not facts:
+            return
+        with self._lock:
+            # Everything that can be refused is checked before the first write request.
+            identified = [
+                (fact_identity(self._client_id, prospect_id, fact), fact) for fact in facts
+            ]
+            encoded = {
+                fact_id: codecs.encode_fact(fact_id, self._client_id, prospect_id, fact, self._zone)
+                for fact_id, fact in identified
+            }
+            _, accepted = self._prospects()
+            if not any(p.prospect_id == prospect_id for _, p in accepted):
+                raise KeyError(f"unknown prospect {prospect_id!r}")
+            table = self._facts_table_for_append()
+            # Compared with every row, including ones the adapter cannot read or that belong to
+            # another client: an identity that is on the sheet is never written a second time.
+            known = {codecs.text_of(table.cell(r, "fact_id")) for r in table.rows}
+            rows = []
+            for fact_id, values in encoded.items():
+                if fact_id not in known:
+                    known.add(fact_id)
+                    rows.append(codecs.row_values(table, values))
+            # Append-only: existing rows are never touched, and the append API inserts after the
+            # last row even if a person added one a moment ago.
+            self._append("facts", table.title, rows)
+
     # ==== onboarding helpers (not part of the port) ======================================
 
     def verify(self) -> list[str]:
@@ -369,7 +411,13 @@ class GoogleSheetsRepository:
         for key in TAB_SPECS:
             title = self._tabs.title(key)
             if title not in meta.titles:
-                issues.append(f"tab {title!r} does not exist")
+                if TAB_SPECS[key].on_demand:
+                    issues.append(
+                        f"warning: tab {title!r} does not exist; it is created when first needed "
+                        "(or by initialize_layout)"
+                    )
+                else:
+                    issues.append(f"tab {title!r} does not exist")
                 continue
             try:
                 self._read_header(key)
@@ -384,13 +432,17 @@ class GoogleSheetsRepository:
 
     def initialize_layout(self) -> list[str]:
         """Create missing tabs and add missing columns to the right. Never edits existing data."""
+        return self._initialize(tuple(TAB_SPECS))
+
+    def _initialize(self, keys: Sequence[str]) -> list[str]:
         done: list[str] = []
         meta = self._api.metadata(self._sid)
-        missing = [self._tabs.title(k) for k in TAB_SPECS if self._tabs.title(k) not in meta.titles]
+        missing = [self._tabs.title(k) for k in keys if self._tabs.title(k) not in meta.titles]
         if missing:
             self._api.add_tabs(self._sid, missing)
             done.extend(f"created tab {title!r}" for title in missing)
-        for key, spec in TAB_SPECS.items():
+        for key in keys:
+            spec = TAB_SPECS[key]
             title = self._tabs.title(key)
             (values,) = self._api.read(self._sid, [f"{quote_tab(title)}!1:1"])
             existing = list(values[0]) if values else []
@@ -564,6 +616,60 @@ class GoogleSheetsRepository:
         self._set_problems("messages", problems)
         return loaded
 
+    # ---- facts tab -------------------------------------------------------------------
+
+    def _facts_table_if_any(self) -> Table | None:
+        """The Facts tab, or None when the spreadsheet has none (a read creates nothing)."""
+        try:
+            return self._read_table("facts")
+        except SheetsApiError as error:
+            if error.status != 400:
+                raise
+            try:
+                absent = self._tabs.title("facts") not in self._api.metadata(self._sid).titles
+            except SheetsApiError:
+                raise error from None
+            if not absent:
+                raise
+            self._set_problems("facts", [])
+            return None
+
+    def _facts_table_for_append(self) -> Table:
+        """The Facts tab; created, or completed with its columns, if it is not ready yet."""
+        try:
+            return self._read_table("facts")
+        except (SheetsApiError, SheetLayoutError) as error:
+            if isinstance(error, SheetsApiError) and error.status != 400:
+                raise
+        self._initialize(("facts",))
+        return self._read_table("facts")
+
+    def _read_facts(self, table: Table) -> list["_FactRow"]:
+        """This client's readable observations. Rows of other clients are not ours: skipped
+        without a word. Unreadable and repeated rows are excluded and reported."""
+        loaded: list[_FactRow] = []
+        seen: set[str] = set()
+        problems: list[RowProblem] = []
+        for row in table.rows:
+            owner = codecs.text_of(table.cell(row, "client_id"))
+            if owner and owner != self._client_id:
+                continue
+            try:
+                if not owner:
+                    raise ValueError("client_id: is empty")
+                stored = codecs.decode_fact(table, row, self._zone)
+            except ValueError as error:
+                problems.append(RowProblem(table.title, row.number, str(error)))
+                continue
+            if stored.fact_id in seen:
+                reason = f"duplicate fact_id {stored.fact_id!r}"
+                problems.append(RowProblem(table.title, row.number, reason))
+                continue
+            seen.add(stored.fact_id)
+            loaded.append(_FactRow(row.number, stored))
+        self._set_problems("facts", problems)
+        return loaded
+
     # ---- shared write machinery ------------------------------------------------------
 
     @staticmethod
@@ -597,6 +703,12 @@ class GoogleSheetsRepository:
         updates = plan.updates(self)
         if updates:
             self._api.write(self._sid, updates)
+
+
+@dataclass(frozen=True, slots=True)
+class _FactRow:
+    row: int
+    stored: codecs.StoredFact
 
 
 class _WritePlan:

@@ -97,6 +97,11 @@ class TestBuildRuntime:
             assert (receipt.status is InboundStatus.STORED) is created
             assert bool(made.repositories["alpha"].list_prospects()) is created
 
+    def test_the_repository_is_given_to_the_engine_as_its_facts_source(self, tmp_path):
+        builders, made = fake_builders()
+        runtime = build_runtime(_config(tmp_path), builders, FakeClock(NOW))
+        assert runtime.engine._facts is made.repositories["alpha"]
+
     def test_live_modes_get_the_real_channel(self, tmp_path):
         config = _config(tmp_path)
         builders, made = fake_builders()

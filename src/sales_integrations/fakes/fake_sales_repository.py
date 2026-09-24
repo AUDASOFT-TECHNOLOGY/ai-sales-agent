@@ -1,6 +1,7 @@
 """In-memory sales repository for tests. Stands in for the Google Sheets adapter."""
 
 from collections.abc import Collection, Iterable, Sequence
+from datetime import datetime
 
 from sales_core.contracts import (
     ActionId,
@@ -9,11 +10,13 @@ from sales_core.contracts import (
     ClientId,
     Conversation,
     ConversationId,
+    Fact,
     Message,
     MessageId,
     Prospect,
     ProspectId,
     SalesAction,
+    fact_identity,
 )
 
 # Port methods that support failure injection (see `fail_next`).
@@ -30,8 +33,15 @@ FAILABLE_METHODS = frozenset(
         "get_conversation",
         "append_messages",
         "append_audit_events",
+        "get_facts",
+        "append_facts",
     }
 )
+
+
+def _recorded_at(fact: Fact) -> datetime:
+    assert fact.recorded_at is not None  # `fact_identity` refuses facts without it
+    return fact.recorded_at
 
 
 def _digits(value: str) -> str:
@@ -39,7 +49,7 @@ def _digits(value: str) -> str:
 
 
 class FakeSalesRepository:
-    """Implements `sales_core.ports.SalesRepository` for one client.
+    """Implements `sales_core.ports.SalesRepository`, `FactsReader` and `FactsWriter` for one client.
 
     Mirrors the guarantees a real adapter must give: objects of another client are rejected,
     writes are all-or-nothing per batch, action idempotency keys are unique, and history is
@@ -63,6 +73,7 @@ class FakeSalesRepository:
         self._message_ids: set[MessageId] = set()
         self._conversation_ids: dict[ProspectId, ConversationId] = {}
         self._audit: list[AuditEvent] = []
+        self._facts: dict[str, tuple[ProspectId, Fact]] = {}  # by identity, in append order
         self._failures: dict[str, list[Exception]] = {}
         self.add_prospects(*prospects)
         self.save_actions(actions)
@@ -195,6 +206,21 @@ class FakeSalesRepository:
         for event in events:
             self._require_client(event.client_id, f"audit event {event.event_type!r}")
         self._audit.extend(events)
+
+    # ---- FactsReader / FactsWriter ---------------------------------------------------------
+
+    def get_facts(self, prospect_id: ProspectId) -> Sequence[Fact]:
+        self._maybe_fail("get_facts")
+        own = [f for pid, f in self._facts.values() if pid == prospect_id]
+        return sorted(own, key=_recorded_at)  # stable: ties keep append order
+
+    def append_facts(self, prospect_id: ProspectId, facts: Sequence[Fact]) -> None:
+        self._maybe_fail("append_facts")
+        identified = [(fact_identity(self._client_id, prospect_id, f), f) for f in facts]
+        if facts and prospect_id not in self._prospects:
+            raise KeyError(f"unknown prospect {prospect_id!r}")
+        for fact_id, fact in identified:
+            self._facts.setdefault(fact_id, (prospect_id, fact))
 
     # ---- internals -----------------------------------------------------------------------
 

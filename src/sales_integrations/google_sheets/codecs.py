@@ -6,6 +6,7 @@ canonical: every value the adapter writes is a plain string, so the API stores i
 
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
@@ -19,9 +20,14 @@ from sales_core.contracts import (
     ClientId,
     ContactInfo,
     Direction,
+    Fact,
+    FactEvidence,
+    FactSource,
+    FactStatus,
     Message,
     MessageDraft,
     Prospect,
+    ProspectId,
     ProspectStatus,
     SalesAction,
     SalesActionType,
@@ -103,6 +109,16 @@ def parse_int(raw: Any, what: str, default: int = 0) -> int:
     if not number.is_integer():
         raise ValueError(f"{what}: {text!r} is not a whole number")
     return int(number)
+
+
+def parse_fraction(raw: Any, what: str) -> float | None:
+    text = text_of(raw)
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        raise ValueError(f"{what}: {text!r} is not a number") from None
 
 
 def json_out(mapping: Mapping[str, str]) -> str:
@@ -332,6 +348,81 @@ def encode_audit(event: AuditEvent, zone: ZoneInfo) -> dict[str, str]:
         "prospect_id": event.prospect_id or "",
         "action_id": event.action_id or "",
         "details": json_out(event.details),
+    }
+    return {key: _cell(key, value) for key, value in encoded.items()}
+
+
+# ---- facts ---------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class StoredFact:
+    """One row of the Facts tab: the observation and whose it is."""
+
+    fact_id: str
+    prospect_id: ProspectId
+    fact: Fact
+
+
+def decode_fact(table: Table, row: Row, zone: ZoneInfo) -> StoredFact:
+    """Rebuild an observation; `ValueError` if the row is incomplete or contradicts the contract."""
+
+    def get(name: str) -> Any:
+        return table.cell(row, name)
+
+    def required(name: str) -> str:
+        value = text_of(get(name))
+        if not value:
+            raise ValueError(f"{name}: is empty")
+        return value
+
+    status = parse_enum(get("fact_status"), FactStatus, "fact_status")
+    if status is None:
+        raise ValueError("fact_status: is empty")
+    recorded_at = parse_datetime(get("recorded_at"), zone, "recorded_at")
+    if recorded_at is None:
+        raise ValueError("recorded_at: is empty")
+    source = parse_enum(get("evidence_source"), FactSource, "evidence_source")
+    details = {
+        "message_id": text_of(get("evidence_message_id")) or None,
+        "excerpt": norm(get("evidence_excerpt")).strip() or None,
+        "observed_at": parse_datetime(get("evidence_observed_at"), zone, "evidence_observed_at"),
+        "recorded_by": text_of(get("evidence_recorded_by")) or None,
+    }
+    if source is None and any(v is not None for v in details.values()):
+        raise ValueError("evidence_source: is empty but other evidence columns are filled")
+    evidence = None if source is None else FactEvidence(source=source, **details)
+    fact = Fact(
+        key=required("fact_key"),
+        value=norm(get("fact_value")),
+        status=status,
+        confidence=parse_fraction(get("confidence"), "confidence"),
+        evidence=evidence,
+        recorded_at=recorded_at,
+        updated_at=parse_datetime(get("updated_at"), zone, "updated_at"),
+    )
+    return StoredFact(required("fact_id"), ProspectId(required("prospect_id")), fact)
+
+
+def encode_fact(
+    fact_id: str, client_id: ClientId, prospect_id: ProspectId, fact: Fact, zone: ZoneInfo
+) -> dict[str, str]:
+    evidence = fact.evidence
+    encoded = {
+        "fact_id": fact_id,
+        "client_id": client_id,
+        "prospect_id": prospect_id,
+        "fact_key": fact.key,
+        "fact_value": fact.value,
+        "fact_status": str(fact.status),
+        "confidence": "" if fact.confidence is None else norm(float(fact.confidence)),
+        "evidence_source": str(evidence.source) if evidence else "",
+        "evidence_message_id": (evidence.message_id or "") if evidence else "",
+        "evidence_excerpt": (evidence.excerpt or "") if evidence else "",
+        "evidence_observed_at": format_datetime(evidence.observed_at, zone) if evidence else "",
+        "evidence_recorded_by": (evidence.recorded_by or "") if evidence else "",
+        "recorded_at": format_datetime(fact.recorded_at, zone),
+        "updated_at": format_datetime(fact.updated_at, zone),
     }
     return {key: _cell(key, value) for key, value in encoded.items()}
 

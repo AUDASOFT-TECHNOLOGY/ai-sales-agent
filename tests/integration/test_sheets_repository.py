@@ -633,7 +633,7 @@ class TestOnboarding:
     def test_initialize_builds_a_blank_spreadsheet(self):
         repo, api = make_repository(layout=False)
         done = repo.initialize_layout()
-        assert len(done) == 8 and repo.verify() == []
+        assert len(done) == 10 and repo.verify() == []  # five tabs, five header rows
         assert api.headers("Prospects")[0] == "prospect_id"
 
     def test_initialize_adds_columns_to_an_existing_client_sheet_without_touching_it(self):

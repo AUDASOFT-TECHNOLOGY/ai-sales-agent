@@ -28,10 +28,11 @@ class ColumnSpec:
 
 @dataclass(frozen=True, slots=True)
 class TabSpec:
-    key: str  # "prospects", "actions", "messages", "log"
+    key: str  # "prospects", "actions", "messages", "log", "facts"
     default_title: str
     columns: tuple[ColumnSpec, ...]
     extra_columns: bool = False  # extra (client) columns are kept and exposed as attributes
+    on_demand: bool = False  # a spreadsheet without this tab still works; it is created when needed
 
     @property
     def fields(self) -> tuple[str, ...]:
@@ -114,7 +115,34 @@ LOG = TabSpec(
     ),
 )
 
-TAB_SPECS: Mapping[str, TabSpec] = {s.key: s for s in (PROSPECTS, ACTIONS, MESSAGES, LOG)}
+# Append-only observations about a prospect: key/value facts, one row per observation. Tabs of
+# spreadsheets set up before facts existed lack it, hence `on_demand`.
+FACTS = TabSpec(
+    "facts",
+    "Facts",
+    tuple(
+        ColumnSpec(name, S)
+        for name in (
+            "fact_id",
+            "client_id",
+            "prospect_id",
+            "fact_key",
+            "fact_value",
+            "fact_status",
+            "confidence",
+            "evidence_source",
+            "evidence_message_id",
+            "evidence_excerpt",
+            "evidence_observed_at",
+            "evidence_recorded_by",
+            "recorded_at",
+            "updated_at",
+        )
+    ),
+    on_demand=True,
+)
+
+TAB_SPECS: Mapping[str, TabSpec] = {s.key: s for s in (PROSPECTS, ACTIONS, MESSAGES, LOG, FACTS)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +153,7 @@ class SheetTabs:
     actions: str = ACTIONS.default_title
     messages: str = MESSAGES.default_title
     log: str = LOG.default_title
+    facts: str = FACTS.default_title
 
     def title(self, key: str) -> str:
         return getattr(self, key)

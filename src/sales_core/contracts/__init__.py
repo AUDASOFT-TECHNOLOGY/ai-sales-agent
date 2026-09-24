@@ -22,7 +22,7 @@ from sales_core.contracts.enums import (
     SalesActionType,
     SendStatus,
 )
-from sales_core.contracts.fact import Fact, FactEvidence
+from sales_core.contracts.fact import Fact, FactEvidence, fact_identity
 from sales_core.contracts.ids import ActionId, ClientId, ConversationId, MessageId, ProspectId
 from sales_core.contracts.llm import LLMMessage, LLMRequest, LLMResponse
 from sales_core.contracts.messaging import InboundEvent, InboundMessage, OutboundMessage, SendResult
@@ -67,4 +67,5 @@ __all__ = [
     "Scheduling",
     "SendResult",
     "SendStatus",
+    "fact_identity",
 ]

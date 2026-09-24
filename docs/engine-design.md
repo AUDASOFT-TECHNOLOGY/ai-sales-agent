@@ -100,7 +100,9 @@ who is not a prospect follows the client's inbound policy (`EngineConfig.inbound
 `OUTBOUND` for a `FIRST_CONTACT`, and whatever the repository reports otherwise (`UNKNOWN`, since
 nothing persists the origin yet; a follow-up to a conversation the prospect started is therefore
 `UNKNOWN`, not falsely `OUTBOUND`). `request.facts` comes from the optional `FactsReader` given to
-the Engine (empty without one); the Engine never writes or extracts facts.
+the Engine (empty without one). The composition root gives it the repository when that also reads
+facts (the Sheets adapter reads the live `Facts` tab on every request). The Engine only ever reads:
+it never writes, applies or extracts facts.
 
 `when_disabled`, `allowed_decisions` and the per-prospect reply limit of the inbound policy are
 not enforced yet.

@@ -366,3 +366,21 @@ def test_core_facts_and_origin_contracts_use_no_business_vocabulary():
             if isinstance(node, ast.Constant) and isinstance(node.value, str)
         }
         assert not strings & set(BUSINESS_FACT_NAMES), py.name
+
+
+# ---- facts persistence stays behind ports ---------------------------------------------------------
+
+
+def test_the_engine_only_reads_facts_and_the_core_names_no_storage_for_them():
+    """Recording facts is somebody else's job (a later slice); the Engine holds a reader only."""
+    engine_names = _defined_and_used_names(SRC / "sales_core" / "engine")
+    assert "FactsReader" in engine_names and "FactsWriter" not in engine_names
+    assert "append_facts" not in engine_names
+    ports = _imported_top_levels(SRC / "sales_core" / "ports" / "facts.py")
+    assert ports <= set(sys.stdlib_module_names) | {"sales_core"}
+
+
+def test_the_sheets_adapter_implements_the_generic_facts_ports_from_the_core():
+    imported = _imported_modules(SHEETS_ADAPTER)
+    assert "sales_core.contracts" in imported
+    assert not {m for m in imported if m.startswith("sales_core.engine")}

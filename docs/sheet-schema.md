@@ -6,8 +6,8 @@ editing it.
 
 ## 0. Principles
 
-1. **One spreadsheet per client, four tabs.** `Prospects`, `Actions`, `Messages`, `Log`. Nothing is
-   shared between clients.
+1. **One spreadsheet per client, five tabs.** `Prospects`, `Actions`, `Messages`, `Log`, `Facts`.
+   Nothing is shared between clients.
 2. **The sheet is live and is the only source of truth.** Rows are added, edited, sorted and deleted
    all day, whether or not the agent runs. There is no import step, no local database, no cache and
    no copy that could go stale: every repository call reads the sheet afresh.
@@ -25,7 +25,9 @@ editing it.
 3. Share it, as *Editor*, with the platform's service account e-mail.
 4. Create the tabs and columns. Either build them by hand from this document, or let the adapter do
    it: `GoogleSheetsRepository.initialize_layout()` creates missing tabs and appends missing columns
-   **to the right** of the client's own columns without touching existing data.
+   **to the right** of the client's own columns without touching existing data. A spreadsheet set up
+   before `Facts` existed needs nothing by hand: `verify()` only warns that the tab is missing, reading
+   facts from it returns none, and the first recorded fact creates the tab (section 6a).
    `GoogleSheetsRepository.verify()` lists anything still missing.
 5. Put the spreadsheet URL or id in `client.yaml` (`sheets.spreadsheet_id`); the id is extracted.
 6. Recommended: format phone columns as *plain text*; add a data-validation drop-down on `status`;
@@ -40,6 +42,7 @@ editing it.
 | `Actions` | one row per commercial action: proposed, approved, sent... | **the agent** | agent, and people approving or editing |
 | `Messages` | every inbound and outbound message (append-only) | **the agent** | nobody |
 | `Log` | audit trail of what the agent did and why (append-only) | **the agent** | nobody |
+| `Facts` | what is known about each prospect: key/value observations (append-only) | **the agent** | nobody |
 
 Tab titles are configurable (`sheets.prospects_tab` and so on). Keep **no blank rows** inside the
 system tabs.
@@ -124,6 +127,44 @@ Extra columns (for example a name look-up formula) are allowed and ignored.
 `timestamp`, `event_type` (for example `action.sent`, `safety.blocked`, `prospect.handoff`),
 `actor` (`core`, `brain`, `core:autonomous`), `prospect_id`, `action_id`, `details` (JSON object).
 This is where a person finds **why** something happened, including handoff and close reasons.
+
+## 6a. `Facts` tab (append-only, system-managed)
+
+One row per **observation** of a fact about a prospect. Facts are generic key/value pairs: which keys
+exist is a Brain's business, so there is no column for any business concept. The tab is part of the
+standard layout: it takes no configuration (its title is `Facts`; `column_mapping` accepts
+`facts.<field>` like any tab).
+
+| Column | Format | Meaning |
+|---|---|---|
+| `fact_id` | text, unique | identity of the observation: `fact-` plus 24 hex characters (below) |
+| `client_id` | text | the client the row belongs to; rows of another client are ignored |
+| `prospect_id` | text | the prospect |
+| `fact_key`, `fact_value` | text | the Brain's key and the value |
+| `fact_status` | `confirmed`, `discovered`, `hypothesis` | how sure we are |
+| `confidence` | number 0 to 1, or blank | mostly for hypotheses |
+| `evidence_source` | `prospect`, `client_data`, `conversation`, `system`, `human`, `brain_inference`, or blank | provenance; blank means no evidence |
+| `evidence_message_id`, `evidence_excerpt`, `evidence_observed_at`, `evidence_recorded_by` | text / date and time | provenance details (need an `evidence_source`) |
+| `recorded_at` | date and time, required | when the observation was recorded |
+| `updated_at` | date and time, or blank | |
+
+**Identity and retries.** `fact_id` is a hash of the client, prospect, key, value, status,
+confidence, evidence and `recorded_at` (`sales_core.contracts.fact_identity`, the same in every
+backend). It is not `prospect_id + key`: a key may take another value later and each observation is a
+row, so `manager` then `director` are two rows and the newest `recorded_at` is the current one.
+Recording the very same fact again (a retry) has the same identity and writes nothing, so a retry
+after an append whose outcome is unknown is always safe. A retry must therefore carry the same
+`recorded_at`: whoever records a fact stamps it once, before the first attempt. A fact without
+`recorded_at` is refused.
+
+**Reading** returns the prospect's observations oldest first (ties in row order), from the live tab.
+A row that cannot be read (unknown status, no id, bad confidence, evidence without a source, a
+repeated `fact_id`...) is excluded and reported in `problems` like any other tab; the rest load.
+
+**Writing** appends only: rows are never edited or removed, existing rows are never rewritten, and
+an identity found on the sheet (even in an unreadable row, or one of another client) is never
+written again. The prospect must exist in this client's `Prospects` tab. A first write to a
+spreadsheet without the tab, or with a blank one, creates the tab and its headers first.
 
 ## 7. Value formats
 
@@ -281,6 +322,8 @@ Google's default limit is about 60 read requests per minute per user. Calls per 
 | get conversation | 1 read (+1 read if the prospect has no history yet) |
 | append messages | 2 reads (+1 for a first message) + 1 append |
 | append audit events | 1 read (header) + 1 append |
+| get facts | 1 read (0 more if the tab does not exist yet) |
+| append facts | 2 reads (prospects, facts) + 1 append; nothing more when every fact is already recorded (first write only: create the tab) |
 
 Roughly ten calls per message sent; 20 a day is far inside the limit. Reads and explicit-range
 writes are retried on 429, 5xx and network errors with backoff (1 s doubling to 30 s, 5 attempts).
@@ -311,4 +354,7 @@ Unknown keys, and empty headers, are refused at startup. Matching ignores case a
 | `SalesAction` | every field; `draft` is spread over `draft_*`; the post-send plan over `next_*` | `Actions` |
 | `Message` | every field | `Messages` |
 | `AuditEvent` | every field | `Log` |
-| *client_id* | not a column | the spreadsheet itself belongs to one client |
+| `Fact` | `key`, `value`, `status`, `confidence`, `recorded_at`, `updated_at` | `fact_key`, `fact_value`, `fact_status`, `confidence`, `recorded_at`, `updated_at` of `Facts` |
+| `Fact.evidence` | `source`, `message_id`, `excerpt`, `observed_at`, `recorded_by` | `evidence_*` columns of `Facts` |
+| *fact identity, client and prospect* | not on `Fact` | `fact_id`, `client_id`, `prospect_id` of `Facts` |
+| *client_id* | not a column (except in `Facts`, where it is a guard) | the spreadsheet itself belongs to one client |
