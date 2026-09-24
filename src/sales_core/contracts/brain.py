@@ -8,6 +8,7 @@ from sales_core.contracts._validation import freeze_mapping, require_aware, requ
 from sales_core.contracts.action import SalesAction
 from sales_core.contracts.conversation import Conversation, MessageDraft
 from sales_core.contracts.enums import SCHEDULABLE_ACTION_TYPES, DecisionType, SalesActionType
+from sales_core.contracts.fact import Fact
 from sales_core.contracts.ids import ClientId
 from sales_core.contracts.prospect import Prospect
 
@@ -34,9 +35,11 @@ class BrainRequest:
     conversation: Conversation
     action: SalesAction  # why the Brain is being asked (first contact, follow-up, reply)
     now: datetime  # injected so decisions are reproducible
+    facts: tuple[Fact, ...] = ()  # what is known about the prospect
 
     def __post_init__(self) -> None:
         require_aware(self.now, "now")
+        object.__setattr__(self, "facts", tuple(self.facts))
         client_id = self.client.client_id
         if (
             self.prospect.client_id != client_id

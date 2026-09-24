@@ -79,3 +79,30 @@ class LLMRole(StrEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
+
+
+class ContactOrigin(StrEnum):
+    """Who started a conversation. History that cannot tell stays UNKNOWN, never guessed."""
+
+    OUTBOUND = "outbound"  # initiated by the Sales Agent
+    INBOUND = "inbound"  # initiated by the prospect
+    UNKNOWN = "unknown"  # existing data that does not say
+
+
+class FactStatus(StrEnum):
+    """How much is known about a fact. Nothing in the Core moves a fact from one to another."""
+
+    CONFIRMED = "confirmed"  # stated or verified by a trustworthy source
+    DISCOVERED = "discovered"  # learned from the conversation or data, not yet confirmed
+    HYPOTHESIS = "hypothesis"  # an inference; may be used to guide, never to assert
+
+
+class FactSource(StrEnum):
+    """Where a fact came from."""
+
+    PROSPECT = "prospect"  # the prospect said so
+    CLIENT_DATA = "client_data"  # supplied by the client (lead file, CRM export)
+    CONVERSATION = "conversation"  # read from the exchange without the prospect stating it outright
+    SYSTEM = "system"  # imported or computed by the platform
+    HUMAN = "human"  # entered or confirmed by an operator
+    BRAIN_INFERENCE = "brain_inference"  # deduced by a Brain

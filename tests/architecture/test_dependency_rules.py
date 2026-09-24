@@ -341,3 +341,28 @@ def test_the_settings_port_in_the_core_is_generic():
     """BrainSettingsSpec is a shape only: it may not import a schema library or the kit."""
     imported = _imported_top_levels(SRC / "sales_core" / "ports" / "brain.py")
     assert imported <= set(sys.stdlib_module_names) | {"sales_core"}
+
+
+# ---- Core facts and contact origin stay generic --------------------------------------------------
+
+# Business vocabulary a Brain may use as fact keys; the Core's contracts must never name them.
+BUSINESS_FACT_NAMES = (
+    "country", "profession", "sector", "team_size", "product_interest", "budget", "interest",
+)  # fmt: skip
+
+
+def test_core_facts_and_origin_contracts_use_no_business_vocabulary():
+    contracts = SRC / "sales_core" / "contracts"
+    offenders = {
+        name
+        for name in _defined_and_used_names(contracts)
+        if any(word in name.lower() for word in BUSINESS_FACT_NAMES)
+    }
+    assert not offenders, f"sales_core.contracts names business concepts: {sorted(offenders)}"
+    for py in contracts.rglob("*.py"):
+        strings = {
+            node.value.lower()
+            for node in ast.walk(ast.parse(py.read_text(encoding="utf-8")))
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        assert not strings & set(BUSINESS_FACT_NAMES), py.name

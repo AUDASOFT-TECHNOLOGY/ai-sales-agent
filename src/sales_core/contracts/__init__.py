@@ -12,13 +12,17 @@ from sales_core.contracts.enums import (
     ActionPriority,
     ActionStatus,
     Channel,
+    ContactOrigin,
     DecisionType,
     Direction,
+    FactSource,
+    FactStatus,
     LLMRole,
     ProspectStatus,
     SalesActionType,
     SendStatus,
 )
+from sales_core.contracts.fact import Fact, FactEvidence
 from sales_core.contracts.ids import ActionId, ClientId, ConversationId, MessageId, ProspectId
 from sales_core.contracts.llm import LLMMessage, LLMRequest, LLMResponse
 from sales_core.contracts.messaging import InboundEvent, InboundMessage, OutboundMessage, SendResult
@@ -36,10 +40,15 @@ __all__ = [
     "ClientContext",
     "ClientId",
     "ContactInfo",
+    "ContactOrigin",
     "Conversation",
     "ConversationId",
     "DecisionType",
     "Direction",
+    "Fact",
+    "FactEvidence",
+    "FactSource",
+    "FactStatus",
     "InboundEvent",
     "InboundMessage",
     "LLMMessage",

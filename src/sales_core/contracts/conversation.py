@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from sales_core.contracts._validation import freeze_mapping, require_aware, require_text
-from sales_core.contracts.enums import Channel, Direction
+from sales_core.contracts.enums import Channel, ContactOrigin, Direction
 from sales_core.contracts.ids import ClientId, ConversationId, MessageId, ProspectId
 
 
@@ -56,6 +56,7 @@ class Conversation:
     client_id: ClientId
     prospect_id: ProspectId
     messages: tuple[Message, ...] = ()
+    origin: ContactOrigin = ContactOrigin.UNKNOWN  # who started it; UNKNOWN for older history
 
     def __post_init__(self) -> None:
         require_text(self.conversation_id, "conversation_id")

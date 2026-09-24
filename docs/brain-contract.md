@@ -31,8 +31,31 @@ and when they are loaded, and to hand the Brain its settings normalised to the l
 future admin interface renders forms from `json_schema()`. Without a spec, settings stay opaque.
 The shared "consultative sales" schema is in [brain-settings.md](brain-settings.md).
 
+## Facts and conversation origin
+
+Two generic additions carry what a Brain needs to reason about a prospect. Both are additive and
+default to "nothing", so existing Brains and callers are unaffected.
+
+- `BrainRequest.facts`: a tuple of `Fact`. A fact is a free-form `key`, a text `value`, a
+  `FactStatus` (`confirmed`, `discovered`, `hypothesis`), an optional `confidence` (0..1), optional
+  `FactEvidence` and timestamps. Which keys exist is the Brain's business; the Core names none.
+- `FactEvidence` (`FactSource`: prospect, client_data, conversation, system, human,
+  brain_inference; plus optional message id, excerpt, time, recorder) is for facts whose source
+  matters: sensitive ones, or ones decisive for qualification or recommendation. Ordinary
+  conversational facts carry none. The Core does not enforce when evidence is required.
+- The status distinction is explicit and nothing promotes it: a hypothesis stays a hypothesis until
+  something else records a new fact. The only structural guard is that a fact resting on a
+  `brain_inference` cannot be `confirmed`.
+- `Conversation.origin` (`ContactOrigin`: `outbound` when the Sales Agent started it, `inbound`
+  when the prospect did, `unknown` for history that does not say). A Brain reads it as
+  `request.conversation.origin`. It defaults to `unknown`.
+- `BrainDecision` is unchanged.
+
+Nothing populates these yet: the Engine still builds requests with no facts and an unknown origin,
+and repositories do not persist them.
+
 ## Not part of the contract yet
 
-Facts learned about a prospect, product interests, the origin of a conversation (outbound or
-inbound) and constraints on what a decision may be are designed but not built; they will extend
-`BrainRequest` and `BrainDecision` additively when the Core work for them lands.
+Product interests, constraints on what a decision may be, applying facts from a decision, and
+persisting facts or the origin. They will extend `BrainRequest` and `BrainDecision` additively when
+the Core work for them lands.
