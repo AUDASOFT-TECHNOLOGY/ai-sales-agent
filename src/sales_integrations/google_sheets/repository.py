@@ -159,6 +159,36 @@ class GoogleSheetsRepository:
                     return prospect
             return None
 
+    def create_prospects(self, prospects: Sequence[Prospect]) -> None:
+        if not prospects:
+            return
+        with self._lock:
+            for prospect in prospects:
+                self._require_client(prospect.client_id, f"prospect {prospect.prospect_id!r}")
+            table = self._read_table("prospects")
+            # Checked against every row, including ones the adapter cannot read (never contacted).
+            ids = {codecs.text_of(table.cell(r, "prospect_id")) for r in table.rows}
+            phones = {codecs.digits(codecs.text_of(table.cell(r, "phone"))) for r in table.rows}
+            for prospect in prospects:
+                phone = codecs.digits(prospect.contact.phone or "")
+                if prospect.prospect_id in ids:
+                    raise ValueError(f"prospect {prospect.prospect_id!r} already exists")
+                if phone and phone in phones:
+                    raise ValueError(
+                        f"prospect {prospect.prospect_id!r}: the phone number is already in use"
+                    )
+                ids.add(prospect.prospect_id)
+                phones.add(phone)
+            rows = [
+                codecs.row_values(
+                    table,
+                    {"prospect_id": p.prospect_id, **codecs.encode_prospect(p, self._zone)},
+                )
+                for p in prospects
+            ]
+            # The append API inserts after the last row even if a person added one a moment ago.
+            self._append("prospects", table.title, rows)
+
     def update_prospects(self, prospects: Sequence[Prospect]) -> None:
         with self._lock:
             incoming = {p.prospect_id: p for p in prospects}

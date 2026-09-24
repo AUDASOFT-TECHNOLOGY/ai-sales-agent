@@ -11,7 +11,7 @@ from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import ClientContext
-from sales_core.engine import Engine, EngineConfig
+from sales_core.engine import Engine, EngineConfig, InboundPolicy, UnknownSenderPolicy
 from sales_core.ports import Clock
 from sales_integrations.system import DisabledChannel
 
@@ -151,6 +151,11 @@ def build_runtime(
                 daily_action_limit=spec.daily_action_limit,
                 max_attempts=spec.max_attempts,
                 opt_out_keywords=frozenset(spec.opt_out_keywords),
+                inbound=InboundPolicy(
+                    spontaneous_conversations=spec.inbound.spontaneous_conversations.enabled,
+                    unknown_sender=UnknownSenderPolicy(spec.inbound.unknown_contacts.policy),
+                    max_new_per_day=spec.inbound.unknown_contacts.max_new_per_day,
+                ),
             ),
         ),
     )

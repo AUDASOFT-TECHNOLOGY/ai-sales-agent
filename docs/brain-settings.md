@@ -114,11 +114,15 @@ off, what to do with unknown senders, anti-abuse limits, allowed decisions):
   upgraded in memory (or `config import` writes it explicitly) with spontaneous conversations
   enabled and unknown senders ignored. Version 1 files are never rewritten.
 - A schema 1 document cannot contain `inbound` or `brain.settings_version`.
-- **The Engine does not enforce `inbound` yet.** It is stored and validated, and available on the
-  client config; enforcement is a later block. Today's runtime behaviour is unchanged.
+- **The Engine enforces part of `inbound`.** `spontaneous_conversations.enabled` and
+  `unknown_contacts.policy` decide what happens to a message from a sender who is not a prospect
+  (ignored, or a prospect is created and the message answered; see
+  [engine-design.md](engine-design.md)). Messages from known prospects are always handled.
+  `unknown_contacts.max_new_per_day` caps the prospects created that way per local day.
+  `when_disabled`, `allowed_decisions` and `limits` are stored and validated but not enforced yet.
 
 ## 7. Not implemented yet
 
 The Brain that reads these settings (fact ledger, discovery planner, LLM pipeline), Core facts and
-the `interest` concept, `inbound` enforcement and unknown-contact creation, Sheets changes, the
+the `interest` concept, enforcement of the remaining `inbound` limits, the
 Admin API and Web Admin, ContactPolicy, and any real client content.

@@ -29,6 +29,7 @@ from sales_core.contracts import (
     SendResult,
 )
 from sales_core.engine import Engine, EngineConfig
+from sales_core.ports import FactsReader
 from sales_integrations.fakes import FakeClock, FakeMessagingChannel, FakeSalesRepository
 
 FU = SalesActionType.FOLLOW_UP
@@ -133,6 +134,7 @@ class Harness:
     clock: FakeClock
     mode: ApprovalMode
     config_kwargs: dict
+    facts: FactsReader | None = None
 
     def new_engine(self, brain: ScriptedBrain | None = None) -> Engine:
         """A fresh Engine over the same repository, as after a process restart."""
@@ -143,6 +145,7 @@ class Harness:
             channel=self.channel,
             clock=self.clock,
             config=EngineConfig(mode=self.mode, **self.config_kwargs),
+            facts=self.facts,
         )
 
     # ---- inspection -----------------------------------------------------------------------
@@ -187,6 +190,7 @@ def build(
     messages: Sequence[Message] = (),
     brain: ScriptedBrain | None = None,
     mode: ApprovalMode = ApprovalMode.APPROVAL,
+    facts: FactsReader | None = None,
     **config: object,
 ) -> Harness:
     clock = FakeClock(NOW)
@@ -201,6 +205,7 @@ def build(
         clock=clock,
         mode=mode,
         config_kwargs=dict(config),
+        facts=facts,
     )
     harness.engine = harness.new_engine()
     return harness

@@ -9,12 +9,16 @@ Public entry points (all serialised by one lock, so a client has a single writer
 - `prepare()`   Phase A: plan, reserve quota, ask the Brain, apply decisions, approval gate.
 - `dispatch()`  Phase B: send APPROVED actions after re-checking safety.
 - `receive_inbound()` / `process_inbound()`  Phase C: store a reply fast, then handle it.
+
+Inbound conversations (Phase C) are outside the daily outbound quota and are asked of the Brain
+with `ContactOrigin.INBOUND`. What happens with a sender who is not a prospect is `InboundPolicy`.
 """
 
 import threading
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from sales_core.approval import ApprovalMode, status_after_proposal
 from sales_core.contracts import (
@@ -24,6 +28,9 @@ from sales_core.contracts import (
     BrainRequest,
     Channel,
     ClientContext,
+    ContactInfo,
+    ContactOrigin,
+    Conversation,
     DecisionType,
     Direction,
     InboundMessage,
@@ -35,6 +42,7 @@ from sales_core.contracts import (
     ProspectStatus,
     SalesAction,
     SalesActionType,
+    Scheduling,
     SendResult,
 )
 from sales_core.contracts.audit import AuditEvent
@@ -55,7 +63,7 @@ from sales_core.engine.models import (
     RunReport,
 )
 from sales_core.planner import plan_daily_actions
-from sales_core.ports import Brain, Clock, MessagingChannel, SalesRepository
+from sales_core.ports import Brain, Clock, FactsReader, MessagingChannel, SalesRepository
 from sales_core.safety import (
     BlockReason,
     SafetyVerdict,
@@ -67,6 +75,10 @@ from sales_core.safety import (
 
 UNCONFIRMED = "unconfirmed send"  # prefix of `last_error` on actions stuck in SENDING
 _ACTIVE_STATUSES = (ProspectStatus.NEW, ProspectStatus.ACTIVE)
+
+
+def _created_prefix(day: date) -> str:
+    return f"inbound-{day.isoformat()}-"
 
 
 class Engine:
@@ -81,6 +93,7 @@ class Engine:
         channel: MessagingChannel,
         clock: Clock,
         config: EngineConfig,
+        facts: FactsReader | None = None,
     ) -> None:
         if repository.client_id != client.client_id:
             raise ValueError("repository is bound to a different client than the engine")
@@ -90,6 +103,7 @@ class Engine:
         self._channel = channel
         self._clock = clock
         self._config = config
+        self._facts = facts  # None: no facts are known, the Brain gets an empty collection
         self._lock = threading.RLock()
         self._events: list[AuditEvent] = []  # audit events not yet written
 
@@ -142,14 +156,7 @@ class Engine:
         if prospect is None or not verdict.allowed:
             self._block(action, prospect, verdict, run)
             return
-        request = BrainRequest(
-            client=self._client,
-            prospect=prospect,
-            conversation=self._repo.get_conversation(action.prospect_id),
-            action=action,
-            now=now,
-        )
-        decision = self._brain.decide(request)
+        decision = self._brain.decide(self._request_for(action, prospect, now))
         validate_decision(decision, now)
         self._emit_for(
             ev.BRAIN_DECISION,
@@ -191,6 +198,35 @@ class Engine:
         elif decision.decision_type is DecisionType.CLOSE:
             self._emit_for(ev.PROSPECT_CLOSED, action, rationale=decision.rationale or None)
         run.outcome(action.action_id, ActionStatus.COMPLETED, str(decision.decision_type))
+
+    def _request_for(self, action: SalesAction, prospect: Prospect, now: datetime) -> BrainRequest:
+        conversation = self._repo.get_conversation(action.prospect_id)
+        origin = self._origin_of(action, conversation)
+        facts = tuple(self._facts.get_facts(prospect.prospect_id)) if self._facts else ()
+        return BrainRequest(
+            client=self._client,
+            prospect=prospect,
+            conversation=replace(conversation, origin=origin),
+            action=action,
+            now=now,
+            facts=facts,
+        )
+
+    @staticmethod
+    def _origin_of(action: SalesAction, conversation: Conversation) -> ContactOrigin:
+        """Who started the conversation, from what the Engine itself knows, never from content.
+
+        A REPLY is the Engine handling an inbound message. A FIRST_CONTACT is the agent writing
+        first. Other outreach keeps whatever the repository says: nothing persists the origin yet,
+        so that is UNKNOWN, which is honest for a conversation someone else may have started.
+        """
+        if action.action_type is SalesActionType.REPLY:
+            return ContactOrigin.INBOUND
+        if conversation.origin is not ContactOrigin.UNKNOWN:
+            return conversation.origin
+        if action.action_type is SalesActionType.FIRST_CONTACT:
+            return ContactOrigin.OUTBOUND
+        return ContactOrigin.UNKNOWN
 
     # ==== Phase B: dispatch ==================================================================
 
@@ -392,14 +428,8 @@ class Engine:
         if self._dry_run:
             self._emit(ev.DRYRUN_INBOUND, sender=inbound.sender, external_id=inbound.external_id)
             return InboundReceipt(status=InboundStatus.DRY_RUN)
-        prospect = self._find_sender(inbound)
+        prospect = self._find_sender(inbound) or self._engage_unknown_sender(inbound)
         if prospect is None:
-            self._emit(
-                ev.INBOUND_UNKNOWN_SENDER,
-                sender=inbound.sender,
-                external_id=inbound.external_id,
-                text=inbound.text,
-            )
             return InboundReceipt(status=InboundStatus.UNKNOWN_SENDER)
 
         message_id = MessageId(f"in:{inbound.channel}:{inbound.external_id}")
@@ -436,6 +466,68 @@ class Engine:
         return InboundReceipt(
             status=InboundStatus.STORED, message_id=message_id, prospect_id=prospect.prospect_id
         )
+
+    def _engage_unknown_sender(self, inbound: InboundMessage) -> Prospect | None:
+        """A message from someone who is not a prospect: ignore it, or create the prospect.
+
+        Nothing is inferred: the new prospect carries only the address, the channel and the time
+        of the message. It is ACTIVE from the start (the conversation has begun), so the planner,
+        which only opens NEW prospects, never sends it outreach nor spends the daily quota on it.
+        """
+        policy = self._config.inbound
+        today = self._clock.now().astimezone(ZoneInfo(self._client.timezone)).date()
+        refusal = None
+        if not policy.engages_unknown_senders:
+            refusal = {
+                "policy": policy.unknown_sender if policy.spontaneous_conversations else "disabled"
+            }
+        elif self._created_on(today) >= policy.max_new_per_day:
+            refusal = {
+                "policy": policy.unknown_sender,
+                "reason": "max_new_per_day reached",
+                "max_new_per_day": policy.max_new_per_day,
+            }
+        if refusal is not None:
+            self._emit(
+                ev.INBOUND_UNKNOWN_SENDER,
+                sender=inbound.sender,
+                external_id=inbound.external_id,
+                text=inbound.text,
+                **refusal,
+            )
+            return None
+        by_email = inbound.channel is Channel.EMAIL
+        address = inbound.sender.strip()
+        digits = "".join(c for c in address if c.isdigit())
+        key = address.casefold() if by_email or not digits else digits
+        prospect = Prospect(
+            client_id=self._client.client_id,
+            # The local day is part of the id: that is what `_created_on` counts, and it survives
+            # restarts. A redelivery never reaches here again: the prospect is found by contact.
+            prospect_id=ProspectId(f"{_created_prefix(today)}{key}"),
+            display_name=address,
+            contact=ContactInfo(
+                email=address if by_email else None,
+                phone=None if by_email else address,
+                preferred_channel=inbound.channel,
+            ),
+            status=ProspectStatus.ACTIVE,
+            schedule=Scheduling(last_inbound_at=inbound.timestamp),
+        )
+        self._repo.create_prospects([prospect])
+        self._emit(
+            ev.PROSPECT_CREATED,
+            prospect_id=prospect.prospect_id,
+            sender=inbound.sender,
+            external_id=inbound.external_id,
+            origin=ContactOrigin.INBOUND,
+        )
+        return prospect
+
+    def _created_on(self, day: date) -> int:
+        """Prospects this Engine created from unknown senders on the client's local `day`."""
+        prefix = _created_prefix(day)
+        return sum(1 for p in self._repo.list_prospects() if p.prospect_id.startswith(prefix))
 
     def _find_sender(self, inbound: InboundMessage) -> Prospect | None:
         if inbound.channel is Channel.EMAIL:

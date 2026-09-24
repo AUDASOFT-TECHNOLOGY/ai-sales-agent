@@ -18,6 +18,7 @@ PROSPECT_OPTED_OUT = "prospect.opted_out"
 PROSPECT_PAUSED = "prospect.paused"
 PROSPECT_HANDOFF = "prospect.handoff"
 PROSPECT_CLOSED = "prospect.closed"
+PROSPECT_CREATED = "prospect.created"  # an unknown sender the client chose to engage
 
 INBOUND_RECEIVED = "inbound.received"
 INBOUND_DUPLICATE = "inbound.duplicate"

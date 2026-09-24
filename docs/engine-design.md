@@ -76,6 +76,35 @@ The WhatsApp webhook (in `sales_app`) hands the parsed `InboundMessage` to `engi
    steps 2–6, and dispatch if the gate allows. In approval mode it stops at `PROPOSED` like any
    other message; "immediately" means *no waiting for the daily cycle*, not *no approval*.
 
+**Who is writing.** Steps 1-2 first find the sender. A known prospect is always handled. A sender
+who is not a prospect follows the client's inbound policy (`EngineConfig.inbound`):
+
+- spontaneous conversations off, or `unknown_contacts.policy = ignore` (the default): the message is
+  audited (`inbound.unknown_sender`, with the policy) and nothing else happens: no prospect, no
+  stored message, no Brain call.
+- `engage` (requires spontaneous conversations on): the Engine creates the prospect with
+  `SalesRepository.create_prospects`, then continues as for a known prospect. The new prospect
+  carries only what the message carries (the address as `display_name` and contact, the channel,
+  `last_inbound_at`); nothing is inferred from the number or the text. It is `ACTIVE` from the
+  start, so the planner (which only opens `NEW` prospects) never sends it outreach. Audited as
+  `prospect.created`. A redelivery finds the same prospect by its contact.
+- **`max_new_per_day`** caps how many prospects `engage` creates per local day of the client (its
+  timezone). The Engine puts that day in the id it gives them (`inbound-<date>-<address>`) and
+  counts those ids, so the count is persistent, includes prospects not yet processed, and starts
+  again each local day. At the limit the sender is refused like an ignored one (nothing created or
+  stored, no Brain call, no reply) and the message is audited as `inbound.unknown_sender` with
+  `reason = max_new_per_day reached`. Known prospects, and prospects that exist, neither count nor
+  are blocked; the outbound quota is separate. `0` creates nobody.
+
+**Origin and facts.** Every Brain request carries `conversation.origin`: `INBOUND` for a `REPLY`,
+`OUTBOUND` for a `FIRST_CONTACT`, and whatever the repository reports otherwise (`UNKNOWN`, since
+nothing persists the origin yet; a follow-up to a conversation the prospect started is therefore
+`UNKNOWN`, not falsely `OUTBOUND`). `request.facts` comes from the optional `FactsReader` given to
+the Engine (empty without one); the Engine never writes or extracts facts.
+
+`when_disabled`, `allowed_decisions` and the per-prospect reply limit of the inbound policy are
+not enforced yet.
+
 `REPLY` actions are excluded from the 20-action quota by the planner. The webhook only stores
 the message and returns 200; processing is a background task, and each daily cycle re-scans for
 stored inbound messages that have no `REPLY` action, so a crash loses nothing.
@@ -153,7 +182,7 @@ the cycle), **record** (every failure is an audit event and visible in the Sheet
 | Send returns `FAILED_TRANSIENT` | `attempts + 1`, back to `APPROVED`, retried by a later dispatch; `FAILED` after 3. |
 | Send returns `FAILED_PERMANENT` | `FAILED`; prospect → `PAUSED` for a human (e.g. bad number). |
 | Safety blocks | `CANCELLED` (permanent) or left `APPROVED` (temporary), with reason. |
-| Webhook duplicate / unknown sender | Ignored / stored and flagged for a human. |
+| Webhook duplicate / unknown sender | Ignored / audited, and ignored or engaged per the inbound policy (section 1, Phase C). |
 
 ## 7. How the Engine knows a conversation is closed or needs a follow-up
 

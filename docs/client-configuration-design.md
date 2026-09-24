@@ -459,8 +459,8 @@ Implemented after the ConfigStore; details in [brain-settings.md](brain-settings
 - **Schema 2** adds `brain.settings_version` and an `inbound` section (spontaneous conversations,
   unknown-contact policy, anti-abuse limits, allowed decisions). New documents default to the safe
   side (spontaneous conversations off, unknown contacts ignored, and a prospect is created for an
-  unknown sender only with policy `engage`). The `inbound` policy is stored and validated but **not
-  yet enforced by the Engine**.
+  unknown sender only with policy `engage`). The Engine enforces the unknown-sender part (ignore or
+  engage); the limits and allowed decisions are stored and validated but **not yet enforced**.
 - **Schema 1 keeps working.** It is upgraded in memory, keeping today's behaviour (replies handled,
   unknown senders ignored), and it cannot contain schema 2 keys. `client.yaml` files without an
   `inbound` section behave the same way, and `config import` writes that behaviour explicitly.

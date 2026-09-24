@@ -38,6 +38,12 @@ class SalesRepository(Protocol):
         ignoring formatting (spaces, '+', dashes); emails ignoring case. None if no match."""
         ...
 
+    def create_prospects(self, prospects: Sequence[Prospect]) -> None:
+        """Insert prospects that do not exist yet (e.g. an unknown sender the client agreed to
+        engage). Raises `ValueError`, writing nothing, if a `prospect_id` (or, where the backend
+        can tell, a phone number) is already in use or a prospect belongs to another client."""
+        ...
+
     def update_prospects(self, prospects: Sequence[Prospect]) -> None:
         """Persist the current state (status, stage, schedule, ...) of existing prospects.
 

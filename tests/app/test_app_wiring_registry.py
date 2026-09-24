@@ -15,7 +15,7 @@ from app_support import (
     phone_id,
     write_client,
 )
-from engine_harness import prospect
+from engine_harness import inbound, prospect
 from factories import NOW
 
 from sales_app.bootstrap import build_application, describe_modes
@@ -30,6 +30,7 @@ from sales_app.wiring import (
 )
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import ClientId
+from sales_core.engine import InboundStatus
 from sales_core.ports import Brain, LLMProvider
 from sales_integrations.fakes import FakeClock, FakeLLMProvider
 from sales_integrations.system import ChannelDisabledError, DisabledChannel
@@ -82,6 +83,19 @@ class TestBuildRuntime:
             "[warm] hello" in repo.list_actions()[0].draft.text
         )  # brain settings reached the Brain
         assert isinstance(brains.CREATED[0][0], LLMProvider)
+
+    def test_the_clients_inbound_policy_reaches_the_engine(self, tmp_path):
+        engage = {
+            "spontaneous_conversations": {"enabled": True},
+            "unknown_contacts": {"policy": "engage"},
+        }
+        for overrides, created in (({}, False), ({"inbound": engage}, True)):
+            config = _config(tmp_path, **overrides)
+            builders, made = fake_builders()
+            runtime = build_runtime(config, builders, FakeClock(NOW))
+            receipt = runtime.engine.receive_inbound(inbound(sender="+19998887777"))
+            assert (receipt.status is InboundStatus.STORED) is created
+            assert bool(made.repositories["alpha"].list_prospects()) is created
 
     def test_live_modes_get_the_real_channel(self, tmp_path):
         config = _config(tmp_path)

@@ -51,8 +51,10 @@ default to "nothing", so existing Brains and callers are unaffected.
   `request.conversation.origin`. It defaults to `unknown`.
 - `BrainDecision` is unchanged.
 
-Nothing populates these yet: the Engine still builds requests with no facts and an unknown origin,
-and repositories do not persist them.
+The Engine fills them in per request: `origin` is `inbound` for a reply to a prospect's message,
+`outbound` for a first contact and otherwise what the repository reports (`unknown`); `facts` come
+from an optional `FactsReader` (`sales_core.ports`) and are empty without one. Nothing extracts or
+persists facts, and repositories do not persist the origin.
 
 ## Not part of the contract yet
 

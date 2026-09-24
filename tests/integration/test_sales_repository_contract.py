@@ -15,11 +15,13 @@ from sales_core.contracts import (
     ActionId,
     ActionStatus,
     AuditEvent,
+    Channel,
     ClientId,
     ContactInfo,
     ConversationId,
     ProspectId,
     ProspectStatus,
+    Scheduling,
 )
 from sales_core.ports import SalesRepository
 from sales_integrations.fakes import FakeSalesRepository
@@ -109,6 +111,45 @@ class TestProspects:
         assert env.repo.find_prospect_by_contact(email=" alex@example.TEST ").prospect_id == "p1"
         assert env.repo.find_prospect_by_contact(phone="+19999999999") is None
         assert env.repo.find_prospect_by_contact() is None
+
+
+class TestCreateProspects:
+    def test_a_created_prospect_can_be_read_listed_and_found_by_contact(self, env):
+        existing = p("p1")
+        env.seed_prospects(existing)
+        created = p(
+            "p2",
+            display_name="+15550000002",
+            contact=ContactInfo(phone="+15550000002", preferred_channel=Channel.WHATSAPP),
+            status=ProspectStatus.ACTIVE,
+            schedule=Scheduling(last_inbound_at=NOW),
+        )
+        env.repo.create_prospects([created])
+        assert list(env.repo.list_prospects()) == [existing, created]
+        assert env.repo.get_prospect(ProspectId("p2")) == created
+        assert env.repo.find_prospect_by_contact(phone="15550000002").prospect_id == "p2"
+
+    def test_a_created_prospect_can_be_updated_afterwards(self, env):
+        env.repo.create_prospects([p("p1")])
+        current = env.repo.get_prospect(ProspectId("p1"))
+        env.repo.update_prospects([replace(current, status=ProspectStatus.OPTED_OUT)])
+        assert env.repo.get_prospect(ProspectId("p1")).status is ProspectStatus.OPTED_OUT
+
+    def test_an_existing_id_is_rejected_and_nothing_is_written(self, env):
+        env.seed_prospects(p("p1"))
+        with pytest.raises(ValueError, match="already exists"):
+            env.repo.create_prospects([p("p2"), p("p1")])
+        assert [x.prospect_id for x in env.repo.list_prospects()] == ["p1"]
+
+    def test_a_repeated_id_inside_one_batch_is_rejected(self, env):
+        with pytest.raises(ValueError, match="already exists"):
+            env.repo.create_prospects([p("p1"), p("p1")])
+        assert env.repo.list_prospects() == []
+
+    def test_other_clients_prospects_are_rejected(self, env):
+        with pytest.raises(ValueError, match="client-b"):
+            env.repo.create_prospects([p("p1", client_id=OTHER)])
+        assert env.repo.list_prospects() == []
 
 
 class TestActions:
@@ -214,3 +255,12 @@ class TestAudit:
         with pytest.raises(ValueError, match="client-b"):
             env.repo.append_audit_events([self._event(), self._event(OTHER)])
         assert env.audit_count() == 0
+
+
+def test_sheets_refuses_to_create_a_prospect_whose_phone_is_already_on_the_sheet():
+    """Even a row the adapter cannot read counts: it may still be contacted by a person."""
+    env = SheetsEnv()
+    env.api.human_add_row("Prospects", prospect_id="broken", phone="+1 555 000 0001", status="???")
+    with pytest.raises(ValueError, match="phone number is already in use"):
+        env.repo.create_prospects([p("p1", contact=ContactInfo(phone="+15550000001"))])
+    assert [r["prospect_id"] for r in env.api.rows("Prospects")] == ["broken"]

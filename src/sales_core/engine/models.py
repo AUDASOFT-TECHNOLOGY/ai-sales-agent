@@ -8,6 +8,37 @@ from sales_core.contracts import ActionId, ActionStatus, MessageId, ProspectId
 from sales_core.planner import DEFAULT_DAILY_ACTION_LIMIT
 from sales_core.safety import DEFAULT_OPT_OUT_KEYWORDS
 
+DEFAULT_MAX_NEW_PER_DAY = 30
+
+
+class UnknownSenderPolicy(StrEnum):
+    IGNORE = "ignore"  # audit the message; create nothing, call no Brain
+    ENGAGE = "engage"  # create a prospect from what the message carries and answer it
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboundPolicy:
+    """What the Engine does with messages from people who are not prospects yet.
+
+    Messages from known prospects are always handled; this only governs strangers. The default is
+    the safe side: strangers are audited and ignored.
+    """
+
+    spontaneous_conversations: bool = False  # may the Engine answer a conversation they started?
+    unknown_sender: UnknownSenderPolicy = UnknownSenderPolicy.IGNORE
+    # Prospects the Engine may create from strangers per local day of the client. 0 creates none.
+    max_new_per_day: int = DEFAULT_MAX_NEW_PER_DAY
+
+    def __post_init__(self) -> None:
+        if self.max_new_per_day < 0:
+            raise ValueError("max_new_per_day must be >= 0")
+        if self.unknown_sender is UnknownSenderPolicy.ENGAGE and not self.spontaneous_conversations:
+            raise ValueError("unknown_sender 'engage' requires spontaneous_conversations")
+
+    @property
+    def engages_unknown_senders(self) -> bool:
+        return self.spontaneous_conversations and self.unknown_sender is UnknownSenderPolicy.ENGAGE
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EngineConfig:
@@ -15,6 +46,7 @@ class EngineConfig:
     daily_action_limit: int = DEFAULT_DAILY_ACTION_LIMIT
     max_attempts: int = 3  # failed Brain calls / transient send failures before FAILED
     opt_out_keywords: frozenset[str] = DEFAULT_OPT_OUT_KEYWORDS
+    inbound: InboundPolicy = field(default_factory=InboundPolicy)
 
     def __post_init__(self) -> None:
         if self.daily_action_limit < 0:

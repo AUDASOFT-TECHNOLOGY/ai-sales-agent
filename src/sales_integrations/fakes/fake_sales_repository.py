@@ -22,6 +22,7 @@ FAILABLE_METHODS = frozenset(
         "list_prospects",
         "get_prospect",
         "find_prospect_by_contact",
+        "create_prospects",
         "update_prospects",
         "list_actions",
         "find_action_by_idempotency_key",
@@ -123,6 +124,10 @@ class FakeSalesRepository:
             if wanted_email and contact.email and contact.email.strip().casefold() == wanted_email:
                 return prospect
         return None
+
+    def create_prospects(self, prospects: Sequence[Prospect]) -> None:
+        self._maybe_fail("create_prospects")
+        self.add_prospects(*prospects)
 
     def update_prospects(self, prospects: Sequence[Prospect]) -> None:
         self._maybe_fail("update_prospects")

@@ -71,6 +71,9 @@ class InMemoryStore:
     ) -> Prospect | None:
         return None
 
+    def create_prospects(self, prospects: Sequence[Prospect]) -> None:
+        self.prospects.update({p.prospect_id: p for p in prospects})
+
     def update_prospects(self, prospects: Sequence[Prospect]) -> None:
         self.prospects.update({p.prospect_id: p for p in prospects})
 
