@@ -5,6 +5,7 @@ from typing import Literal
 
 from sales_brain_kit.consultative.language import localize, match_language
 from sales_brain_kit.settings.catalog import CatalogSettings, Product, SourceInterest
+from sales_brain_kit.settings.market import Market
 
 MatchBy = Literal["id", "name", "aliases"]
 
@@ -52,10 +53,16 @@ class ProductCatalog:
                 return product
         return None
 
-    def exclusion(self, product: Product, language: str | None) -> str | None:
+    def exclusion(
+        self, product: Product, language: str | None, market: Market | None = None
+    ) -> str | None:
         """Why a product may not be offered now, or None if it may."""
         if product.status == "inactive":
             return "inactive"
+        if market is not None and market.catalog is not None:
+            scope = market.catalog
+            if (scope.only and product.id not in scope.only) or product.id in scope.exclude:
+                return f"not offered in market {market.id}"
         allowed = product.restrictions.languages if product.restrictions else ()
         if allowed and language is not None and match_language(language, allowed) is None:
             return f"not offered in {language}"

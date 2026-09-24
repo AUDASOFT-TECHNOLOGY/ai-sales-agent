@@ -1,0 +1,88 @@
+# The commerce sections of a client's Brain settings, with every field: markets, register rules,
+# payment, and the conversion workflow. NOT loaded by anything and NOT client data. Every text says
+# TODO(fill-in), every link is on the reserved `.invalid` domain, and there is no account number, so
+# sales_brain_kit.check_readiness flags any of it that reaches real settings. A test keeps this file
+# valid against the schema (with the discovery fields and product it refers to added).
+#
+# Nothing here says that registration, payment or an appointment needs a person: each step chooses.
+
+communication:
+  languages:
+    priority: [explicit_preference, conversation, profile, market, default]   # the order signals are trusted; default is the last resort
+  register_rules:                  # the first rule that matches the known market and language applies
+    - id: example-register
+      when: {markets: [example-market], languages: [xx]}   # both dimensions must match when both are given
+      formality: informal          # formal | neutral | informal (else the client's tone)
+      allow_switch: true           # may the Brain follow the prospect's own register?
+      style: TODO(fill-in) preferred communication style
+
+markets:
+  country_fact: country            # a declared discovery field, with infer.allowed: false
+  trusted_sources: [prospect, client_data, human, system]   # where a country may come from; a Brain's guess never counts
+  markets:
+    - id: example-market
+      label: TODO(fill-in) market name
+      countries: [TODO(fill-in) country as the client's data spells it]
+      languages: {allowed: [xx], default: xx}
+      style: TODO(fill-in) how to speak in this market
+      catalog: {exclude: []}       # or only: [product ids]
+      workflow: example-workflow   # this market's conversion workflow
+      follow_up: {situations: {}}  # cadence overrides for this market
+
+payment:
+  methods:
+    - id: example-online
+      kind: online                 # online | offline | other
+      status: active
+      label: TODO(fill-in) method name
+      provider: TODO(fill-in) provider (never shown to the prospect)
+      applies_to: {products: [], markets: [], countries: [], currencies: []}   # empty means any
+      confirmation: {mode: provider, note: TODO(fill-in) what the prospect should expect}   # provider | manual | none
+      instructions:                # the most specific matching one is used, exactly as written
+        - id: default
+          url: https://todo.invalid/pay
+          text: TODO(fill-in) exact wording, kept character for character
+    - id: example-offline
+      kind: offline
+      label: TODO(fill-in) method name
+      confirmation: {mode: manual, note: TODO(fill-in) how the payment is confirmed}
+      instructions:
+        - id: default
+          text: TODO(fill-in) exact payment instructions
+          fields:                  # each is given as "label: value", value kept exactly
+            - {label: TODO(fill-in) label, value: TODO(fill-in) exact value}
+        - id: for-a-country
+          applies_to: {countries: [TODO(fill-in) country as the client's data spells it]}
+          text: TODO(fill-in) instructions for that country
+
+conversion:
+  default_workflow: example-workflow
+  appointment:                     # default for appointment and callback steps
+    supported: true
+    kind: call
+    mode: callback                 # callback | booking_url | human_scheduling
+    handled_by: human              # human | agent
+    min_notice_hours: 24
+  workflows:
+    - id: example-workflow
+      label: TODO(fill-in) workflow name
+      steps:                       # in order, unless `next` says otherwise
+        - {id: recommend, kind: recommend}        # done when the discovery ladder's recommend requirement is known
+        - {id: qualify, kind: qualify}
+        - id: register
+          kind: register
+          human: optional          # none | optional | required
+          registration: {mode: agent_assisted, collects: [example-field]}   # self_service (needs url) | agent_assisted | human_assisted
+          completes_when: {facts: [{key: registration-status, equals: [registered]}]}
+          objective: TODO(fill-in) how to guide the prospect through registration
+          fallback: handoff        # a step id, or handoff | close | park | skip
+        - id: pay
+          kind: payment
+          requires: {steps: [register]}
+          payment: {methods: []}   # empty: every method that applies
+          completes_when: {facts: [{key: payment-status, equals: [received]}]}
+        - id: confirm
+          kind: payment_confirmation
+          human: optional
+          completes_when: {facts: [{key: payment-status, equals: [confirmed]}]}
+        - {id: done, kind: close}

@@ -122,7 +122,7 @@ stored inbound messages that have no `REPLY` action, so a crash loses nothing.
 | Stage labels (opaque to the Core) | Sending, retries, error handling, audit |
 | Prompts and templates; talks to `LLMProvider` | Deciding *nothing* about content |
 
-- **Cadence lives in the Brain** (its `rules.yaml` and logic). The Planner only asks "is
+- **Cadence lives in the Brain** (its `follow_up` settings and logic). The Planner only asks "is
   something due?"; it never knows why. The Brain reads `follow_up_count` and history and answers
   with the next date, or `CLOSE` after its own maximum.
 - **OpenAI is an implementation detail behind `LLMProvider`**, which only Brains hold. The Core

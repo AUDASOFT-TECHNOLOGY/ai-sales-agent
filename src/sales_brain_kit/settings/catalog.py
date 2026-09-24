@@ -22,6 +22,7 @@ from sales_brain_kit.settings.common import (
 )
 from sales_brain_kit.settings.discovery import BudgetOverride, DiscoveryField
 from sales_brain_kit.settings.followup import ProductFollowUp
+from sales_brain_kit.settings.scope import MarketScope
 
 ProductStatus = Literal["active", "coming_soon", "inactive"]
 CtaKind = Literal["request_info", "enrol_link", "request_callback", "notify_me"]
@@ -57,19 +58,24 @@ class Availability(Model):
     capacity_note: ShortText | None = None
 
 
-class Pricing(Model):
+class PriceTerms(Model):
+    """What a price is. A configured price is authoritative: nothing calculates or converts it."""
+
     model: Literal["fixed", "from", "range", "on_request", "free"] = "on_request"
     amount: Amount | None = None
     max_amount: Amount | None = None
     currency: Currency | None = None
-    disclose: Literal["always", "after_interest", "on_request"] = "after_interest"
     note: ShortText | None = None
 
     @model_validator(mode="after")
-    def _consistent(self) -> "Pricing":
+    def _consistent(self) -> "PriceTerms":
         priced = self.model in ("fixed", "from", "range")
         if priced and (self.amount is None or self.currency is None):
             raise ValueError(f"a '{self.model}' price needs 'amount' and 'currency'")
+        if priced and not self.amount:
+            raise ValueError(
+                f"a '{self.model}' price must be above zero (use 'free' for no charge)"
+            )
         if not priced and (self.amount is not None or self.max_amount is not None):
             raise ValueError(f"a '{self.model}' price has no amount")
         if self.model == "range":
@@ -78,6 +84,31 @@ class Pricing(Model):
         elif self.max_amount is not None:
             raise ValueError("'max_amount' is only for a 'range' price")
         return self
+
+
+Disclosure = Literal["always", "after_interest", "on_request"]
+
+
+class PriceVariant(PriceTerms):
+    """The price for a market or country. The most specific variant that applies wins; without
+    one, the product's own (default) price applies."""
+
+    id: Slug
+    applies_to: MarketScope
+    disclose: Disclosure | None = None  # None: the product's
+
+    @model_validator(mode="after")
+    def _has_a_place(self) -> "PriceVariant":
+        if not self.applies_to.restricts_place:
+            raise ValueError("a price variant needs at least one market or country")
+        return self
+
+
+class Pricing(PriceTerms):
+    """The product's default price, and optionally a price per market or country."""
+
+    disclose: Disclosure = "after_interest"
+    variants: tuple[PriceVariant, ...] = Field(default=(), max_length=50)
 
 
 class Audience(Model):
@@ -133,13 +164,31 @@ class Strategy(Model):
 
 
 class Appointment(Model):
-    """MVP: an appointment is a callback scheduled by the agent and carried out by a human."""
+    """How an appointment or callback works. Nothing here says a person must be involved: the
+    client chooses who carries it out and how it is arranged.
+
+    `mode`: `callback` (the agent takes the time the prospect asks for and schedules it),
+    `booking_url` (the prospect books through the configured link) or `human_scheduling` (a person
+    arranges it: the conversation is handed over).
+    `handled_by`: who carries a scheduled callback out, a `human` (the conversation is handed over
+    when it falls due) or the `agent` (it contacts the prospect itself).
+    """
 
     supported: bool = False
     kind: Literal["call", "visit", "demo"] = "call"
-    handled_by: Literal["human"] = "human"
+    mode: Literal["callback", "booking_url", "human_scheduling"] = "callback"
+    handled_by: Literal["human", "agent"] = "human"
+    booking_url: HttpsUrl | None = None
     min_notice_hours: int = Field(default=24, ge=0, le=720)
     note: ShortText | None = None
+
+    @model_validator(mode="after")
+    def _mode_needs_its_data(self) -> "Appointment":
+        if self.mode == "booking_url" and self.booking_url is None:
+            raise ValueError("the 'booking_url' mode needs a 'booking_url'")
+        if self.mode != "booking_url" and self.booking_url is not None:
+            raise ValueError("'booking_url' is only for the 'booking_url' mode")
+        return self
 
 
 class Restrictions(Model):
@@ -171,6 +220,7 @@ class Product(Model):
     follow_up: ProductFollowUp | None = None
     appointment: Appointment | None = None
     restrictions: Restrictions | None = None
+    workflow: Slug | None = None  # the conversion workflow for this product (else the market's)
 
     @model_validator(mode="after")
     def _status_rules(self) -> "Product":

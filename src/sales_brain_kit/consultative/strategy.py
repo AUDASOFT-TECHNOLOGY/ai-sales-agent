@@ -25,8 +25,16 @@ from sales_brain_kit.consultative.facts import KnownFacts
 from sales_brain_kit.consultative.follow_up import FollowUpPolicy
 from sales_brain_kit.consultative.history import HistoryView
 from sales_brain_kit.consultative.interest import InterestLevel
+from sales_brain_kit.consultative.market import MarketContext
+from sales_brain_kit.consultative.pricing import resolve_price
 from sales_brain_kit.consultative.selection import ProductSelection, SelectionBasis
+from sales_brain_kit.consultative.workflow import (
+    WorkflowState,
+    evaluate_workflow,
+    select_workflow,
+)
 from sales_brain_kit.settings import ConsultativeSalesSettings
+from sales_brain_kit.settings.catalog import Product
 from sales_core.contracts import (
     BrainRequest,
     ContactOrigin,
@@ -52,6 +60,7 @@ class Objective(StrEnum):
     PROPOSE_NEXT_STEP = "propose_next_step"  # interest is established: invite the next step
     RE_ENGAGE = "re_engage"  # the prospect went quiet: bring something worth answering
     HAND_OVER = "hand_over"  # a human carries this on (a promised callback is due)
+    ADVANCE_WORKFLOW = "advance_workflow"  # carry out the current step of the conversion workflow
 
 
 _FIRST_TOUCH = (CommercialSituation.FIRST_CONTACT, CommercialSituation.INBOUND_OPENING)
@@ -85,6 +94,7 @@ class ConversationPlan:
     greeting: bool  # open with a greeting
     follow_up_intent: str | None = None  # what a follow-up now is meant to do, if configured
     terminal: TerminalOutcome | None = None
+    workflow: WorkflowState | None = None  # where the conversion workflow stands, if there is one
 
     @property
     def qualification_sufficient(self) -> bool | None:
@@ -118,16 +128,31 @@ def plan_conversation(
     selection: ProductSelection,
     language: str,
     follow_up: FollowUpPolicy,
+    market: MarketContext,
 ) -> ConversationPlan:
     now = request.now
     situation = classify(request, history)
     origin = _effective_origin(request.conversation.origin, history)
     primary = selection.focus[0] if selection.focus else None
+    by_person = situation is CommercialSituation.CALLBACK and _callback_by_person(settings, primary)
 
     steps = evaluate_steps(
         settings, applicable_fields(settings, selection.focus), facts, selection, now
     )
-    if situation is CommercialSituation.CALLBACK:
+    workflow = None
+    chosen = select_workflow(settings, primary, market.market)
+    if chosen is not None:
+        workflow = evaluate_workflow(
+            settings,
+            chosen,
+            facts=facts,
+            stage=request.prospect.stage,
+            ladder=steps,
+            focus=selection.focus,
+            place=market.place,
+            currency=resolve_price(primary, market.place).currency if primary else None,
+        )
+    if by_person:
         discovery = not_needed("a promised callback is not the moment to ask questions")
     else:
         discovery = plan_discovery(
@@ -137,6 +162,7 @@ def plan_conversation(
             history=history,
             language=language,
             now=now,
+            advance_keys=workflow.ask_keys if workflow is not None else (),
         )
 
     terminal = None
@@ -149,7 +175,9 @@ def plan_conversation(
             )
 
     mode = _no_product_mode(settings, origin)
-    objective = _objective(situation, selection, discovery, steps, settings, mode)
+    objective = _objective(
+        situation, selection, discovery, steps, settings, mode, workflow, by_person
+    )
     presenting = objective in (Objective.PRESENT_OFFER, Objective.PROPOSE_NEXT_STEP)
     no_products = selection.basis in (SelectionBasis.NO_CATALOG, SelectionBasis.NONE_SUITABLE)
     forbidden = (
@@ -161,7 +189,7 @@ def plan_conversation(
         situation=situation,
         origin=origin,
         objective=objective,
-        allowed_decisions=_allowed_decisions(situation),
+        allowed_decisions=_allowed_decisions(situation, settings),
         discovery=discovery,
         steps=steps,
         may_present=not forbidden,
@@ -174,7 +202,17 @@ def plan_conversation(
             else None
         ),
         terminal=terminal,
+        workflow=workflow,
     )
+
+
+def _callback_by_person(settings: ConsultativeSalesSettings, primary: Product | None) -> bool:
+    """A promised callback that falls due is carried out by a person, unless the client says the
+    agent does it. (The product's own appointment settings win over the client's default.)"""
+    appointment = primary.appointment if primary is not None else None
+    if appointment is None or not appointment.supported:
+        appointment = settings.conversion.appointment
+    return appointment is None or appointment.handled_by == "human"
 
 
 def _effective_origin(origin: ContactOrigin, history: HistoryView) -> ContactOrigin:
@@ -201,11 +239,15 @@ def _objective(
     steps: Mapping[str, StepStatus],
     settings: ConsultativeSalesSettings,
     mode: str,
+    workflow: WorkflowState | None,
+    callback_by_person: bool,
 ) -> Objective:
-    if situation is CommercialSituation.CALLBACK:
+    if situation is CommercialSituation.CALLBACK and callback_by_person:
         return Objective.HAND_OVER
     if situation in (CommercialSituation.FOLLOW_UP, CommercialSituation.REMINDER):
         return Objective.RE_ENGAGE
+    if workflow is not None and workflow.advancing:
+        return Objective.ADVANCE_WORKFLOW
     if selection.focus:
         proposal = steps.get("propose_next_step")
         ready = (proposal is not None and proposal.satisfied) or _shortcut_proposes(
@@ -231,12 +273,17 @@ def _shortcut_proposes(settings: ConsultativeSalesSettings, selection: ProductSe
     )
 
 
-def _allowed_decisions(situation: CommercialSituation) -> frozenset[DecisionType]:
+def _allowed_decisions(
+    situation: CommercialSituation, settings: ConsultativeSalesSettings
+) -> frozenset[DecisionType]:
+    decisions = _ALL_DECISIONS
+    if not settings.handoff.enabled:
+        decisions = decisions - {DecisionType.HANDOFF_TO_HUMAN}
     if situation is CommercialSituation.FIRST_CONTACT:
-        return _ALL_DECISIONS - {DecisionType.CLOSE, DecisionType.SCHEDULE_FOLLOW_UP}
+        return decisions - {DecisionType.CLOSE, DecisionType.SCHEDULE_FOLLOW_UP}
     if situation is CommercialSituation.CALLBACK:
-        return _ALL_DECISIONS - {DecisionType.CLOSE}
-    return _ALL_DECISIONS
+        return decisions - {DecisionType.CLOSE}
+    return decisions
 
 
 def _greeting(settings: ConsultativeSalesSettings, history: HistoryView) -> bool:

@@ -30,9 +30,28 @@ def _text(max_length: int) -> object:
     ]
 
 
+def _not_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("must not be blank")
+    return value
+
+
+def _exact(max_length: int) -> object:
+    """Text that is data, not prose: kept exactly as written (no trimming, no reformatting).
+    Payment details and any other value that must never be altered use it."""
+    return Annotated[
+        str,
+        StringConstraints(min_length=1, max_length=max_length),
+        AfterValidator(_not_blank),
+        AfterValidator(_no_control_characters),
+    ]
+
+
 Hint = _text(200)
 ShortText = _text(300)
 Text = _text(3000)
+ExactShort = _exact(200)
+ExactText = _exact(1500)
 
 # Identifiers chosen by the client (product ids, fact keys, stage ids, ...). Stable and URL-safe.
 Slug = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")]
@@ -57,6 +76,8 @@ def _localize(value: object) -> object:
 # Plain text (in the client's default language) or a {language: text} map.
 LocalizedShort = Annotated[ShortText | dict[Lang, ShortText], AfterValidator(_localize)]  # type: ignore[operator]
 LocalizedText = Annotated[Text | dict[Lang, Text], AfterValidator(_localize)]  # type: ignore[operator]
+LocalizedExact = Annotated[ExactText | dict[Lang, ExactText], AfterValidator(_localize)]  # type: ignore[operator]
+LocalizedExactShort = Annotated[ExactShort | dict[Lang, ExactShort], AfterValidator(_localize)]  # type: ignore[operator]
 
 _DURATION = re.compile(r"^P(?=\d|T\d)(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$")
 

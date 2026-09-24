@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from sales_brain_kit.settings.catalog import Product
 from sales_brain_kit.settings.common import duration_seconds
 from sales_brain_kit.settings.followup import FollowUpSettings, Situation, Step, Then
+from sales_brain_kit.settings.market import Market
 from sales_core.contracts import SalesActionType
 
 NO_RESPONSE = "no_response"
@@ -41,9 +42,13 @@ class NextTouch:
 
 
 class FollowUpPolicy:
-    def __init__(self, settings: FollowUpSettings) -> None:
+    """The cadence: the product's own, else the prospect's market's, else the client's."""
+
+    def __init__(self, settings: FollowUpSettings, market: Market | None = None) -> None:
         self._settings = settings
         self._global: dict[str, Situation] = dict(settings.situations)
+        if market is not None and market.follow_up is not None:
+            self._global |= dict(market.follow_up.situations)
 
     def situations(self, product: Product | None = None) -> tuple[str, ...]:
         names = dict.fromkeys(self._global)
@@ -52,7 +57,7 @@ class FollowUpPolicy:
         return tuple(names)
 
     def table(self, situation: str, product: Product | None = None) -> Situation | None:
-        """The product's own cadence for a situation, else the client's."""
+        """The product's own cadence for a situation, else the market's or the client's."""
         if product is not None and product.follow_up is not None:
             own: dict[str, Situation] = dict(product.follow_up.situations)
             if situation in own:

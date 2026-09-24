@@ -3,7 +3,8 @@
 Status: **implemented** in `src/sales_brain_kit/consultative/` (Slice 5). It is the first real Brain
 of the platform and it is client-agnostic: everything it knows comes from a client's Brain
 settings ([brain-settings.md](brain-settings.md)), the facts the Core hands it, and the
-conversation. Client Brains (`brains/*`) will be thin packages that give it their settings.
+conversation. Client Brains (`brains/*`) are thin packages that give it their settings; the first is
+Naga's ([naga-brain.md](naga-brain.md)).
 
 The Brain Kit is **not a chatbot**. It is the commercial intelligence layer: it works out what is
 known, what the client sells, what the prospect probably wants, what is genuinely worth asking,
@@ -46,15 +47,23 @@ One model call per decision, plus at most one retry after a refused answer. Modu
 |---|---|
 | `errors` | `BrainOutputError` (the answer cannot become a decision) |
 | `facts` | current view of the prospect's facts, status kept |
-| `language` | language tags, localised texts, which language to use |
-| `catalog` | find products, say which may be offered |
+| `applicability` | does a market/country/product/currency scope apply, and how specifically |
+| `market` | the prospect's market, from a trusted explicit country only |
+| `language` | language tags, localised texts, which language to use (configured priority) |
+| `register` | formality and style from the client's rules |
+| `catalog` | find products, say which may be offered (also by market) |
 | `history` | who spoke last, how many messages unanswered, how much was asked |
 | `interest` | product interest: possible, probable, confirmed |
 | `selection` | which products this conversation is about |
-| `discovery` | minimum necessary discovery |
-| `follow_up` | cadence: when to come back |
+| `pricing` | which configured price applies to the known place, and how it is written |
+| `payment` | which payment methods and instructions apply, rendered exactly |
+| `discovery` | minimum necessary discovery (and what the workflow step still needs) |
+| `follow_up` | cadence: when to come back (product, market, client) |
+| `workflow` | where the prospect stands in the conversion workflow, derived from facts |
+| `exact` | placeholders and the checks that keep exact values out of the model |
 | `strategy` | situation, objective, decisions open, terminal outcomes |
 | `context` | `CommercialContext`, the immutable result of all of the above |
+| `commerce` | which exact values may be given in this message |
 | `output` | the structured answer, its JSON Schema and parsing |
 | `prompt` | system instructions and the JSON context |
 | `validation` | the acceptance checks |
@@ -155,15 +164,21 @@ cannot send and hand over in one decision). A disqualifier applies only if its f
 
 ## 7. Language and tone
 
-Nothing names a language. The language to use comes from, in order: a confirmed `language`
-preference of the prospect (locked); a `language` fact learned from the conversation; the locale the
-client holds for the prospect; the client's default. When the client allows mirroring
-(`mirror_prospect_language`) and nothing is locked, the reply follows the language the prospect
-wrote in, as the model reports it, if the client supports it. A language the prospect just asked for
-wins even over a stored preference. Unsupported languages are never used, and where the prospect
-lives never decides the language (nor tone, nor arguments). The message must declare its language
-and it must match; tone, formality, persona, principles and message limits are built into the
-system instructions from settings.
+Nothing names a language. The language comes from ordered signals, in the client's own order
+(`communication.languages.priority`; by default: a confirmed `language` preference of the prospect,
+which is locked; a language learned from the conversation; what the client holds for the prospect, a
+`language` fact or the locale; the language rule of the prospect's market; the client's default). When
+the client allows mirroring (`mirror_prospect_language`) and nothing is locked, the reply follows the
+language the prospect wrote in, as the model reports it, if the client supports it (and the market
+allows it). A language the prospect just asked for wins even over a stored preference. Unsupported
+languages are never used. The message must declare its language and it must match.
+
+Where the prospect lives matters **only** through rules the client wrote for a *country of residence
+that is known from a trusted, explicit source* (never inferred from a name, a phone number, a locale or a
+nationality): a market's languages, the register rules, the catalog, the cadence, prices and payment.
+The model is told to follow those decisions and never to guess a place. Tone, formality, persona,
+principles and message limits are built into the system instructions from settings, the register being
+resolved from the client's `register_rules`. Details: [brain-commerce.md](brain-commerce.md).
 
 ## 8. Inbound and outbound
 
@@ -210,9 +225,19 @@ for the audit trail, and the decision's `metadata` carries only short operationa
 (objective, situation, selected product, question asked, follow-up situation, handoff and close
 reasons).
 
+## 10b. Prices, payment and the conversion workflow
+
+A price, a payment instruction or a booking link is an *exact value*: the model never receives it. It is
+given placeholders (`[[price:id]]`, `[[payment:id]]`, `[[booking:id]]`), validation refuses any exact-looking
+value it writes itself, and deterministic code inserts the configured text. The conversion workflow
+(registration, payment, appointment, handoff, close, ...) is derived from facts and stage and adds the
+objective `advance_workflow`. See [brain-commerce.md](brain-commerce.md).
+
 ## 11. Known limitations
 
-- Facts are not extracted or recorded: a Brain cannot propose facts through the current contracts.
+- Facts are not extracted or recorded: a Brain cannot propose facts through the current contracts, so
+  workflow steps that depend on what the agent collected (registration data, a payment proof) rely on
+  facts recorded by staff or another system until a Core slice adds proposed facts.
 - Rebuttals are not counted (`max_rebuttals > 0` and `handoff.triggers[].after_rebuttals` are
   guidance only); only the no-rebuttal handoff is enforced.
 - Approved provider templates (`templates`) are not selected; the Brain always writes free text.

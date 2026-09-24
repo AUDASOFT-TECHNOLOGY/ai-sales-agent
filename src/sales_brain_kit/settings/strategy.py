@@ -44,10 +44,25 @@ class BusinessSettings(Model):
     website: HttpsUrl | None = None
 
 
+# Where a language can be learned from, in the client's own order of trust. `explicit_preference`
+# is a language the prospect confirmed; `conversation` one seen in the exchange; `profile` what the
+# client holds for the prospect (a language fact or locale); `market` the language rule of the
+# prospect's market; `default` the client's default (always the last resort).
+LanguageSignal = Literal["explicit_preference", "conversation", "profile", "market", "default"]
+DEFAULT_LANGUAGE_PRIORITY: tuple[LanguageSignal, ...] = (
+    "explicit_preference",
+    "conversation",
+    "profile",
+    "market",
+    "default",
+)
+
+
 class LanguageSettings(Model):
     default: Lang
     supported: tuple[Lang, ...] = Field(min_length=1, max_length=10)
     mirror_prospect_language: bool = True
+    priority: tuple[LanguageSignal, ...] = DEFAULT_LANGUAGE_PRIORITY
 
     @model_validator(mode="after")
     def _default_is_supported(self) -> "LanguageSettings":
@@ -55,6 +70,12 @@ class LanguageSettings(Model):
             raise ValueError(f"default language {self.default!r} must be one of 'supported'")
         if len(set(self.supported)) != len(self.supported):
             raise ValueError("'supported' lists a language twice")
+        if len(set(self.priority)) != len(self.priority):
+            raise ValueError("'priority' lists a signal twice")
+        if "explicit_preference" not in self.priority:
+            raise ValueError(
+                "'priority' must include 'explicit_preference': what a prospect asked for is never ignored"
+            )
         return self
 
 
@@ -69,6 +90,30 @@ class ToneSettings(Model):
     persona_name: ShortText | None = None
 
 
+class RegisterWhen(Model):
+    markets: tuple[Slug, ...] = Field(default=(), max_length=20)
+    languages: tuple[Lang, ...] = Field(default=(), max_length=10)
+
+
+class RegisterRule(Model):
+    """The register (formality, style) for a market and/or language. The first rule that matches
+    the prospect's known market and the language in use applies; without one, `tone` does."""
+
+    id: Slug
+    when: RegisterWhen
+    formality: Literal["formal", "neutral", "informal"] | None = None
+    allow_switch: bool | None = None  # may the Brain move to the prospect's own register?
+    style: ShortText | None = None
+
+    @model_validator(mode="after")
+    def _has_a_condition_and_an_effect(self) -> "RegisterRule":
+        if not self.when.markets and not self.when.languages:
+            raise ValueError("'when' needs at least one market or language")
+        if self.formality is None and self.allow_switch is None and self.style is None:
+            raise ValueError("give at least one of 'formality', 'allow_switch' or 'style'")
+        return self
+
+
 class MessageSettings(Model):
     max_chars: int = Field(default=600, ge=100, le=2000)
     max_questions: int = Field(default=1, ge=0, le=2)  # 2 is the platform ceiling
@@ -81,6 +126,7 @@ class CommunicationSettings(Model):
     tone: ToneSettings = Field(default_factory=ToneSettings)
     principles: tuple[ShortText, ...] = Field(default=(), max_length=10)
     message: MessageSettings = Field(default_factory=MessageSettings)
+    register_rules: tuple[RegisterRule, ...] = Field(default=(), max_length=30)
 
 
 class Goal(Model):
@@ -175,6 +221,7 @@ class HandoffTrigger(Model):
 
 
 class HandoffSettings(Model):
+    enabled: bool = True  # False: the agent never hands a conversation to a person
     triggers: tuple[HandoffTrigger, ...] = Field(default=(), max_length=10)
     message: LocalizedShort | None = None  # what the prospect is told
     briefing: bool = True  # summarise the conversation for the human

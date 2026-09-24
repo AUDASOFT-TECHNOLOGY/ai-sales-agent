@@ -61,6 +61,11 @@ def _base_metadata(context: CommercialContext) -> dict[str, str | None]:
         "origin": str(plan.origin),
         "discovery": str(plan.discovery.status),
         "qualification_sufficient": _flag(plan.qualification_sufficient),
+        "market": context.market.market.id if context.market.market else None,
+        "workflow": plan.workflow.workflow.id if plan.workflow else None,
+        "workflow_step": (
+            plan.workflow.current.id if plan.workflow and plan.workflow.current else None
+        ),
     }
 
 
@@ -80,6 +85,7 @@ def _metadata(validated: ValidatedOutput, context: CommercialContext) -> dict[st
         "handoff_reason": validated.handoff_reason,
         "handoff_briefing": validated.handoff_briefing,
         "close_reason": validated.close_reason,
+        "exact_values": ",".join(validated.exact_values) or None,
     }
     if validated.decision_type is DecisionType.HANDOFF_TO_HUMAN:
         details["handoff_message"] = _handoff_message(context)

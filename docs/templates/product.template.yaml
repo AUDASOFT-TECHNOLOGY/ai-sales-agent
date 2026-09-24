@@ -1,0 +1,105 @@
+# A product, with every field the Brain understands. NOT loaded by anything and NOT client data:
+# every text says TODO(fill-in) and the URL is on the reserved `.invalid` domain, so
+# sales_brain_kit.check_readiness flags any of it that reaches real settings.
+#
+# To add a product: copy it under `catalog.products` in a client's Brain settings (the client-facing
+# configuration interface will do this from a form), replace every TODO(fill-in) with information
+# the client confirmed, and set `status: active`. A test keeps this file valid against the schema.
+# Only `id`, `name` and `summary` are required; everything else is optional and the Brain simply
+# does not use what is missing.
+#
+# It stays `status: inactive` here so that, even by accident, the Brain never offers it.
+
+products:
+  - id: example-product            # immutable once published: facts and history refer to it
+    status: inactive               # active | coming_soon | inactive (products are never deleted)
+    name: TODO(fill-in) product name  # plain text, or {xx: ..., yy: ...} per language
+    summary: TODO(fill-in) one sentence a prospect can understand
+    description: TODO(fill-in) the full description
+    category: TODO(fill-in) category
+    url: https://todo.invalid/product
+    aliases: [TODO(fill-in) another name prospects use]   # also matched against a Sheet column
+    tags: [todo-tag]
+    workflow: example-workflow     # the conversion workflow for this product (else the market's, else the default)
+
+    availability:
+      regions: all                 # or a list of places the product is offered
+      delivery: [online]           # online | onsite | hybrid
+      # next_start: 2099-01-01     # only a real, confirmed date
+      capacity_note: TODO(fill-in) seats, groups, waiting list
+
+    pricing:                       # never invent a price: `on_request` states none
+      model: on_request            # fixed | from | range | on_request | free
+      # For a real price:  model: fixed, amount: <number above zero>, currency: <ISO code>
+      disclose: after_interest     # always | after_interest | on_request
+      note: TODO(fill-in) what the price includes
+      variants: []                 # one price per market or country, for example:
+      #  - id: example-variant
+      #    applies_to: {markets: [example-market]}      # and/or countries: [as the client writes them]
+      #    model: fixed
+      #    amount: 100
+      #    currency: XXX
+      #    disclose: after_interest                     # optional; else the product's
+
+    audience:
+      suited_for: [TODO(fill-in) who it is for]
+      not_for: [TODO(fill-in) who it is not for]
+      prerequisites: [TODO(fill-in) what the prospect needs beforehand]
+
+    value:
+      proposition: TODO(fill-in) the promise, in one line
+      benefits: [TODO(fill-in) benefit]
+      differentiators: [TODO(fill-in) what sets it apart]
+      proof_points:
+        - {text: TODO(fill-in) a claim the client can back up, verified: false}   # only verified: true is used
+
+    sales_arguments:               # `use_when`: fact key (a declared discovery field) -> values
+      - id: example-argument
+        text: TODO(fill-in) an argument
+        use_when: {example-field: [TODO(fill-in) value]}
+
+    objections:                    # this product's own; merged over the global ones, product wins
+      - code: example-objection
+        examples: [TODO(fill-in) how prospects phrase it]
+        response: TODO(fill-in) how to handle it, using only what the client has confirmed
+        max_rebuttals: 1
+        then: follow_up            # follow_up | handoff | drop
+
+    qualification:                 # rules over declared discovery fields (never a demographic)
+      fit:
+        - {id: example-fit, description: TODO(fill-in) what makes a prospect a good fit, fact: example-field}
+      disqualifiers:
+        - {id: example-disqualifier, description: TODO(fill-in) what rules the product out, fact: example-field, effect: not_a_fit}   # not_a_fit | handoff
+
+    discovery:                     # extra facts worth asking about, and a budget it may only tighten
+      extra_fields:
+        - key: product-specific-fact
+          label: TODO(fill-in) what only this product needs to know
+          importance: optional
+          changes: [qualification]
+      budget: {max_questions_per_conversation: 3}
+
+    strategy:
+      cta:
+        kind: request_info         # request_info | enrol_link (needs a url) | request_callback | notify_me
+        label: TODO(fill-in) button or call-to-action wording
+      angle: TODO(fill-in) the commercial angle to lead with
+
+    follow_up:                     # this product's cadence by situation; the market's, then the client's otherwise
+      situations:
+        no_response:
+          steps: [{after: P4D}]
+          then: park               # park | close | handoff
+
+    appointment:                   # how an appointment or callback works for this product
+      supported: false
+      kind: call                   # call | visit | demo
+      mode: callback               # callback | booking_url (needs booking_url) | human_scheduling
+      handled_by: human            # human | agent: who carries a scheduled callback out
+      min_notice_hours: 24
+
+    restrictions:                  # special rules: the product can only add to the global ones
+      do_not_claim: [TODO(fill-in) something never to promise]
+      do_not_discuss: [TODO(fill-in) a topic to leave to a person]
+      requires_human_for: [TODO(fill-in) a request only a person handles]
+      languages: []                # empty: offered in every supported language

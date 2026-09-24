@@ -10,6 +10,13 @@ opt_out_keywords: ["stop"]
 
 brain:
   factory: naga_brain.brain:create_brain
+  settings_version: 1
+  # Naga's Brain settings are Naga's own data: catalog, languages, markets, payment, workflow,
+  # cadence, tone. None of it is known yet, so none is written here. They are entered through the
+  # client-facing configuration interface (later) or published with
+  # `sales-agent config publish naga FILE`, and are validated against the consultative schema
+  # (`sales_brain_kit.ConsultativeSalesSpec`; see docs/brain-settings.md, docs/brain-commerce.md and
+  # the templates in docs/templates/). Naga cannot be enabled until they are valid.
   settings: {}
 
 sheets:

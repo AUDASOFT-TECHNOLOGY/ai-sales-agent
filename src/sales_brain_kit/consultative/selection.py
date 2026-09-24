@@ -19,6 +19,7 @@ from enum import StrEnum
 from sales_brain_kit.consultative.catalog import ProductCatalog
 from sales_brain_kit.consultative.interest import InterestLevel, ProductInterest
 from sales_brain_kit.settings.catalog import Presentation, Product
+from sales_brain_kit.settings.market import Market
 
 
 class SelectionBasis(StrEnum):
@@ -51,11 +52,12 @@ def select_products(
     *,
     language: str,
     presentation: Presentation,
+    market: Market | None = None,
 ) -> ProductSelection:
     excluded: dict[str, str] = {}
     offerable: dict[str, Product] = {}
     for product in catalog.products:
-        reason = catalog.exclusion(product, language)
+        reason = catalog.exclusion(product, language, market)
         if reason is None:
             offerable[product.id] = product
         else:

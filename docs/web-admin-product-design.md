@@ -203,7 +203,13 @@ KPIs and the report do **not** move ahead of `ConfigStore`.
    is not built until a task requires it.
 5. **Google Sheets quota and performance.** The scaling concern (full-tab reads, section 8 item 4)
    is acknowledged and deliberately **not solved now**. The MVP stays on Google Sheets.
-6. **Admin API process.** In its first version the Admin API runs in the same single process as
+6. **Configuration interfaces.** The Brain settings are one typed schema (`json_schema()`, with
+   templates in `docs/templates/` and `check_readiness` for what is still missing). The first interface
+   is **client-facing**: a client such as Naga enters its own catalog, languages, markets, payment,
+   conversion workflow and follow-up rules. The later **multi-client Admin** manages many clients through
+   the same schema and the same ConfigStore. Nothing in the schema is specific to one client (see
+   [brain-commerce.md](brain-commerce.md)).
+7. **Admin API process.** In its first version the Admin API runs in the same single process as
    `sales_app` and the webhooks. The code is organised so it can be split into its own process
    later: the Admin API shares no in-memory state with the webhook or scheduler other than
    through the registry, the ports and the stores, and it is mounted as its own router.

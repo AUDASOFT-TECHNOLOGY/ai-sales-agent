@@ -18,8 +18,9 @@ consultative sales Brain, is implemented too: see [brain-kit.md](brain-kit.md). 
 
 `sales_core` never imports the kit and knows no product, discovery or follow-up vocabulary (an
 architecture test enforces it). A Brain without a `SETTINGS_SPEC` keeps opaque settings exactly as
-before. The two client Brains are still scaffolds and declare none; the generic Brain is built from any
-valid settings with `sales_brain_kit.create_brain`.
+before. The Naga Brain declares the consultative spec unchanged (it adds no rules; see
+[naga-brain.md](naga-brain.md)); the Tounesimmo Brain is still a scaffold and declares none. The generic
+Brain is built from any valid settings with `sales_brain_kit.create_brain`.
 
 Another Brain family can bring its own schema through the same hook; a future Web Admin only calls
 `json_schema()` and renders forms.
@@ -47,7 +48,11 @@ a cautious default, so a client can start with a catalog and a tone.
 | `conversation` | answer-first, calls to action, objections, intents, media handling |
 | `follow_up` | cadence per situation, limits, stop conditions |
 | `incoming` | how the Brain behaves when a prospect writes first |
-| `handoff`, `adaptation`, `templates` | handoff triggers, adaptation inputs and packs, approved templates |
+| `handoff`, `adaptation`, `templates` | handoff (on or off, triggers, message), adaptation inputs and packs, approved templates |
+| `markets`, `payment`, `conversion` | markets by country, payment methods and exact instructions, conversion workflows and the default appointment (see [brain-commerce.md](brain-commerce.md)) |
+
+`communication` also holds `register_rules` and the language `priority`; a product's `pricing` may hold
+per-market or per-country `variants`, and a product may name its `workflow`.
 
 **Products** are dynamic data: `id` (immutable slug), `status` (`active`, `coming_soon`, `inactive`),
 name, summary, pricing (with a disclosure policy), audience, value, sales arguments, objections,
@@ -60,8 +65,9 @@ follow-up situations): merged by id, product wins. Restrictions: the product can
 budget: a product can only tighten. Conversation context selects among rules and never overrides
 them.
 
-**MVP scope decisions built in:** appointments are a callback carried out by a human
-(`appointment.handled_by` can only be `human`; there is no `book_call` call to action); evidence
+**Scope decisions built in:** an appointment is configured, not assumed: `appointment.mode` is a callback
+the agent schedules, a configured booking link, or a person arranging it, and `handled_by` says whether a
+person or the agent carries a scheduled callback out (there is no `book_call` call to action); evidence
 (the prospect's own words) is required for `critical` and `sensitive` discovery fields and optional
 for ordinary ones; nothing in the schema fixes how many LLM calls a reply uses.
 
@@ -142,9 +148,20 @@ one per product; the fact's status gives the level (confirmed, discovered = prob
 possible). The lead's source columns can give the same through `catalog.source_interest`. A
 requirement's `accept` is the weakest level that satisfies `interest`.
 
+## 7b. Commerce sections
+
+Markets, price variants, payment, register rules, the language priority, the handoff switch and the
+conversion workflows are described in [brain-commerce.md](brain-commerce.md), including how exact values
+(prices, payment details, links) reach the prospect without a model handling them. Their validation is
+in the same two passes: structure first, then references (every id, market, product, fact key, stage,
+step and payment method a rule names must exist; a country that drives a market must be a declared
+discovery field that forbids inference; a workflow step needs how it is known to be done; nothing hands
+over to a person when handoff is off; a step cannot require a fact that can never be learned).
+
 ## 8. Not implemented yet
 
 Fact extraction and recording by the Brain, rebuttal counting (`after_rebuttals`), provider
 templates (`templates`), `conversation.media_handling`, enforcement of the remaining `inbound`
 limits, the Admin API and Web Admin, ContactPolicy, and any real client content.
-`discovery.when_no_product.inbound` is superseded by `incoming.no_product` and is not read.
+`discovery.when_no_product.inbound` is superseded by `incoming.no_product` and is not read. Also not
+implemented: customer segments in pricing, and provider-confirmed payments (see brain-commerce.md).

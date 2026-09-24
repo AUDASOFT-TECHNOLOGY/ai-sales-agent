@@ -18,7 +18,8 @@ Business Brains (`brains/`) and client configuration (`clients/`).
 | `brains/` | Business Brains, one independent package per client |
 | `tests/` | Tests for the generic Core, including architecture rules |
 | `src/sales_brain_kit/` | Shared, client-agnostic Brain: settings schema and validation, and the generic consultative sales Brain |
-| `docs/` | Architecture, Brain contract and settings, Sheet schema, configuration and Web Admin design |
+| `brains/naga/` | The Naga Brain: a thin wiring package over the kit; its business data is Naga's own configuration, none shipped yet (`docs/naga-brain.md`) |
+| `docs/` | Architecture, Brain contract and settings, commerce (markets, payment, workflows), Sheet schema, configuration and Web Admin design |
 
 See [docs/architecture.md](docs/architecture.md) for the dependency rules.
 
@@ -57,5 +58,9 @@ Dashboard will share one KPI computation. Not built yet: see
 
 Status: planner, engine, application layer and the Google Sheets adapter are implemented and
 tested (Sheets against an in-memory stand-in and a mocked HTTP transport). The generic Brain Kit is
-implemented ([docs/brain-kit.md](docs/brain-kit.md)); the client Brains are not built yet. See
+implemented ([docs/brain-kit.md](docs/brain-kit.md)), with generic markets, language and register
+rules, prices per place, payment and conversion workflows ([docs/brain-commerce.md](docs/brain-commerce.md)).
+The Naga package is wiring only ([docs/naga-brain.md](docs/naga-brain.md)): its business data is not
+known yet and none is shipped;
+the Tounesimmo Brain is not built yet. See
 [docs/sheet-schema.md](docs/sheet-schema.md) for the spreadsheet layout.

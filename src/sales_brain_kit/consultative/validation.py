@@ -10,15 +10,26 @@ exactly when one is sent, fits the limits and is in the language the policy expe
 may be offered, and are presented as the plan requires; a question is asked only when discovery
 allows it and about something it proposed; configured rules (handoff, close, out-of-scope,
 disqualification) are followed; a hypothesis never disqualifies; and any follow-up has a valid time,
-computed from configuration.
+computed from configuration. Prices, payment details and links are exact values: the message may
+only carry their placeholders, which are checked and then replaced by the configured text (see
+`exact.py`), and the workflow's required decision (a handoff, a close, waiting) is enforced.
 """
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from sales_brain_kit.consultative.commerce import exact_values
 from sales_brain_kit.consultative.context import CommercialContext
 from sales_brain_kit.consultative.discovery import DiscoveryStatus
 from sales_brain_kit.consultative.errors import BrainOutputError
+from sales_brain_kit.consultative.exact import (
+    MAX_EXPANDED_CHARS,
+    configured_links,
+    expand,
+    find_placeholders,
+    unexpected_content,
+    without_placeholders,
+)
 from sales_brain_kit.consultative.follow_up import NextTouch
 from sales_brain_kit.consultative.history import count_questions
 from sales_brain_kit.consultative.language import match_language
@@ -48,6 +59,7 @@ class ValidatedOutput:
     handoff_briefing: str | None = None
     close_reason: str | None = None
     rationale: str = ""
+    exact_values: tuple[str, ...] = ()  # the placeholders that were replaced, for the audit trail
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -82,8 +94,11 @@ def validate_output(output: BrainOutput, context: CommercialContext) -> Validate
         wanted = ", ".join(sorted(d.value for d in required.decisions))
         problems.append(f"the configuration requires {wanted}: {required.reason}")
 
+    _check_person(decision, required, context, problems)
+
     language = context.language.expected(analysis.prospect_language, analysis.requested_language)
     message = _check_message(decision, output, language, context, problems)
+    final_message, replaced = _check_exact_values(decision, message, language, context, problems)
     selected, presented = _check_products(
         decision, output, analysis, disqualified, language, context, problems
     )
@@ -97,7 +112,7 @@ def validate_output(output: BrainOutput, context: CommercialContext) -> Validate
     return ValidatedOutput(
         decision_type=decision,
         analysis=analysis,
-        message=message,
+        message=final_message,
         language=language if message is not None else None,
         selected=selected,
         presented=presented,
@@ -109,6 +124,7 @@ def validate_output(output: BrainOutput, context: CommercialContext) -> Validate
         handoff_briefing=_clean(output.handoff_briefing),
         close_reason=_clean(output.close_reason),
         rationale=" ".join(output.rationale.split())[:MAX_RATIONALE_CHARS],
+        exact_values=replaced,
     )
 
 
@@ -235,7 +251,71 @@ def _required(
             decisions=frozenset({wanted}),
             reason=f"an out-of-scope message is met with {scope.reply}",
         )
+    state = context.plan.workflow
+    if state is not None and state.forced:
+        return _Required(
+            decisions=state.forced,
+            reason=state.forced_reason or "the conversion workflow requires it",
+        )
     return None
+
+
+def _check_person(
+    decision: DecisionType,
+    required: _Required | None,
+    context: CommercialContext,
+    problems: list[str],
+) -> None:
+    """A handoff the configuration does not ask for is refused at a step that involves no person."""
+    state = context.plan.workflow
+    if (
+        decision is DecisionType.HANDOFF_TO_HUMAN
+        and required is None
+        and state is not None
+        and state.current is not None
+        and state.human == "none"
+    ):
+        problems.append(
+            f"decision {decision}: step {state.current.id!r} of the workflow involves no person"
+        )
+
+
+def _check_exact_values(
+    decision: DecisionType,
+    text: str | None,
+    language: str,
+    context: CommercialContext,
+    problems: list[str],
+) -> tuple[str | None, tuple[str, ...]]:
+    """The message with every placeholder replaced by its exact configured text.
+
+    A placeholder that is not available now, a malformed one, and any link, amount with a currency
+    or account-like number the model wrote itself are refused; nothing is repaired.
+    """
+    if decision is not DecisionType.SEND_MESSAGE or text is None:
+        return text, ()
+    found = find_placeholders(text)
+    values = exact_values(context, language)
+    before = len(problems)
+    for placeholder in dict.fromkeys(found):
+        if placeholder not in values:
+            available = ", ".join(sorted(v.placeholder.token for v in values.values())) or "none"
+            problems.append(
+                f"exact values: {placeholder.token} is not available now (available: {available})"
+            )
+    for reason in unexpected_content(
+        without_placeholders(text), configured_links(context.settings)
+    ):
+        problems.append(f"exact values: {reason}")
+    if len(problems) > before:
+        return text, ()
+    expanded = expand(text, {p: values[p].value for p in found})
+    if len(expanded) > MAX_EXPANDED_CHARS:
+        problems.append(
+            f"exact values: the message is {len(expanded)} characters once they are inserted; "
+            f"the limit is {MAX_EXPANDED_CHARS}"
+        )
+    return expanded, tuple(dict.fromkeys(p.token for p in found))
 
 
 # ---- the message ------------------------------------------------------------------------------------

@@ -137,6 +137,7 @@ class TestTheJsonSchemaForForms:
         assert set(self.schema["properties"]) == {
             "business", "communication", "objectives", "stages", "catalog", "discovery",
             "conversation", "follow_up", "incoming", "handoff", "adaptation", "templates",
+            "markets", "payment", "conversion",
         }  # fmt: skip
         assert set(self.schema["required"]) == {"business", "communication"}
 

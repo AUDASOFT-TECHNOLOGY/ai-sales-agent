@@ -29,8 +29,10 @@ from sales_brain_kit.settings import ConsultativeSalesSettings
 from sales_brain_kit.settings.catalog import Product
 from sales_brain_kit.settings.discovery import DiscoveryField, Requirement
 
-# The order in which next steps are worked toward.
+# The order in which next steps are worked toward. `advance` is not configured under `sufficiency`:
+# it is what the current step of the conversion workflow still needs from the prospect.
 LADDER = ("recommend", "qualify", "propose_next_step")
+ADVANCE = "advance"
 _IMPORTANCE = {"critical": 0, "useful": 1, "optional": 2}
 MAX_TARGETS = 5
 
@@ -180,6 +182,7 @@ def plan_discovery(
     history: HistoryView,
     language: str,
     now: datetime,
+    advance_keys: Sequence[str] = (),
 ) -> DiscoveryPlan:
     focus = selection.focus
     if not selection.candidates:
@@ -187,7 +190,9 @@ def plan_discovery(
     fields = applicable_fields(settings, focus)
     statuses = evaluate_steps(settings, fields, facts, selection, now)
     strongest = selection.strongest
+    advance = tuple(key for key in advance_keys if key in fields)
 
+    shortcut_reason = None
     for shortcut in settings.discovery.shortcuts:
         wanted = shortcut.when.interest
         if (
@@ -196,9 +201,15 @@ def plan_discovery(
             and strongest.at_least(InterestLevel(wanted))
             and shortcut.do in ("propose_next_step", "recommend_now")
         ):
-            return not_needed(f"shortcut: interest is {strongest} ({shortcut.do})")
+            shortcut_reason = f"shortcut: interest is {strongest} ({shortcut.do})"
+            break
+    if shortcut_reason is not None:
+        # The shortcut skips the ladder, not what the conversion workflow still needs to know.
+        statuses = {}
+        if not advance:
+            return not_needed(shortcut_reason)
 
-    aim, keys = _first_gap(statuses, fields)
+    aim, keys = _first_gap(statuses, fields, advance)
     if aim is None:
         return not_needed("enough is known for the next step")
 
@@ -227,7 +238,9 @@ def plan_discovery(
 
 
 def _first_gap(
-    statuses: Mapping[str, StepStatus], fields: Mapping[str, DiscoveryField]
+    statuses: Mapping[str, StepStatus],
+    fields: Mapping[str, DiscoveryField],
+    advance: Sequence[str] = (),
 ) -> tuple[str | None, list[str]]:
     """The first next step that lacks something worth asking for, and what would fill the gap."""
     for step in LADDER:
@@ -244,6 +257,8 @@ def _first_gap(
             keys = [key for key in keys if key != INTEREST_KEY]
         if keys:
             return step, keys
+    if advance:
+        return ADVANCE, list(advance)
     return None, []
 
 

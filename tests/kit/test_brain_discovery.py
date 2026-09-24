@@ -245,6 +245,8 @@ class TestNotAQuestionnaire:
     def test_no_questions_at_all_when_the_budget_is_zero(self):
         doc = set_at(settings_doc(), "communication.message.max_questions", 0)
         doc = set_at(doc, "discovery.budget.max_questions_per_message", 0)
+        # With no question allowed a requirement is only valid if the lead data can supply it.
+        doc = set_at(doc, "discovery.fields.0.source_columns", ["Goal"])
         assert plan(doc).status is DiscoveryStatus.BLOCKED
 
     def test_a_prospect_who_asks_for_a_price_is_answered_not_questioned(self):

@@ -14,6 +14,8 @@ from sales_brain_kit.consultative.follow_up import FollowUpPolicy
 from sales_brain_kit.consultative.history import HistoryView, view_history
 from sales_brain_kit.consultative.interest import derive_interests
 from sales_brain_kit.consultative.language import LanguagePolicy, resolve_language
+from sales_brain_kit.consultative.market import MarketContext, resolve_market
+from sales_brain_kit.consultative.register import Register, resolve_register
 from sales_brain_kit.consultative.selection import ProductSelection, select_products
 from sales_brain_kit.consultative.strategy import ConversationPlan, plan_conversation
 from sales_brain_kit.settings import ConsultativeSalesSettings
@@ -27,7 +29,9 @@ class CommercialContext:
     settings: ConsultativeSalesSettings
     catalog: ProductCatalog
     facts: KnownFacts
+    market: MarketContext
     language: LanguagePolicy
+    register: Register
     history: HistoryView
     selection: ProductSelection
     follow_up: FollowUpPolicy
@@ -59,7 +63,9 @@ def build_context(request: BrainRequest, settings: ConsultativeSalesSettings) ->
         min_hypothesis_confidence=hypotheses.min_confidence_to_use,
         no_hypothesis_for=frozenset(f.key for f in fields if not f.infer.allowed),
     )
-    language = resolve_language(facts, prospect.locale, settings.communication.languages)
+    market = resolve_market(facts, settings.markets)
+    language = resolve_language(facts, prospect.locale, settings.communication.languages, market)
+    register = resolve_register(settings.communication, language=language.language, market=market)
     interests = derive_interests(
         catalog,
         request.facts,
@@ -71,9 +77,10 @@ def build_context(request: BrainRequest, settings: ConsultativeSalesSettings) ->
         interests,
         language=language.language,
         presentation=settings.catalog.presentation,
+        market=market.market,
     )
     history = view_history(request.conversation)
-    follow_up = FollowUpPolicy(settings.follow_up)
+    follow_up = FollowUpPolicy(settings.follow_up, market.market)
     plan = plan_conversation(
         settings,
         request=request,
@@ -82,13 +89,16 @@ def build_context(request: BrainRequest, settings: ConsultativeSalesSettings) ->
         selection=selection,
         language=language.language,
         follow_up=follow_up,
+        market=market,
     )
     return CommercialContext(
         request=request,
         settings=settings,
         catalog=catalog,
         facts=facts,
+        market=market,
         language=language,
+        register=register,
         history=history,
         selection=selection,
         follow_up=follow_up,

@@ -12,8 +12,8 @@ sales_app ──► sales_core ◄── sales_integrations
 - `sales_core` imports nothing from `sales_integrations`, `sales_app` or any brain.
   It defines contracts (data models) and ports (interfaces).
 - `sales_integrations` implements Core ports. It knows nothing about clients or brains.
-- Brains import only `sales_core` (contracts and port types). They contain no vendor code;
-  the Core injects the `LLMProvider`.
+- Brains import only `sales_core` (contracts and port types), and may import `sales_brain_kit`. They contain no vendor code;
+  the Core injects the `LLMProvider`. The Naga Brain is such a package ([naga-brain.md](naga-brain.md)).
 - `sales_app` is the composition root, the only place where everything is wired together.
 - Brains never import each other.
 - `sales_brain_kit` is the shared, client-agnostic building block for Brains: the settings schema
@@ -21,7 +21,9 @@ sales_app ──► sales_core ◄── sales_integrations
   them (`sales_brain_kit/consultative`, see [brain-kit.md](brain-kit.md)). It imports only
   `sales_core` (contracts and ports only, for its runtime) and pydantic, knows no client, and is never imported by `sales_core`, `sales_integrations` or
   `sales_app` (which finds a Brain's `SETTINGS_SPEC` with `importlib`). Brains may import it.
-  See [brain-settings.md](brain-settings.md).
+  See [brain-settings.md](brain-settings.md). Markets, prices per place, payment and conversion
+  workflows are generic capabilities of the kit driven by client configuration
+  ([brain-commerce.md](brain-commerce.md)); the Core is unchanged by them.
 
 `tests/architecture/` enforces these rules.
 

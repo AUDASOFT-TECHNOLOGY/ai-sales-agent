@@ -1,7 +1,8 @@
 """Language tags, localised texts and which language a message is written in.
 
 Nothing here names a language. The language comes from what is known about the prospect and from
-the client's own configuration, never from where the prospect lives.
+the client's own configuration, in the order the client configured; where the prospect lives matters
+only through a market rule the client wrote for a country that is known from a trusted source.
 """
 
 from collections.abc import Iterable, Mapping
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from sales_brain_kit.consultative.facts import LANGUAGE_KEY, KnownFacts
+from sales_brain_kit.consultative.market import MarketContext
 from sales_brain_kit.settings.strategy import LanguageSettings
 from sales_core.contracts import FactSource, FactStatus
 
@@ -43,7 +45,8 @@ def localize(
 class LanguageBasis(StrEnum):
     EXPLICIT_PREFERENCE = "explicit_preference"  # a confirmed statement of the prospect
     CONVERSATION = "conversation"  # learned from the exchange
-    PROSPECT_DATA = "prospect_data"  # the locale the client holds for the prospect
+    PROSPECT_DATA = "prospect_data"  # the language or locale the client holds for the prospect
+    MARKET = "market"  # the language rule of the prospect's market
     CLIENT_DEFAULT = "client_default"  # the safe default of the configuration
 
 
@@ -56,6 +59,7 @@ class LanguagePolicy:
     locked: bool  # an explicit preference: the prospect's writing language does not override it
     mirror: bool  # may follow the language the prospect writes in
     supported: tuple[str, ...]
+    allowed: tuple[str, ...] = ()  # what mirroring may pick from (the market's, else `supported`)
 
     def expected(self, written: str | None = None, requested: str | None = None) -> str:
         """The language of the reply once the latest message is known.
@@ -69,48 +73,87 @@ class LanguagePolicy:
             return asked
         if self.locked or not self.mirror:
             return self.language
-        return match_language(written, self.supported) or self.language
+        return match_language(written, self.allowed or self.supported) or self.language
 
 
 def resolve_language(
-    facts: KnownFacts, locale: str | None, languages: LanguageSettings
+    facts: KnownFacts,
+    locale: str | None,
+    languages: LanguageSettings,
+    market: MarketContext | None = None,
 ) -> LanguagePolicy:
-    """Explicit preference, then conversation evidence, then the prospect's locale, then default."""
+    """Pick the language from the signals the client configured, in the order it configured.
+
+    The signals are an explicit preference the prospect confirmed, what the conversation showed,
+    what the client holds for the prospect (a language fact or locale), the language rule of the
+    prospect's market, and the client's default. The first signal that yields a supported language
+    wins, so conflicting signals are settled by the configured priority and never by chance. A
+    market only narrows what may be picked from, except that an explicit request always stands.
+    """
     supported = tuple(languages.supported)
     mirror = languages.mirror_prospect_language
+    in_market = market.market.languages if market is not None and market.market else None
+    pool = (
+        tuple(
+            language
+            for language in supported
+            if in_market is None or not in_market.allowed or language in in_market.allowed
+        )
+        or supported
+    )
 
     known = facts.settled(LANGUAGE_KEY)
-    fact_language = match_language(known.value, supported) if known else None
-    if known is not None and fact_language is not None:
-        if known.status is FactStatus.CONFIRMED:
+
+    def from_fact(*, conversation: bool) -> str | None:
+        if known is None or known.status is FactStatus.CONFIRMED:
+            return None
+        if (known.source is FactSource.CONVERSATION) is not conversation:
+            return None
+        return match_language(known.value, pool)
+
+    def signal(name: str) -> tuple[str, LanguageBasis] | None:
+        match name:
+            case "explicit_preference":
+                chosen = (
+                    match_language(known.value, supported)
+                    if known is not None and known.status is FactStatus.CONFIRMED
+                    else None
+                )
+                return (chosen, LanguageBasis.EXPLICIT_PREFERENCE) if chosen else None
+            case "conversation":
+                chosen = from_fact(conversation=True)
+                return (chosen, LanguageBasis.CONVERSATION) if chosen else None
+            case "profile":
+                chosen = from_fact(conversation=False) or match_language(locale, pool)
+                return (chosen, LanguageBasis.PROSPECT_DATA) if chosen else None
+            case "market":
+                chosen = (
+                    match_language(in_market.default, pool)
+                    if in_market and in_market.default
+                    else None
+                )
+                return (chosen, LanguageBasis.MARKET) if chosen else None
+            case _:
+                return None
+
+    for name in languages.priority:
+        found = signal(name)
+        if found is not None:
+            language, basis = found
+            locked = basis is LanguageBasis.EXPLICIT_PREFERENCE
             return LanguagePolicy(
-                language=fact_language,
-                basis=LanguageBasis.EXPLICIT_PREFERENCE,
-                locked=True,
-                mirror=False,
+                language=language,
+                basis=basis,
+                locked=locked,
+                mirror=mirror and not locked,
                 supported=supported,
+                allowed=pool,
             )
-        basis = (
-            LanguageBasis.CONVERSATION
-            if known.source is FactSource.CONVERSATION
-            else LanguageBasis.PROSPECT_DATA
-        )
-        return LanguagePolicy(
-            language=fact_language, basis=basis, locked=False, mirror=mirror, supported=supported
-        )
-    from_locale = match_language(locale, supported)
-    if from_locale is not None:
-        return LanguagePolicy(
-            language=from_locale,
-            basis=LanguageBasis.PROSPECT_DATA,
-            locked=False,
-            mirror=mirror,
-            supported=supported,
-        )
     return LanguagePolicy(
         language=languages.default,
         basis=LanguageBasis.CLIENT_DEFAULT,
         locked=False,
         mirror=mirror,
         supported=supported,
+        allowed=pool,
     )

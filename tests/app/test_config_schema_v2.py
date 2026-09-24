@@ -81,9 +81,11 @@ class TestFindingASpec:
         assert lookup.spec is None and not lookup.import_failed
         assert "does not implement BrainSettingsSpec" in lookup.error
 
-    def test_the_shipped_brain_packages_declare_nothing_yet(self):
-        # The two client Brains are still scaffolds: no spec, so their settings stay opaque.
-        assert find_settings_spec("naga_brain.brain:create_brain").spec is None
+    def test_only_the_brains_that_are_built_declare_settings_rules(self):
+        # Naga's Brain is built and declares the consultative spec; Tounesimmo is still a scaffold
+        # whose settings stay opaque.
+        naga = find_settings_spec("naga_brain.brain:create_brain")
+        assert naga.error is None and naga.spec.family == "consultative_sales"
         assert find_settings_spec("tounesimmo_brain.brain:create_brain").spec is None
 
 
@@ -555,3 +557,41 @@ class TestTheCommandLine:
         capsys.readouterr()
         assert cli.main(["validate"]) == cli.EXIT_OK
         assert "[config v1]" in capsys.readouterr().out
+
+
+class TestCommerceSettingsThroughThePublishingPath:
+    """Slice 6b: markets, prices, payment and workflows are ordinary Brain settings for the
+    ConfigStore: validated by the Brain's spec, stored normalised, exact values untouched."""
+
+    def test_a_commerce_document_is_accepted_and_stored_with_its_exact_values(self):
+        from commerce_support import ACCOUNT_NUMBER, PAY_URL, commerce_doc
+
+        result = check(document(commerce_doc()))
+        assert result.errors == ()
+        stored = result.document["brain"]["settings"]
+        methods = {m["id"]: m for m in stored["payment"]["methods"]}
+        assert methods["bank-transfer"]["instructions"][0]["fields"][1]["value"] == ACCOUNT_NUMBER
+        assert methods["online-card"]["instructions"][0]["url"] == PAY_URL
+        assert json.dumps(stored)  # plain JSON, as the store keeps it
+
+    def test_no_secret_lint_is_tripped_by_payment_data(self):
+        from commerce_support import commerce_doc
+
+        assert check(document(commerce_doc())).errors == ()
+
+    def test_a_broken_payment_configuration_is_reported_with_its_path(self):
+        from commerce_support import commerce_doc
+
+        broken = commerce_doc()
+        broken["payment"]["methods"][0]["instructions"][0].pop("url")
+        result = check(document(broken))
+        assert result.document is None
+        assert any("brain.settings.payment.methods.0" in e and "'url'" in e for e in result.errors)
+
+    def test_a_broken_workflow_is_reported_with_its_path(self):
+        from commerce_support import commerce_doc
+
+        broken = commerce_doc()
+        broken["conversion"]["workflows"][0]["steps"][2]["next"] = "register"
+        result = check(document(broken))
+        assert any("conversion.workflows[0].steps" in e and "loop back" in e for e in result.errors)

@@ -9,8 +9,11 @@ from pydantic import Field, model_validator
 
 from sales_brain_kit.settings.catalog import CatalogSettings
 from sales_brain_kit.settings.common import Model
+from sales_brain_kit.settings.conversion import ConversionSettings
 from sales_brain_kit.settings.discovery import DiscoverySettings
 from sales_brain_kit.settings.followup import FollowUpSettings
+from sales_brain_kit.settings.market import MarketSettings
+from sales_brain_kit.settings.payment import PaymentSettings
 from sales_brain_kit.settings.references import check_references
 from sales_brain_kit.settings.strategy import (
     AdaptationSettings,
@@ -31,6 +34,9 @@ class ConsultativeSalesSettings(Model):
     objectives: Objectives = Field(default_factory=Objectives)
     stages: tuple[Stage, ...] = Field(default=(), max_length=20)
     catalog: CatalogSettings = Field(default_factory=CatalogSettings)
+    markets: MarketSettings = Field(default_factory=MarketSettings)
+    payment: PaymentSettings = Field(default_factory=PaymentSettings)
+    conversion: ConversionSettings = Field(default_factory=ConversionSettings)
     discovery: DiscoverySettings = Field(default_factory=DiscoverySettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
     follow_up: FollowUpSettings = Field(default_factory=FollowUpSettings)

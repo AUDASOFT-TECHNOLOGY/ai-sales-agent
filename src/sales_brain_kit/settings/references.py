@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from sales_brain_kit.settings.common import Localized, duration_seconds
 from sales_brain_kit.settings.followup import MIN_GAP_FLOOR_SECONDS, Situation
+from sales_brain_kit.settings.references_commerce import check_commerce
 from sales_brain_kit.settings.strategy import (
     BUILTIN_ADAPTATION_INPUTS,
     PRACTICAL_ONLY_KEYS,
@@ -46,6 +47,7 @@ def check_references(settings: Any) -> list[str]:
     _check_adaptation(problems, settings, field_keys)
     _check_budgets(problems, settings)
     _check_follow_up(problems, settings)
+    check_commerce(problems, settings, field_keys)
     return problems
 
 
@@ -274,6 +276,11 @@ def _check_follow_up(problems: list[str], settings: Any) -> None:
         if product.follow_up is not None:
             situations.append(
                 (f"catalog.products[{p}].follow_up.situations", product.follow_up.situations)
+            )
+    for m, market in enumerate(settings.markets.markets):
+        if market.follow_up is not None:
+            situations.append(
+                (f"markets.markets[{m}].follow_up.situations", market.follow_up.situations)
             )
     for base, table in situations:
         for name, situation in table.items():

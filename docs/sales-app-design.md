@@ -280,5 +280,5 @@ Set it to 1440 to plan once a day.
 
 **Still pending:**
 - `validate --online` (checking the real sheet with `GoogleSheetsRepository.verify()`).
-- The scaffold Brains do not yet expose the `create_brain` factory named in their disabled client
-  files.
+- The Tounesimmo scaffold Brain does not yet expose the `create_brain` factory named in its disabled
+  client file (Naga's does).

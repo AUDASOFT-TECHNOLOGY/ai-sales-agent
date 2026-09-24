@@ -12,6 +12,7 @@ from sales_brain_kit.consultative import (
     ConsultativeSalesBrain,
     create_brain,
 )
+from sales_brain_kit.readiness import ReadinessReport, check_readiness
 from sales_brain_kit.settings import ConsultativeSalesSettings
 from sales_brain_kit.spec import (
     FAMILY,
@@ -28,7 +29,9 @@ __all__ = [
     "ConsultativeSalesBrain",
     "ConsultativeSalesSettings",
     "ConsultativeSalesSpec",
+    "ReadinessReport",
     "SettingsInvalidError",
+    "check_readiness",
     "create_brain",
     "parse_settings",
 ]

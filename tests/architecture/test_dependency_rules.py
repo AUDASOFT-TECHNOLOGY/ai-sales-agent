@@ -429,11 +429,141 @@ def test_the_brain_runtime_never_sends_or_writes_anything():
 def test_the_brain_runtime_has_one_way_dependencies():
     """Foundations (facts, language, catalog, history) never import the layers above them."""
     order = [
-        "errors", "facts", "language", "catalog", "history", "interest", "selection",
-        "discovery", "follow_up", "strategy", "context", "output", "prompt", "validation",
-        "decision", "brain",
+        "errors", "facts", "applicability", "market", "language", "register", "catalog", "history",
+        "interest", "selection", "pricing", "payment", "discovery", "follow_up", "workflow",
+        "exact", "strategy", "context", "commerce", "output", "prompt", "validation", "decision",
+        "brain",
     ]  # fmt: skip
     for index, name in enumerate(order):
         later = {f"sales_brain_kit.consultative.{other}" for other in order[index + 1 :]}
         imported = _imported_modules_of_file(RUNTIME / f"{name}.py")
         assert not imported & later, f"{name} imports a module above it: {sorted(imported & later)}"
+
+
+# ---- the Naga Brain is a thin package over the kit ---------------------------------------------------
+
+NAGA = BRAINS / "naga" / "naga_brain"
+
+
+def test_the_naga_brain_depends_only_on_the_core_and_the_kit():
+    allowed = set(sys.stdlib_module_names) | {"naga_brain", "sales_core", "sales_brain_kit"}
+    assert _imported_top_levels(NAGA) <= allowed
+
+
+def test_the_naga_brain_reaches_the_core_only_through_contracts_and_ports():
+    for module in _imported_modules(NAGA):
+        if module.startswith("sales_core"):
+            assert module in {"sales_core.contracts", "sales_core.ports"}, module
+
+
+def test_the_naga_brain_adds_no_second_brain_interface_and_no_effects():
+    names = _defined_and_used_names(NAGA)
+    for forbidden in ("MessagingChannel", "SalesRepository", "FactsWriter", "send", "Engine"):
+        assert forbidden not in names, forbidden
+    assert not _imported_top_levels(NAGA) & {"threading", "asyncio", "sqlite3", "socket", "os"}
+
+
+def test_the_kit_never_depends_on_the_naga_brain_or_any_other_client_brain():
+    assert not _imported_top_levels(KIT) & set(_brain_packages())
+
+
+# ---- Slice 6b: payment, markets and workflows are generic capabilities -----------------------------
+
+# Places, currencies and business names that belong to a client's configuration, never to code.
+GEOGRAPHY_AND_CLIENT_WORDS = (
+    r"naga", r"tounesimmo", r"tunisia", r"tunisie", r"tunisian", r"algeria", r"algerie",
+    r"algerian", r"maghreb", r"\btunis\b", r"\balger\b", r"\bdinars?\b", r"\btnd\b", r"\bdzd\b",
+)  # fmt: skip
+
+
+def _string_constants(package_dir: Path) -> list[tuple[str, str]]:
+    """(file, text) of every string literal that is code rather than a docstring."""
+    found: list[tuple[str, str]] = []
+    for py in package_dir.rglob("*.py"):
+        tree = ast.parse(py.read_text(encoding="utf-8"))
+        docstrings = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(getattr(node.body[0], "value", None), ast.Constant)
+        }
+        found += [
+            (py.relative_to(ROOT).as_posix(), node.value)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+        ]
+    return found
+
+
+def test_no_client_name_market_geography_or_currency_of_a_client_is_in_generic_source():
+    import re
+
+    generic = [SRC / "sales_core", SRC / "sales_brain_kit", SRC / "sales_integrations"]
+    generic += [SRC / "sales_app" / name for name in ("wiring", "api", "config_store")]
+    pattern = re.compile("|".join(GEOGRAPHY_AND_CLIENT_WORDS), re.IGNORECASE)
+    for package in generic:
+        for py in package.rglob("*.py"):
+            text = py.read_text(encoding="utf-8")
+            match = pattern.search(text)
+            assert match is None, f"{match.group(0)!r} appears in {py.relative_to(ROOT)}"
+
+
+def test_no_generic_code_branches_on_who_the_client_or_the_product_is():
+    """Nothing compares a client id, a display name, a product id or a country with a literal."""
+    watched = {"client_id", "display_name", "product_id", "country", "market_id"}
+    offenders = []
+    for py in SRC.rglob("*.py"):
+        for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Compare):
+                continue
+            sides = [node.left, *node.comparators]
+            names = {
+                side.id if isinstance(side, ast.Name) else side.attr
+                for side in sides
+                if isinstance(side, ast.Name | ast.Attribute)
+            }
+            literal = any(isinstance(s, ast.Constant) and isinstance(s.value, str) for s in sides)
+            if literal and names & watched:
+                offenders.append(f"{py.relative_to(ROOT)}:{node.lineno}")
+    assert not offenders, offenders
+
+
+def test_the_core_knows_nothing_of_payment_markets_prices_or_workflows():
+    """The exact-value and workflow machinery lives in the Brain kit; the Core's contracts and
+    engine are unchanged and carry none of its vocabulary."""
+    offenders = {
+        name
+        for name in _defined_and_used_names(SRC / "sales_core")
+        if any(word in name.lower() for word in ("payment", "market", "workflow", "iban", "price"))
+    }
+    assert not offenders, f"sales_core names commerce concepts: {sorted(offenders)}"
+
+
+def test_no_account_number_link_or_payment_detail_is_written_in_source():
+    import re
+
+    iban_like = re.compile(r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){3,}\b")
+    long_digits = re.compile(r"\d{9,}")
+    link = re.compile(r"https?://[A-Za-z0-9-]+\.")  # a real address, not the pattern of one
+    for package in (SRC / "sales_core", SRC / "sales_brain_kit", BRAINS):
+        for path, text in _string_constants(package):
+            assert not iban_like.search(text) and not long_digits.search(text), path
+            assert not link.search(text), f"a link is written in {path}"
+
+
+def test_the_exact_value_mechanism_is_pure_and_reaches_no_storage_or_network():
+    forbidden = {"httpx", "requests", "socket", "sqlite3", "os", "subprocess", "threading"}
+    for name in ("exact", "payment", "pricing", "commerce", "workflow", "market", "applicability"):
+        assert not _imported_top_levels_of_file(RUNTIME / f"{name}.py") & forbidden, name
+
+
+def test_the_settings_schema_imports_only_pydantic_and_itself():
+    allowed = set(sys.stdlib_module_names) | {"pydantic", "sales_brain_kit"}
+    assert _imported_top_levels(KIT / "settings") <= allowed
+    for module in _imported_modules(KIT / "settings"):
+        if module.startswith("sales_brain_kit"):
+            assert module.startswith("sales_brain_kit.settings"), module
