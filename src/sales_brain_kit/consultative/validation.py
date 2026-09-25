@@ -33,9 +33,10 @@ from sales_brain_kit.consultative.exact import (
 from sales_brain_kit.consultative.follow_up import NextTouch
 from sales_brain_kit.consultative.history import count_questions
 from sales_brain_kit.consultative.language import match_language
+from sales_brain_kit.consultative.learning import check_learned
 from sales_brain_kit.consultative.output import STOP_SIGNALS, Analysis, BrainOutput
 from sales_brain_kit.settings.catalog import Disqualifier, Objection, Product
-from sales_core.contracts import DecisionType, PaymentProgress, payment_progress
+from sales_core.contracts import DecisionType, FactProposal, PaymentProgress, payment_progress
 
 MAX_REQUESTED_HORIZON = timedelta(days=366)
 MAX_RATIONALE_CHARS = 300
@@ -58,6 +59,9 @@ class ValidatedOutput:
     handoff_reason: str | None = None
     handoff_briefing: str | None = None
     close_reason: str | None = None
+    fact_proposals: tuple[
+        FactProposal, ...
+    ] = ()  # what the model learned, as proposals to the Core
     rationale: str = ""
     exact_values: tuple[str, ...] = ()  # the placeholders that were replaced, for the audit trail
 
@@ -107,6 +111,7 @@ def validate_output(output: BrainOutput, context: CommercialContext) -> Validate
     touch = _check_follow_up(decision, output, selected, required, context, problems)
     _check_reasons(decision, output, context, problems)
     _check_payment(decision, output, analysis, context, problems)
+    fact_proposals = check_learned(output, context, problems)
 
     if problems:
         raise BrainOutputError(problems)
@@ -124,6 +129,7 @@ def validate_output(output: BrainOutput, context: CommercialContext) -> Validate
         handoff_reason=_clean(output.handoff_reason),
         handoff_briefing=_clean(output.handoff_briefing),
         close_reason=_clean(output.close_reason),
+        fact_proposals=fact_proposals,
         rationale=" ".join(output.rationale.split())[:MAX_RATIONALE_CHARS],
         exact_values=replaced,
     )

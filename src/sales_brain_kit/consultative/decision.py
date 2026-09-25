@@ -42,7 +42,7 @@ def build_decision(validated: ValidatedOutput, context: CommercialContext) -> Br
         new_stage=validated.stage,
         rationale=validated.rationale or f"{context.plan.objective}: {validated.decision_type}",
         metadata=_metadata(validated, context),
-        proposed_facts=_payment_proposals(validated, context),
+        proposed_facts=(*validated.fact_proposals, *_payment_proposals(validated, context)),
     )
 
 
@@ -144,6 +144,7 @@ def _metadata(validated: ValidatedOutput, context: CommercialContext) -> dict[st
         "handoff_briefing": validated.handoff_briefing,
         "close_reason": validated.close_reason,
         "exact_values": ",".join(validated.exact_values) or None,
+        "learned_facts": ",".join(dict.fromkeys(p.key for p in validated.fact_proposals)) or None,
     }
     if validated.decision_type is DecisionType.HANDOFF_TO_HUMAN:
         details["handoff_message"] = _handoff_message(context)

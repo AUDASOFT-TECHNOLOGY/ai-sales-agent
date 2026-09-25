@@ -90,9 +90,48 @@ lead's source columns (`discovery.fields[].source_columns`) count as *discovered
 shown facts that are declared discovery fields (plus `language`), and never a protected attribute
 unless a qualification rule of a product in focus needs it.
 
-Nothing here promotes a status. The Core now accepts facts a Brain proposes
-(`BrainDecision.proposed_facts`, see [core-facts-and-payments.md](core-facts-and-payments.md)); the kit's
-output schema does not emit proposals yet, so extraction from the conversation is a later kit slice.
+Nothing here promotes a status. What the Brain learns goes back to the Core as proposals (section 3b).
+
+### 3b. Learning facts from the conversation
+
+Fact extraction is not strategy. The model *reports* what the prospect's messages contain
+(`learned_facts`: `key`, `value`, `basis`, `excerpt`, `confidence`); the code decides everything
+else, in `consultative/learning.py`, and the Core validates the result again and is the only one that
+records (the Brain holds no writer):
+
+```
+model report -> learning.py (FactProposal) -> BrainDecision.proposed_facts
+  -> Core review_proposals -> FactsWriter -> stored Fact
+```
+
+| basis (the model's only choice) | source | status | needs |
+|---|---|---|---|
+| `stated`: they said it plainly | `prospect` | `confirmed` | exact words (`excerpt`) |
+| `implied`: it follows from their words | `conversation` | `discovered` | exact words |
+| `guess`: the model's own inference | `brain_inference` | `hypothesis` | a confidence, a field that allows guessing |
+
+- **Keys** are the client's declared discovery fields, plus `interest` (its value must name a catalog
+  product and is stored by id). Never a `core_*` key, never `payment_claimed`/`payment_proof_received`
+  (those come from `analysis.payment_claimed` and an inbound receipt, see section 10b). The response
+  schema lists only these keys; validation refuses any other and tells the model why.
+- **Anchoring.** Only a reply learns: the words must appear verbatim (case and spacing aside) in a
+  message the prospect wrote since our last one, and the proposal is anchored to that message. A
+  guess is anchored to the latest one. A report whose words are missing or not in the messages is
+  refused, so the model must correct it.
+- **No invention.** An empty `learned_facts` is normal. "I am interested" yields nothing: no
+  product, budget, country or urgency is proposed without the prospect's words (and `interest`
+  without a resolvable product is refused).
+- **Guesses** are never confirmed or discovered, are refused on sensitive or protected fields and
+  where `infer.allowed` is false, and are dropped (not an error) below
+  `discovery.hypotheses.min_confidence_to_use`. A guess never competes with a settled fact.
+- **No duplicates.** A proposal is skipped when the same value is already recorded (or in the
+  lead's data) with at least the same firmness. A firmer statement (the prospect confirms a
+  discovered value) is new evidence and is proposed. At most 10 reports per answer (the Core allows
+  20 proposals per decision, payment facts included).
+
+Limitation: the code checks the words are the prospect's and that the key and provenance are
+allowed, but not that the value *means* what the words mean (except `interest`, matched against the
+catalog). The evidence is stored with the fact so a person can check it.
 
 ## 4. Product catalog and product interest
 
@@ -236,12 +275,9 @@ objective `advance_workflow`. See [brain-commerce.md](brain-commerce.md).
 
 ## 11. Known limitations
 
-- The kit does not propose facts yet: the Core accepts them (`BrainDecision.proposed_facts`) but the
-  model's output schema carries none, so workflow steps that depend on what the agent collected
-  (registration data, a payment proof) rely on facts recorded by staff or another system until the
-  kit emits proposals. Payment is the exception: the kit proposes `payment_claimed` and
-  `payment_proof_received` (discovered), and only a person's confirmation in the client's CRM records
-  `core_payment_confirmed`.
+- Learned facts are only proposed on a reply, from the messages the prospect sent since our last
+  one (see section 3b). Whether the value matches the quoted words is not verified, except for
+  `interest`. `language` is not a learnable key (it is read from `analysis`).
 - Rebuttals are not counted (`max_rebuttals > 0` and `handoff.triggers[].after_rebuttals` are
   guidance only); only the no-rebuttal handoff is enforced.
 - Approved provider templates (`templates`) are not selected; the Brain always writes free text.

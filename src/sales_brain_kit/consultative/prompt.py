@@ -16,10 +16,12 @@ from typing import Any
 
 from sales_brain_kit.consultative.commerce import ExactValue, exact_values, price_of
 from sales_brain_kit.consultative.context import CommercialContext
+from sales_brain_kit.consultative.discovery import learnable_fields
 from sales_brain_kit.consultative.exact import Placeholder
 from sales_brain_kit.consultative.facts import LANGUAGE_KEY, KnownFact
 from sales_brain_kit.consultative.interest import InterestLevel
 from sales_brain_kit.consultative.language import localize
+from sales_brain_kit.consultative.learning import prospect_messages
 from sales_brain_kit.consultative.output import response_schema
 from sales_brain_kit.consultative.pricing import PriceStatus
 from sales_brain_kit.consultative.strategy import Objective
@@ -147,6 +149,17 @@ _RULES = (
         "confirming anything. Offer only the payment methods listed in workflow.payment_methods: if none is "
         "listed, no payment method is available now."
     ),
+    (
+        "13. Learning. In 'learned_facts' report only what the prospect's own messages since our "
+        "last message really tell you about a key in learnable_facts; an empty list is normal and "
+        "usually right. Never fill a key to be helpful, never report what the facts already say, "
+        "and never report a payment here (use analysis.payment_claimed). basis 'stated': they said "
+        "it plainly; 'implied': it follows directly from their words; 'guess': your own inference "
+        "(give a confidence, only where may_guess is true; it is never told to anyone). For "
+        "'stated' and 'implied', excerpt is their exact words, copied. For 'interest' the value is "
+        "the id of a catalog product they showed interest in: being interested, without saying in "
+        "what, tells you nothing about which. You only report: the system decides what is recorded."
+    ),
 )
 _DECISIONS = (
     "Decisions: send_message (message + language), schedule_follow_up (nothing now, come back "
@@ -238,6 +251,7 @@ def build_payload(context: CommercialContext) -> dict[str, Any]:
             "workflow": _workflow(context),
             "exact_values": _exact_values(context),
             "discovery": _discovery(context),
+            "learnable_facts": _learnable(context),
             "conversation_rules": _conversation_rules(context),
             "inbound": _inbound(context),
             "follow_up": _follow_up(context),
@@ -594,6 +608,23 @@ def _discovery(context: CommercialContext) -> dict[str, Any]:
         "stop_signals": list(context.settings.discovery.stop_signals),
         "when_no_product_in_focus": context.plan.no_product_mode,
     }
+
+
+def _learnable(context: CommercialContext) -> list[dict[str, Any]]:
+    """The keys the model may report in `learned_facts`, and what each means."""
+    if not prospect_messages(context):
+        return []
+    protected = _protected(context)
+    return [
+        {
+            "key": key,
+            "label": field.label if field else None,
+            "may_guess": key not in protected
+            and (field is None or (field.infer.allowed and not field.sensitive)),
+            "sensitive": True if field is not None and field.sensitive else None,
+        }
+        for key, field in learnable_fields(context.settings).items()
+    ]
 
 
 def _conversation_rules(context: CommercialContext) -> dict[str, Any]:

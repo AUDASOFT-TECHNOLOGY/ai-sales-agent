@@ -17,11 +17,13 @@ from typing import Any, Literal, get_args
 from pydantic import Field, ValidationError
 
 from sales_brain_kit.consultative.context import CommercialContext
+from sales_brain_kit.consultative.discovery import learnable_fields
 from sales_brain_kit.consultative.errors import BrainOutputError
 from sales_brain_kit.settings.common import Model
 from sales_brain_kit.settings.discovery import StopSignal
 from sales_core.contracts import LLMResponse, PaymentProgress, payment_progress
 
+MAX_LEARNED_FACTS = 10  # with the payment facts, well under the Core's limit per decision
 STOP_SIGNALS = frozenset(get_args(StopSignal))
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
@@ -47,6 +49,19 @@ class Analysis(Model):
     payment_method: str | None = Field(default=None, max_length=64)  # the method they say they used
 
 
+class LearnedFact(Model):
+    """Something the model read in the prospect's messages. A report, not a record: the code decides
+    whether it is proposed to the Core (see `learning.py`) and the Core decides whether it is kept."""
+
+    key: str = Field(max_length=64)  # a declared discovery field, or `interest`
+    value: str = Field(max_length=200)  # for `interest`, the id of a catalog product
+    # stated: they said it plainly; implied: it follows from their words; guess: the model's own
+    # inference, never asserted to anyone.
+    basis: Literal["stated", "implied", "guess"]
+    excerpt: str | None = Field(default=None, max_length=300)  # their exact words (not for a guess)
+    confidence: float | None = Field(default=None, ge=0, le=1)  # for a guess only
+
+
 class FollowUpChoice(Model):
     """The situation the next touch belongs to. The delay itself always comes from settings."""
 
@@ -68,6 +83,7 @@ class BrainOutput(Model):
     handoff_reason: str | None = Field(default=None, max_length=500)
     handoff_briefing: str | None = Field(default=None, max_length=1500)
     close_reason: str | None = Field(default=None, max_length=500)
+    learned_facts: tuple[LearnedFact, ...] = Field(default=(), max_length=MAX_LEARNED_FACTS)
     requests_receipt: bool = False  # the message asks the prospect to send their receipt
     # What the message says about the payment: nothing, that it is being verified, or that it is
     # confirmed. `confirmed` is only open once a person at the client confirmed it (see validation).
@@ -152,6 +168,7 @@ def response_schema(context: CommercialContext) -> dict[str, Any]:
         offer.method.id
         for offer in (context.plan.workflow.methods if context.plan.workflow else ())
     ]
+    keys = list(learnable_fields(settings))
     return _object(
         {
             "decision": {"type": "string", "enum": sorted(d.value for d in plan.allowed_decisions)},
@@ -193,6 +210,18 @@ def response_schema(context: CommercialContext) -> dict[str, Any]:
             "handoff_reason": _text(),
             "handoff_briefing": _text(),
             "close_reason": _text(),
+            "learned_facts": {
+                "type": "array",
+                "items": _object(
+                    {
+                        "key": {"type": "string", "enum": keys} if keys else {"type": "string"},
+                        "value": {"type": "string"},
+                        "basis": {"type": "string", "enum": ["stated", "implied", "guess"]},
+                        "excerpt": _text(),
+                        "confidence": {"type": ["number", "null"]},
+                    }
+                ),
+            },
             "requests_receipt": {"type": "boolean"},
             "payment_statement": {
                 "type": "string",

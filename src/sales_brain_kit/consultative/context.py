@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sales_brain_kit.consultative.catalog import ProductCatalog
+from sales_brain_kit.consultative.discovery import declared_fields
 from sales_brain_kit.consultative.facts import KnownFacts, known_facts
 from sales_brain_kit.consultative.follow_up import FollowUpPolicy
 from sales_brain_kit.consultative.history import HistoryView, view_history
@@ -19,7 +20,6 @@ from sales_brain_kit.consultative.register import Register, resolve_register
 from sales_brain_kit.consultative.selection import ProductSelection, select_products
 from sales_brain_kit.consultative.strategy import ConversationPlan, plan_conversation
 from sales_brain_kit.settings import ConsultativeSalesSettings
-from sales_brain_kit.settings.discovery import DiscoveryField
 from sales_core.contracts import BrainRequest
 
 
@@ -42,18 +42,10 @@ class CommercialContext:
         return self.request.now
 
 
-def _declared_fields(settings: ConsultativeSalesSettings) -> list[DiscoveryField]:
-    fields = list(settings.discovery.fields)
-    for product in settings.catalog.products:
-        if product.discovery is not None:
-            fields += product.discovery.extra_fields
-    return fields
-
-
 def build_context(request: BrainRequest, settings: ConsultativeSalesSettings) -> CommercialContext:
     prospect = request.prospect
     hypotheses = settings.discovery.hypotheses
-    fields = _declared_fields(settings)
+    fields = declared_fields(settings)
     catalog = ProductCatalog(settings.catalog, settings.communication.languages.default)
 
     facts = known_facts(

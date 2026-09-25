@@ -66,6 +66,10 @@ Refusals are audited (`fact.proposal_rejected`, with key and reason, never the v
 Brain that fact only, not the decision. Acceptances are audited too (`fact.proposal_accepted`).
 Without a configured writer, proposals are refused with reason `no_writer`, not silently lost.
 
+The generic Brain kit fills `proposed_facts` from what the prospect said (`learned_facts`, see
+[brain-kit.md](brain-kit.md) section 3b) and from payment claims and receipts; the Core rules above apply
+to all of them, whatever the Brain says.
+
 ### Provenance, idempotency, history
 
 An accepted proposal becomes a `Fact` whose evidence is `FactEvidence(source=<claimed source>,

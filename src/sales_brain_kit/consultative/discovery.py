@@ -28,6 +28,7 @@ from sales_brain_kit.consultative.selection import ProductSelection, SelectionBa
 from sales_brain_kit.settings import ConsultativeSalesSettings
 from sales_brain_kit.settings.catalog import Product
 from sales_brain_kit.settings.discovery import DiscoveryField, Requirement
+from sales_core.contracts import CORE_FACT_KEY_PREFIX, UNVERIFIED_CLAIM_KEYS
 
 # The order in which next steps are worked toward. `advance` is not configured under `sufficiency`:
 # it is what the current step of the conversion workflow still needs from the prospect.
@@ -80,6 +81,35 @@ class StepStatus:
     satisfied: bool
     missing_all: tuple[str, ...] = ()  # every one of these is needed
     missing_any: tuple[str, ...] = ()  # any one of these would do
+
+
+def declared_fields(settings: ConsultativeSalesSettings) -> list[DiscoveryField]:
+    """Every field the client declares, global and per product."""
+    fields = list(settings.discovery.fields)
+    for product in settings.catalog.products:
+        if product.discovery is not None:
+            fields += product.discovery.extra_fields
+    return fields
+
+
+def learnable_fields(settings: ConsultativeSalesSettings) -> dict[str, DiscoveryField | None]:
+    """The keys the model may report having learned, in a stable order: every declared field, and
+    `interest` (mapped to None: it is not a field) when the catalog has products. A key the Core or
+    a payment claim owns is never learnable, whatever a client declared."""
+    keys: dict[str, DiscoveryField | None] = {
+        field.key: field
+        for field in declared_fields(settings)
+        if not is_reserved_fact_key(field.key)
+    }
+    if settings.catalog.products:
+        keys[INTEREST_KEY] = None
+    return keys
+
+
+def is_reserved_fact_key(key: str) -> bool:
+    """Keys a Brain never proposes as a learning: the Core's own (`core_*`) and the payment claims,
+    which are recorded from the analysis of the message, never from a free-form statement."""
+    return key.startswith(CORE_FACT_KEY_PREFIX) or key in UNVERIFIED_CLAIM_KEYS
 
 
 def applicable_fields(
