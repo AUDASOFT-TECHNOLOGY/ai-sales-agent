@@ -299,6 +299,8 @@ def answer(**overrides: Any) -> dict[str, Any]:
             "out_of_scope": False,
             "stop_signals": [],
             "disqualified": [],
+            "payment_claimed": False,
+            "payment_method": None,
         },
         "product_candidates": [],
         "presented_products": [],
@@ -309,6 +311,8 @@ def answer(**overrides: Any) -> dict[str, Any]:
         "handoff_reason": None,
         "handoff_briefing": None,
         "close_reason": None,
+        "requests_receipt": False,
+        "payment_statement": "none",
         "rationale": "test",
     }
     for section in ("analysis", "follow_up"):

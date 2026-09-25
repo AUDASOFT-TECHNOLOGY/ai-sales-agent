@@ -102,6 +102,11 @@ class TestBuildRuntime:
         runtime = build_runtime(_config(tmp_path), builders, FakeClock(NOW))
         assert runtime.engine._facts is made.repositories["alpha"]
 
+    def test_the_repository_is_also_the_only_way_facts_are_recorded(self, tmp_path):
+        builders, made = fake_builders()
+        runtime = build_runtime(_config(tmp_path), builders, FakeClock(NOW))
+        assert runtime.engine._facts_writer is made.repositories["alpha"]
+
     def test_live_modes_get_the_real_channel(self, tmp_path):
         config = _config(tmp_path)
         builders, made = fake_builders()

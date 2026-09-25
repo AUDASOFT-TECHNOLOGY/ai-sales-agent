@@ -29,7 +29,7 @@ from sales_core.contracts import (
     SendResult,
 )
 from sales_core.engine import Engine, EngineConfig
-from sales_core.ports import FactsReader
+from sales_core.ports import FactsReader, FactsWriter
 from sales_integrations.fakes import FakeClock, FakeMessagingChannel, FakeSalesRepository
 
 FU = SalesActionType.FOLLOW_UP
@@ -135,6 +135,7 @@ class Harness:
     mode: ApprovalMode
     config_kwargs: dict
     facts: FactsReader | None = None
+    facts_writer: FactsWriter | None = None
 
     def new_engine(self, brain: ScriptedBrain | None = None) -> Engine:
         """A fresh Engine over the same repository, as after a process restart."""
@@ -146,6 +147,7 @@ class Harness:
             clock=self.clock,
             config=EngineConfig(mode=self.mode, **self.config_kwargs),
             facts=self.facts,
+            facts_writer=self.facts_writer,
         )
 
     # ---- inspection -----------------------------------------------------------------------
@@ -218,6 +220,7 @@ def inbound(
     pid: str = "p1",
     external_id: str = "wamid.1",
     channel: Channel = Channel.WHATSAPP,
+    metadata: dict[str, str] | None = None,
 ) -> InboundMessage:
     return InboundMessage(
         channel=channel,
@@ -225,4 +228,5 @@ def inbound(
         external_id=external_id,
         text=text,
         timestamp=NOW,
+        metadata=metadata or {},
     )

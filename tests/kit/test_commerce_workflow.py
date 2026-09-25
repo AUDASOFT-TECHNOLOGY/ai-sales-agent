@@ -13,12 +13,15 @@ from commerce_support import (
     PAY_URL,
     answer,
     at_payment,
+    claimed,
     commerce_doc,
     country,
     interested,
     known,
     make_brain,
+    paid,
     payload_of,
+    proof_sent,
     registered,
     request,
 )
@@ -29,7 +32,8 @@ from sales_brain_kit.consultative import BrainOutputError, build_context
 from sales_brain_kit.consultative.discovery import DiscoveryStatus
 from sales_brain_kit.consultative.strategy import Objective
 from sales_brain_kit.consultative.workflow import WorkflowStatus
-from sales_core.contracts import DecisionType, FactSource
+from sales_brain_kit.spec import SettingsInvalidError
+from sales_core.contracts import DecisionType, FactSource, PaymentProgress
 
 BOOKING_URL = "https://book.example.org/slots?team=A"
 
@@ -86,14 +90,31 @@ class TestWhereTheProspectStands:
         # the product's own price is in USD, so the card (USD, EUR) and the transfer apply
         assert [m.method.id for m in state.methods] == ["online-card", "bank-transfer"]
 
-    def test_payment_received_moves_it_to_confirmation(self):
-        state = state_of(*registered(), known("payment_status", "received"))
-        assert state.current.id == "confirm"
+    def test_a_claimed_payment_moves_it_to_confirmation_never_further(self):
+        state = state_of(*registered(), claimed())
+        assert state.current.id == "confirm" and state.payment is PaymentProgress.CLAIMED
+        assert state.forced == set()  # nothing closes: the payment is not verified
 
-    def test_a_confirmed_payment_ends_at_the_closing_step(self):
-        state = state_of(*registered(), known("payment_status", "confirmed"))
-        assert state.current.id == "done"
+    def test_a_proof_moves_it_to_confirmation_never_further(self):
+        state = state_of(*registered(), proof_sent())
+        assert state.current.id == "confirm" and state.payment is PaymentProgress.PROOF_RECEIVED
+
+    def test_a_confirmation_by_a_person_ends_at_the_closing_step(self):
+        state = state_of(*registered(), paid())
+        assert state.current.id == "done" and state.payment is PaymentProgress.PAID
         assert state.forced == {DecisionType.CLOSE}
+
+    @pytest.mark.parametrize(
+        "source", [FactSource.SYSTEM, FactSource.PROSPECT, FactSource.CONVERSATION]
+    )
+    def test_nothing_but_a_person_or_the_clients_records_confirms_a_payment(self, source):
+        state = state_of(*registered(), paid(source))
+        assert state.payment is PaymentProgress.NONE  # not even a claim: it is nothing
+        assert state.current.id == "pay" and state.forced == set()
+
+    def test_a_claim_and_a_proof_together_are_still_not_a_confirmation(self):
+        state = state_of(*registered(), claimed(), proof_sent())
+        assert state.current.id == "confirm" and state.payment is PaymentProgress.PROOF_RECEIVED
 
     def test_the_stage_of_the_prospect_can_be_the_completion(self):
         doc = sale(
@@ -164,10 +185,10 @@ class TestPrerequisitesAndTheNextStep:
         doc = sale(
             commerce_doc(),
             {"id": "recommend", "kind": "recommend"},
-            {"id": "pay", "kind": "payment", "requires": {"steps": ["register"]},
-             "completes_when": {"facts": [{"key": "payment_status"}]}},
+            {"id": "pay", "kind": "payment", "requires": {"steps": ["register"]}},
             {"id": "register", "kind": "register",
              "completes_when": {"facts": [{"key": "registration_status"}]}},
+            {"id": "confirm", "kind": "payment_confirmation"},
         )  # fmt: skip
         assert state_of(interested(), doc=doc).current.id == "register"
 
@@ -323,7 +344,7 @@ class TestPayment:
         message = refused(
             commerce_doc(),
             answer(message="[[payment:bank-transfer]]"),
-            facts=[*registered(), known("payment_status", "confirmed")],
+            facts=[*registered(), paid()],
         )
         assert "not available" in message or "requires close" in message
 
@@ -336,12 +357,18 @@ class TestPayment:
         assert [m["id"] for m in methods] == ["online-card", "bank-transfer"]
         assert methods[1]["confirmation"] == {
             "mode": "manual", "note": "A person confirms the transfer."}  # fmt: skip
-        assert methods[0]["confirmation"]["mode"] == "provider"
+        assert methods[0]["confirmation"]["mode"] == "manual"
 
-    def test_payment_confirmation_can_be_left_to_a_person_or_the_provider(self):
+    def test_a_provider_cannot_be_configured_to_confirm_a_payment(self):
+        doc = deepcopy(commerce_doc())
+        doc["payment"]["methods"][0]["confirmation"]["mode"] = "provider"
+        with pytest.raises(SettingsInvalidError, match="never by a provider"):
+            parse_settings(doc)
+
+    def test_payment_confirmation_can_be_left_to_a_person(self):
         doc = deepcopy(commerce_doc())
         doc["conversion"]["workflows"][0]["steps"][3]["human"] = "required"
-        state = state_of(*registered(), known("payment_status", "received"), doc=doc)
+        state = state_of(*registered(), claimed(), doc=doc)
         assert state.current.id == "confirm" and state.forced == {DecisionType.HANDOFF_TO_HUMAN}
 
     def test_no_applicable_method_falls_back_to_the_configured_fallback(self):
@@ -523,20 +550,18 @@ class TestHandoffIsConfigurable:
         assert "not open in this situation" in refused(doc, handoff(), facts=[interested()])
 
     def test_a_close_step_ends_the_conversation(self):
-        state = state_of(*registered(), known("payment_status", "confirmed"))
-        assert "requires close" in refused(
-            commerce_doc(), answer(), facts=[*registered(), known("payment_status", "confirmed")]
-        )
+        state = state_of(*registered(), paid())
+        assert "requires close" in refused(commerce_doc(), answer(), facts=[*registered(), paid()])
         accepted = decide(
             closing(),
             doc=commerce_doc(),
-            facts=[*registered(), known("payment_status", "confirmed")],
+            facts=[*registered(), paid()],
             **ONGOING,
         )
         assert accepted.decision_type is DecisionType.CLOSE and state.current.kind == "close"
 
     def test_a_person_asking_outranks_a_step_that_would_close(self):
-        facts = [*registered(), known("payment_status", "confirmed")]
+        facts = [*registered(), paid()]
         decision = decide(
             handoff(analysis={"intent": "human_requested"}),
             doc=commerce_doc(),

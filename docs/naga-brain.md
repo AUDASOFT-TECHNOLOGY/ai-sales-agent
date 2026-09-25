@@ -85,5 +85,5 @@ nationality never drive anything; the Brain sends, stores and schedules nothing:
 
 - Naga cannot run until its settings exist and are valid.
 - The generic limitations of [brain-commerce.md](brain-commerce.md) section 12 apply, notably that a
-  Brain cannot yet propose facts (so what registration collects, or that a payment proof arrived, must be
-  recorded by staff or another system) and that a payment provider's confirmation has no inbound path.
+  kit only proposes payment claims and proofs (what registration collects must still be recorded by staff
+  or another system) and that the CRM/Admin through which a person confirms a payment is not built yet.

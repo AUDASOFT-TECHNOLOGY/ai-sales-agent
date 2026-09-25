@@ -364,7 +364,7 @@ class TestWorkflowSettings:
 
     def test_unknown_references(self):
         doc = edited(commerce_doc(), f"{STEP}.2", {
-            "id": "pay", "kind": "payment", "next": "ghost", "fallback": "nowhere",
+            "id": "pay", "kind": "custom", "next": "ghost", "fallback": "nowhere",
             "requires": {"steps": ["nope"], "facts": ["nothing"]},
             "completes_when": {"facts": [{"key": "unknown"}], "stage": "ghost-stage"}})  # fmt: skip
         found = " | ".join(problems(doc))
@@ -388,7 +388,7 @@ class TestWorkflowSettings:
 
     def test_a_step_cannot_fall_back_to_itself_or_require_itself(self):
         doc = edited(commerce_doc(), f"{STEP}.2", {
-            "id": "pay", "kind": "payment", "fallback": "pay", "requires": {"steps": ["pay"]},
+            "id": "pay", "kind": "custom", "fallback": "pay", "requires": {"steps": ["pay"]},
             "completes_when": {"facts": [{"key": "payment_status"}]}})  # fmt: skip
         found = " | ".join(problems(doc))
         assert "cannot fall back to itself" in found and "cannot require itself" in found
@@ -536,7 +536,7 @@ class TestTheTemplates:
         doc["communication"]["register_rules"] = template["communication"]["register_rules"]
         doc["discovery"] = {"fields": [
             {"key": "country", "infer": {"allowed": False}},
-            {"key": "example-field"}, {"key": "registration-status"}, {"key": "payment-status"}]}  # fmt: skip
+            {"key": "example-field"}, {"key": "registration-status"}]}  # fmt: skip
         for section in ("markets", "payment", "conversion"):
             doc[section] = template[section]
         assert problems(doc) == [], problems(doc)
@@ -548,7 +548,7 @@ class TestTheTemplates:
         doc["communication"]["register_rules"] = template["communication"]["register_rules"]
         doc["discovery"] = {"fields": [
             {"key": "country", "infer": {"allowed": False}},
-            {"key": "example-field"}, {"key": "registration-status"}, {"key": "payment-status"}]}  # fmt: skip
+            {"key": "example-field"}, {"key": "registration-status"}]}  # fmt: skip
         for section in ("markets", "payment", "conversion"):
             doc[section] = template[section]
         missing = check_readiness(parse_settings(doc)).missing

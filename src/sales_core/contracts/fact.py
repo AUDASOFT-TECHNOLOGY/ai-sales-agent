@@ -35,6 +35,11 @@ class FactEvidence:
         require_aware(self.observed_at, "observed_at")
 
 
+# Keys that begin with this prefix are written by the Core alone, from trusted events. A Brain can
+# neither propose nor claim one, so nothing it says can pose as something the Core established.
+CORE_FACT_KEY_PREFIX = "core_"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Fact:
     """One thing known, discovered or suspected about a prospect."""
@@ -70,6 +75,37 @@ class Fact:
     @property
     def is_confirmed(self) -> bool:
         return self.status is FactStatus.CONFIRMED
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FactProposal:
+    """A Brain's statement that it learned something: not a Fact, and never persisted as is.
+
+    It carries only what a Brain can honestly assert. Everything a Brain could otherwise forge
+    (the time it was observed, who recorded it, the identity of the record) is set by the Core
+    when it turns an accepted proposal into a `Fact`. Evidence is a reference to a stored message,
+    not a copy of it: `excerpt` is optional and, when given, must appear verbatim in that message.
+    """
+
+    key: str
+    value: str
+    status: FactStatus  # what the Brain proposes; the Core decides whether that is allowed
+    source: FactSource  # where the Brain says it comes from; the Core checks it can be claimed
+    confidence: float | None = None
+    message_id: MessageId | None = None  # the stored message it was read from
+    excerpt: str | None = None  # the words it rests on; needs `message_id`
+
+    def __post_init__(self) -> None:
+        require_text(self.key, "key")
+        require_text(self.value, "value")
+        if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
+            raise ValueError("confidence must be between 0 and 1")
+        if self.message_id is not None:
+            require_text(self.message_id, "message_id")
+        if self.excerpt is not None:
+            require_text(self.excerpt, "excerpt")
+            if self.message_id is None:
+                raise ValueError("an excerpt needs the message_id it was taken from")
 
 
 def _instant(value: datetime | None) -> str | None:

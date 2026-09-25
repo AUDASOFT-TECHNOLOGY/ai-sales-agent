@@ -8,7 +8,7 @@ code inserts the configured text (see `consultative/exact.py`).
 
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from sales_brain_kit.settings.common import (
     HttpsUrl,
@@ -23,7 +23,7 @@ from sales_brain_kit.settings.common import (
 from sales_brain_kit.settings.scope import Applicability
 
 MethodKind = Literal["online", "offline", "other"]
-ConfirmationMode = Literal["provider", "manual", "none"]
+ConfirmationMode = Literal["manual", "none"]
 
 
 class PaymentField(Model):
@@ -50,10 +50,22 @@ class PaymentInstruction(Model):
 
 
 class Confirmation(Model):
-    """How a payment becomes confirmed: by the provider, by a person, or not tracked."""
+    """How a payment becomes confirmed. It is always a person at the client who confirms it, after
+    checking (`manual`); `none` means the client does not track confirmation here. No provider, no
+    message and no answer of the prospect or of the model confirms a payment."""
 
     mode: ConfirmationMode = "manual"
     note: LocalizedText | None = None  # what the prospect is told to expect or do
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _no_automatic_confirmation(cls, value: object) -> object:
+        if value == "provider":
+            raise ValueError(
+                "a payment is confirmed only by a person at the client, never by a provider: "
+                "use 'manual'"
+            )
+        return value
 
 
 class PaymentMethod(Model):
@@ -80,3 +92,39 @@ class PaymentMethod(Model):
 
 class PaymentSettings(Model):
     methods: tuple[PaymentMethod, ...] = Field(default=(), max_length=30)
+
+
+class OnlinePayment(Model):
+    """Whether a product can be paid online, through which methods (kind `online`, whose
+    instruction carries the configured payment link). Off unless the product says so."""
+
+    enabled: bool = False
+    methods: tuple[Slug, ...] = Field(default=(), max_length=30)  # empty: every online method
+
+
+class OfflinePayment(Model):
+    """Whether a product can be paid offline (a transfer, a deposit, ...), through which methods,
+    and whether the prospect must send a receipt after paying so that a person can verify it."""
+
+    enabled: bool = False
+    methods: tuple[Slug, ...] = Field(default=(), max_length=30)  # empty: every offline method
+    receipt_required: bool = False
+
+    @model_validator(mode="after")
+    def _receipt_needs_offline(self) -> "OfflinePayment":
+        if self.receipt_required and not self.enabled:
+            raise ValueError("'receipt_required' is for offline payment, which is not enabled")
+        return self
+
+
+class ProductPayment(Model):
+    """The payment options a product declares, explicitly. Without this block the product makes no
+    declaration and the methods' own scopes decide; with it, an option that is not enabled is never
+    offered and none of its methods (or their links) can be given to the prospect."""
+
+    online: OnlinePayment = Field(default_factory=OnlinePayment)
+    offline: OfflinePayment = Field(default_factory=OfflinePayment)
+
+    def allows(self, method: PaymentMethod) -> bool:
+        option = self.online if method.kind == "online" else self.offline
+        return option.enabled and (not option.methods or method.id in option.methods)

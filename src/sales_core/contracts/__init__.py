@@ -22,14 +22,52 @@ from sales_core.contracts.enums import (
     SalesActionType,
     SendStatus,
 )
-from sales_core.contracts.fact import Fact, FactEvidence, fact_identity
+from sales_core.contracts.fact import (
+    CORE_FACT_KEY_PREFIX,
+    Fact,
+    FactEvidence,
+    FactProposal,
+    fact_identity,
+)
 from sales_core.contracts.ids import ActionId, ClientId, ConversationId, MessageId, ProspectId
 from sales_core.contracts.llm import LLMMessage, LLMRequest, LLMResponse
 from sales_core.contracts.messaging import InboundEvent, InboundMessage, OutboundMessage, SendResult
+from sales_core.contracts.payment import (
+    CONFIRM_PAYMENTS,
+    CONFIRMATION_KEYS,
+    CONFIRMED_VALUE,
+    CONFIRMING_SOURCES,
+    PAYMENT_AMOUNT_KEY,
+    PAYMENT_CLAIMED_KEY,
+    PAYMENT_CONFIRMED_KEY,
+    PAYMENT_CURRENCY_KEY,
+    PAYMENT_PROOF_KEY,
+    PAYMENT_REFERENCE_KEY,
+    UNVERIFIED_CLAIM_KEYS,
+    ConfirmingActor,
+    PaymentConfirmation,
+    PaymentConfirmationReceipt,
+    PaymentConfirmationStatus,
+    PaymentProgress,
+    is_payment_confirmation,
+    payment_progress,
+)
 from sales_core.contracts.prospect import ContactInfo, Prospect, Scheduling
 
 __all__ = [
+    "CONFIRMATION_KEYS",
+    "CONFIRMED_VALUE",
+    "CONFIRMING_SOURCES",
+    "CONFIRM_PAYMENTS",
+    "CORE_FACT_KEY_PREFIX",
+    "PAYMENT_AMOUNT_KEY",
+    "PAYMENT_CLAIMED_KEY",
+    "PAYMENT_CONFIRMED_KEY",
+    "PAYMENT_CURRENCY_KEY",
+    "PAYMENT_PROOF_KEY",
+    "PAYMENT_REFERENCE_KEY",
     "SCHEDULABLE_ACTION_TYPES",
+    "UNVERIFIED_CLAIM_KEYS",
     "ActionId",
     "ActionPriority",
     "ActionStatus",
@@ -39,6 +77,7 @@ __all__ = [
     "Channel",
     "ClientContext",
     "ClientId",
+    "ConfirmingActor",
     "ContactInfo",
     "ContactOrigin",
     "Conversation",
@@ -47,6 +86,7 @@ __all__ = [
     "Direction",
     "Fact",
     "FactEvidence",
+    "FactProposal",
     "FactSource",
     "FactStatus",
     "InboundEvent",
@@ -59,6 +99,10 @@ __all__ = [
     "MessageDraft",
     "MessageId",
     "OutboundMessage",
+    "PaymentConfirmation",
+    "PaymentConfirmationReceipt",
+    "PaymentConfirmationStatus",
+    "PaymentProgress",
     "Prospect",
     "ProspectId",
     "ProspectStatus",
@@ -68,4 +112,6 @@ __all__ = [
     "SendResult",
     "SendStatus",
     "fact_identity",
+    "is_payment_confirmation",
+    "payment_progress",
 ]

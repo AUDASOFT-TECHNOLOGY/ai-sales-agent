@@ -12,7 +12,7 @@ from sales_app.wiring.integrations import IntegrationBuilders
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import ClientContext
 from sales_core.engine import Engine, EngineConfig, InboundPolicy, UnknownSenderPolicy
-from sales_core.ports import Clock, FactsReader
+from sales_core.ports import Clock, FactsReader, FactsWriter
 from sales_integrations.system import DisabledChannel
 
 
@@ -147,6 +147,11 @@ def build_runtime(
             channel=channel,
             clock=clock,
             facts=repository if isinstance(repository, FactsReader) else None,
+            facts_writer=(
+                repository
+                if isinstance(repository, FactsReader) and isinstance(repository, FactsWriter)
+                else None
+            ),
             config=EngineConfig(
                 mode=config.effective_mode,
                 daily_action_limit=spec.daily_action_limit,

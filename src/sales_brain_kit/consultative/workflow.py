@@ -21,7 +21,7 @@ from enum import StrEnum
 from sales_brain_kit.consultative.applicability import Place
 from sales_brain_kit.consultative.discovery import StepStatus
 from sales_brain_kit.consultative.facts import KnownFacts
-from sales_brain_kit.consultative.payment import MethodOffer, applicable_methods
+from sales_brain_kit.consultative.payment import MethodOffer, applicable_methods, receipt_required
 from sales_brain_kit.settings import ConsultativeSalesSettings
 from sales_brain_kit.settings.catalog import Appointment, Product
 from sales_brain_kit.settings.conversion import (
@@ -31,7 +31,7 @@ from sales_brain_kit.settings.conversion import (
     WorkflowStep,
 )
 from sales_brain_kit.settings.market import Market
-from sales_core.contracts import DecisionType, FactStatus
+from sales_core.contracts import DecisionType, FactStatus, PaymentProgress
 
 # Steps that are the discovery ladder or informational: they never take over the conversation.
 LADDER_KINDS = frozenset({"recommend", "qualify", "inform"})
@@ -65,6 +65,16 @@ class WorkflowState:
     forced_reason: str | None = None
     methods: tuple[MethodOffer, ...] = ()  # payment methods that apply, for a payment step
     appointment: Appointment | None = None  # for an appointment or callback step
+    payment: PaymentProgress = PaymentProgress.NONE  # what the facts say about the payment
+    receipt_required: bool = False  # the product asks for a receipt and it is not in hand yet
+
+    @property
+    def receipt_pending(self) -> bool:
+        """A receipt is due: required, and neither received nor the payment already confirmed."""
+        return self.receipt_required and self.payment in (
+            PaymentProgress.NONE,
+            PaymentProgress.CLAIMED,
+        )
 
     @property
     def advancing(self) -> bool:
@@ -102,6 +112,8 @@ def evaluate_workflow(
     focus: tuple[Product, ...],
     place: Place,
     currency: str | None,
+    payment: PaymentProgress = PaymentProgress.NONE,
+    receipt_in_hand: bool = False,
 ) -> WorkflowState:
     by_id = {step.id: step for step in workflow.steps}
     order = {step.id: index for index, step in enumerate(workflow.steps)}
@@ -136,6 +148,10 @@ def evaluate_workflow(
                 return status is None or status.satisfied
             case "handoff" | "close":
                 return False
+            case "payment":  # the prospect said they paid or sent something: still not verified
+                return payment is not PaymentProgress.NONE
+            case "payment_confirmation":  # only a person at the client confirms, nothing else
+                return payment is PaymentProgress.PAID
             case _:
                 return completion_holds(step.completes_when) if step.completes_when else True
 
@@ -150,6 +166,7 @@ def evaluate_workflow(
                 place=place,
                 currency=currency,
                 only=step.payment.methods if step.payment else (),
+                product=primary,
             )
             return methods, None, None if methods else "no payment method applies to this prospect"
         if step.kind in ("appointment", "callback"):
@@ -211,6 +228,7 @@ def evaluate_workflow(
                 fallback=fallback,
                 forced=forced,
                 forced_reason=f"step {step.id!r} cannot proceed ({unavailable}); fallback: {fallback}",
+                payment=payment,
             )
             break
 
@@ -242,11 +260,19 @@ def evaluate_workflow(
             forced_reason=forced_reason,
             methods=methods,
             appointment=appointment,
+            payment=payment,
+            # asked for, unless the message being answered already carries it
+            receipt_required=receipt_required(primary, methods) and not receipt_in_hand,
         )
 
     if state is None:
         state = _state(
-            workflow, passed, None, WorkflowStatus.COMPLETED, "every step of the workflow is done"
+            workflow,
+            passed,
+            None,
+            WorkflowStatus.COMPLETED,
+            "every step of the workflow is done",
+            payment=payment,
         )
     return state
 

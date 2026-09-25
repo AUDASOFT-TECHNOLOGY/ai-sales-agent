@@ -177,6 +177,24 @@ def _defined_and_used_names(package_dir: Path) -> set[str]:
     return names
 
 
+def _names_of(path: Path) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.add(node.name)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, ast.alias):
+            names.add(node.name.split(".")[-1])
+        elif isinstance(node, ast.keyword) and node.arg:
+            names.add(node.arg)
+    return names
+
+
 def test_the_core_knows_nothing_about_google_or_spreadsheets():
     core = SRC / "sales_core"
     assert not _imported_top_levels(core) & GOOGLE_LIBRARIES
@@ -371,11 +389,23 @@ def test_core_facts_and_origin_contracts_use_no_business_vocabulary():
 # ---- facts persistence stays behind ports ---------------------------------------------------------
 
 
-def test_the_engine_only_reads_facts_and_the_core_names_no_storage_for_them():
-    """Recording facts is somebody else's job (a later slice); the Engine holds a reader only."""
+def test_only_the_engine_records_facts_and_only_through_the_writer_port():
+    """A Brain proposes; the Core records. The Engine holds the writer port, and nothing outside
+    the Core's own modules (the Engine, the payment confirmation) calls it."""
     engine_names = _defined_and_used_names(SRC / "sales_core" / "engine")
-    assert "FactsReader" in engine_names and "FactsWriter" not in engine_names
-    assert "append_facts" not in engine_names
+    assert {"FactsReader", "FactsWriter"} <= engine_names
+    writers = {
+        py.relative_to(SRC).as_posix()
+        for py in SRC.rglob("*.py")
+        if "append_facts" in _names_of(py)
+    }
+    assert writers == {
+        "sales_core/engine/engine.py",
+        "sales_core/payments/confirmation.py",
+        "sales_core/ports/facts.py",
+        "sales_integrations/fakes/fake_sales_repository.py",
+        "sales_integrations/google_sheets/repository.py",
+    }
     ports = _imported_top_levels(SRC / "sales_core" / "ports" / "facts.py")
     assert ports <= set(sys.stdlib_module_names) | {"sales_core"}
 
@@ -532,15 +562,45 @@ def test_no_generic_code_branches_on_who_the_client_or_the_product_is():
     assert not offenders, offenders
 
 
-def test_the_core_knows_nothing_of_payment_markets_prices_or_workflows():
-    """The exact-value and workflow machinery lives in the Brain kit; the Core's contracts and
-    engine are unchanged and carry none of its vocabulary."""
+# The one place the Core may say "payment": the generic, provider-free payment confirmation by a
+# person (its contract, its service, and the names re-exported from the contracts package).
+PAYMENT_MODULES = {
+    SRC / "sales_core" / "contracts" / "payment.py",
+    SRC / "sales_core" / "contracts" / "__init__.py",
+}
+PAYMENT_PACKAGE = SRC / "sales_core" / "payments"
+
+
+def _core_names_outside_the_payment_modules() -> dict[Path, set[str]]:
+    return {
+        py: _names_of(py)
+        for py in (SRC / "sales_core").rglob("*.py")
+        if py not in PAYMENT_MODULES and PAYMENT_PACKAGE not in py.parents
+    }
+
+
+def test_the_core_knows_nothing_of_markets_prices_or_workflows():
+    """The exact-value and workflow machinery lives in the Brain kit; the Core carries none of its
+    vocabulary. (Payment is different: see the next test.)"""
     offenders = {
         name
         for name in _defined_and_used_names(SRC / "sales_core")
-        if any(word in name.lower() for word in ("payment", "market", "workflow", "iban", "price"))
+        if any(word in name.lower() for word in ("market", "workflow", "iban", "price"))
     }
     assert not offenders, f"sales_core names commerce concepts: {sorted(offenders)}"
+
+
+def test_only_the_payment_modules_name_payment_in_the_core():
+    """The Engine, the planner, the safety rules and every other contract stay payment-free: a
+    payment reaches the rest of the Core only as facts."""
+    offenders = {
+        py.relative_to(ROOT).as_posix(): sorted(n for n in names if "payment" in n.lower())
+        for py, names in _core_names_outside_the_payment_modules().items()
+        if any("payment" in n.lower() for n in names)
+    }
+    # The contracts package re-exports the payment names; nothing else in it may use the word.
+    offenders.pop("src/sales_core/contracts/__init__.py", None)
+    assert not offenders, f"payment vocabulary outside the payment modules: {offenders}"
 
 
 def test_no_account_number_link_or_payment_detail_is_written_in_source():
@@ -567,3 +627,125 @@ def test_the_settings_schema_imports_only_pydantic_and_itself():
     for module in _imported_modules(KIT / "settings"):
         if module.startswith("sales_brain_kit"):
             assert module.startswith("sales_brain_kit.settings"), module
+
+
+# ---- Slice 6c: Brain-proposed facts and payment confirmation stay generic ---------------------
+
+PAYMENTS = SRC / "sales_core" / "payments"
+PROVIDER_AND_HTTP_LIBRARIES = {
+    "stripe", "paypal", "paytabs", "braintree", "adyen", "square", "mollie", "razorpay",
+    "requests", "httpx", "aiohttp", "urllib3", "fastapi", "starlette", "flask", "django",
+    "hmac", "hashlib", "socket", "ssl", "http", "urllib",
+}  # fmt: skip
+PROVIDER_WORDS = (
+    "stripe", "paypal", "paytabs", "braintree", "adyen", "mollie", "razorpay", "konnect", "flouci",
+    "d17", "cmi", "webhook", "signature", "api_key", "secret", "password", "token", "credential",
+)  # fmt: skip
+
+
+def _payment_core_files() -> list[Path]:
+    return [*PAYMENTS.rglob("*.py"), SRC / "sales_core" / "contracts" / "payment.py"]
+
+
+def test_the_payment_confirmation_depends_on_the_core_alone():
+    """No provider SDK, no HTTP framework, no adapter, no app, no kit, no client."""
+    allowed = set(sys.stdlib_module_names) - PROVIDER_AND_HTTP_LIBRARIES | {"sales_core"}
+    for py in _payment_core_files():
+        imported = _imported_top_levels_of_file(py)
+        assert imported <= allowed, f"{py.relative_to(ROOT)} imports {sorted(imported - allowed)}"
+    assert not _imported_top_levels(PAYMENTS) & {
+        "sales_integrations", "sales_app", "sales_brain_kit", *_brain_packages()
+    }  # fmt: skip
+
+
+def test_the_payment_confirmation_knows_no_provider_and_holds_no_credentials():
+    """Authentication belongs to the CRM or Admin; the Core only sees a confirmation with permissions."""
+    for py in _payment_core_files():
+        names = {name.lower() for name in _names_of(py)}
+        for word in PROVIDER_WORDS:
+            assert not any(word in name for name in names), f"{word!r} named in {py.name}"
+    for path, text in _string_constants(PAYMENTS):
+        assert not any(word in text.lower() for word in PROVIDER_WORDS), path
+
+
+def test_the_payment_confirmation_and_the_engine_never_read_a_raw_provider_payload():
+    for py in (*_payment_core_files(), SRC / "sales_core" / "engine" / "engine.py"):
+        names = _names_of(py)
+        assert not names & {"payload", "raw", "raw_body", "headers", "body"}, py.name
+
+
+def test_facts_the_core_writes_carry_the_reserved_prefix_no_proposal_can_use():
+    from sales_core.contracts import CONFIRMATION_KEYS, CORE_FACT_KEY_PREFIX
+
+    assert CONFIRMATION_KEYS and all(k.startswith(CORE_FACT_KEY_PREFIX) for k in CONFIRMATION_KEYS)
+
+
+def test_the_brain_kit_and_brains_only_propose_they_never_touch_the_facts_writer_or_confirmation():
+    for package in (KIT, BRAINS):
+        names = _defined_and_used_names(package)
+        for forbidden in (
+            "FactsWriter",
+            "append_facts",
+            "PaymentConfirmation",
+            "PaymentConfirmationService",
+            "PAYMENT_CONFIRMED_KEY",
+            "review_proposals",
+        ):
+            assert forbidden not in names, f"{forbidden} used under {package.name}"
+
+
+def test_the_core_names_no_geography_or_currency_of_a_client_in_the_new_modules():
+    import re
+
+    pattern = re.compile("|".join(GEOGRAPHY_AND_CLIENT_WORDS), re.IGNORECASE)
+    for py in (*_payment_core_files(), *(SRC / "sales_core" / "facts").rglob("*.py")):
+        assert pattern.search(py.read_text(encoding="utf-8")) is None, py.name
+
+
+def test_the_facts_review_is_pure_it_reaches_no_port_clock_or_adapter():
+    imported = _imported_modules(SRC / "sales_core" / "facts")
+    core = {m for m in imported if m.startswith("sales_core")}
+    assert {m for m in core if not m.startswith("sales_core.facts")} <= {"sales_core.contracts"}
+    assert not _imported_top_levels(SRC / "sales_core" / "facts") & {"threading", "time", "os"}
+
+
+# ---- Slice 6c correction: only a person authorised by the client confirms a payment -----------------
+
+
+def test_no_provider_event_or_automatic_confirmation_exists_anywhere_in_the_source():
+    """The MVP has no provider path: nothing turns an external event into a confirmed payment."""
+    forbidden = {"TrustedPaymentEvent", "PaymentIntake", "PaymentEventType", "PaymentReceipt"}
+    for py in SRC.rglob("*.py"):
+        assert not _names_of(py) & forbidden, py.relative_to(ROOT).as_posix()
+
+
+def test_the_confirmation_key_is_named_only_where_a_person_confirms_and_where_it_is_read():
+    """Writing it: the confirmation service alone. Reading it: the payment contract's own derivation
+    (`payment_progress`). Nowhere else in the source, so nothing else can produce or interpret it."""
+    users = {
+        py.relative_to(SRC).as_posix()
+        for py in SRC.rglob("*.py")
+        if "PAYMENT_CONFIRMED_KEY" in _names_of(py)
+    }
+    assert users == {
+        "sales_core/contracts/__init__.py",
+        "sales_core/contracts/payment.py",
+        "sales_core/payments/confirmation.py",
+    }
+
+
+def test_a_confirmation_never_comes_from_the_system_the_prospect_or_a_brain():
+    for py in (SRC / "sales_core" / "contracts" / "payment.py", *PAYMENTS.rglob("*.py")):
+        names = _names_of(py)
+        assert not names & {"SYSTEM", "PROSPECT", "CONVERSATION", "BRAIN_INFERENCE"}, py.name
+    from sales_core.contracts import CONFIRMING_SOURCES, FactSource
+
+    assert CONFIRMING_SOURCES == {FactSource.HUMAN, FactSource.CLIENT_DATA}
+
+
+def test_no_adapter_and_no_app_code_confirms_payments_yet():
+    """There is no CRM or Admin in the MVP: the service is reached by nothing in the application."""
+    for package in ("sales_integrations", "sales_app", "sales_brain_kit"):
+        for py in (SRC / package).rglob("*.py"):
+            names = _names_of(py)
+            assert not names & {"PaymentConfirmationService", "PaymentConfirmation"}, py.name

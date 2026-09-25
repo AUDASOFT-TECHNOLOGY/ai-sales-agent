@@ -98,6 +98,15 @@ products:
       handled_by: human            # human | agent: who carries a scheduled callback out
       min_notice_hours: 24
 
+    payment:                       # the payment options this product declares (see payment.methods)
+      online:
+        enabled: false             # true: the product can be paid online; needs a payment method of kind online with a url
+        methods: []                # empty: every online method that applies
+      offline:
+        enabled: false             # true: the product can be paid offline (transfer, deposit, ...)
+        methods: []
+        receipt_required: false    # true: after paying, the prospect is asked to send a receipt; a person verifies it
+
     restrictions:                  # special rules: the product can only add to the global ones
       do_not_claim: [TODO(fill-in) something never to promise]
       do_not_discuss: [TODO(fill-in) a topic to leave to a person]

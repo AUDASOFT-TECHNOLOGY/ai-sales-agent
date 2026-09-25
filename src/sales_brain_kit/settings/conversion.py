@@ -35,9 +35,7 @@ HumanRole = Literal["none", "optional", "required"]
 FALLBACK_KEYWORDS = ("handoff", "close", "park", "skip")
 
 # Kinds whose completion the workflow cannot know by itself: the client says how it is known.
-GATED_KINDS: frozenset[str] = frozenset(
-    {"register", "appointment", "callback", "payment", "payment_confirmation", "custom"}
-)
+GATED_KINDS: frozenset[str] = frozenset({"register", "appointment", "callback", "custom"})
 TERMINAL_KINDS: frozenset[str] = frozenset({"handoff", "close"})
 PAYMENT_KINDS: frozenset[str] = frozenset({"payment", "payment_confirmation"})
 
@@ -116,6 +114,12 @@ class WorkflowStep(Model):
             raise ValueError("'payment' settings belong to a payment step")
         if self.appointment is not None and self.kind not in ("appointment", "callback"):
             raise ValueError("'appointment' settings belong to an appointment or callback step")
+        if self.kind in PAYMENT_KINDS and self.completes_when is not None:
+            raise ValueError(
+                f"a '{self.kind}' step has no 'completes_when': a payment step is done when the "
+                "prospect has claimed or proved a payment, and a confirmation step only when a "
+                "person at the client has confirmed it"
+            )
         if self.kind in GATED_KINDS and self.completes_when is None:
             raise ValueError(
                 f"a '{self.kind}' step needs 'completes_when': how is it known to be done?"

@@ -99,10 +99,20 @@ class WhatsAppWebhookParser:
                 external_id=str(raw["id"]),
                 text=WhatsAppWebhookParser._text(kind, raw),
                 timestamp=datetime.fromtimestamp(int(raw["timestamp"]), UTC),
-                metadata={"type": kind},
+                metadata=WhatsAppWebhookParser._metadata(kind, raw),
             )
         except (KeyError, TypeError, ValueError) as error:
             raise MalformedPayloadError(f"unreadable message: {error!r}") from error
+
+    @staticmethod
+    def _metadata(kind: str, raw: Mapping[str, Any]) -> dict[str, str]:
+        """The kind of content, and the provider's id of the media when there is one: a reference
+        to what was sent (a receipt, a photo), not a copy of it. Nothing is downloaded or stored."""
+        metadata = {"type": kind}
+        content = raw.get(kind)
+        if kind != "text" and isinstance(content, Mapping) and content.get("id"):
+            metadata["media_id"] = str(content["id"])
+        return metadata
 
     @staticmethod
     def _text(kind: str, raw: Mapping[str, Any]) -> str:

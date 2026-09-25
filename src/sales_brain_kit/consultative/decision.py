@@ -7,8 +7,23 @@ debugging; the Core stores or ignores them and never acts on them.
 
 from sales_brain_kit.consultative.context import CommercialContext
 from sales_brain_kit.consultative.language import localize
+from sales_brain_kit.consultative.payment import RECEIPT_MEDIA
 from sales_brain_kit.consultative.validation import ValidatedOutput
-from sales_core.contracts import BrainDecision, DecisionType, MessageDraft
+from sales_brain_kit.settings.conversion import PAYMENT_KINDS
+from sales_core.contracts import (
+    PAYMENT_CLAIMED_KEY,
+    PAYMENT_PROOF_KEY,
+    BrainDecision,
+    DecisionType,
+    FactProposal,
+    FactSource,
+    FactStatus,
+    MessageDraft,
+    MessageId,
+    PaymentProgress,
+    SalesActionType,
+    payment_progress,
+)
 
 FAMILY_TAG = "consultative_sales"
 
@@ -27,6 +42,49 @@ def build_decision(validated: ValidatedOutput, context: CommercialContext) -> Br
         new_stage=validated.stage,
         rationale=validated.rationale or f"{context.plan.objective}: {validated.decision_type}",
         metadata=_metadata(validated, context),
+        proposed_facts=_payment_proposals(validated, context),
+    )
+
+
+def _payment_proposals(
+    validated: ValidatedOutput, context: CommercialContext
+) -> tuple[FactProposal, ...]:
+    """What the prospect said or sent about paying, proposed as *discovered* facts anchored to
+    their own message. Never a confirmation: the Core refuses to record one from a Brain, and a
+    person at the client is the only one who confirms. Only a reply carries such a message."""
+    request = context.request
+    last = context.history.last_inbound
+    if request.action.action_type is not SalesActionType.REPLY or last is None:
+        return ()
+    progress = payment_progress(request.facts)
+    if progress is PaymentProgress.PAID:
+        return ()
+    proposals: list[FactProposal] = []
+    if validated.analysis.payment_claimed and progress is PaymentProgress.NONE:
+        proposals.append(_statement(PAYMENT_CLAIMED_KEY, "claimed", last.message_id))
+    kind = last.metadata.get("type")
+    state = context.plan.workflow
+    at_payment = (
+        state is not None and state.current is not None and state.current.kind in PAYMENT_KINDS
+    )
+    already = any(
+        f.key == PAYMENT_PROOF_KEY
+        and f.evidence is not None
+        and f.evidence.message_id == last.message_id
+        for f in request.facts
+    )
+    if kind in RECEIPT_MEDIA and at_payment and not already:
+        proposals.append(_statement(PAYMENT_PROOF_KEY, kind, last.message_id))
+    return tuple(proposals)
+
+
+def _statement(key: str, value: str, message_id: MessageId) -> FactProposal:
+    return FactProposal(
+        key=key,
+        value=value,
+        status=FactStatus.DISCOVERED,
+        source=FactSource.PROSPECT,
+        message_id=message_id,
     )
 
 

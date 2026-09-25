@@ -49,7 +49,9 @@ default to "nothing", so existing Brains and callers are unaffected.
 - `Conversation.origin` (`ContactOrigin`: `outbound` when the Sales Agent started it, `inbound`
   when the prospect did, `unknown` for history that does not say). A Brain reads it as
   `request.conversation.origin`. It defaults to `unknown`.
-- `BrainDecision` is unchanged.
+- `BrainDecision.proposed_facts` (a tuple of `FactProposal`, default empty) lets a Brain say what it
+  learned; the Core validates each proposal and records the accepted ones. A Brain never writes facts.
+  See [core-facts-and-payments.md](core-facts-and-payments.md).
 
 The Engine fills them in per request: `origin` is `inbound` for a reply to a prospect's message,
 `outbound` for a first contact and otherwise what the repository reports (`unknown`); `facts` come
@@ -57,8 +59,10 @@ from an optional `FactsReader` (`sales_core.ports`) and are empty without one: e
 observation of the prospect, oldest first. The same key can appear several times (it may take
 another value later); the newest is the current one. Recording is the separate append-only
 `FactsWriter` port, implemented by the Google Sheets adapter (`Facts` tab) and the fake repository;
-an observation is identified by `fact_identity`, so recording it twice keeps one. Nothing extracts
-or applies facts yet, and repositories do not persist the origin.
+an observation is identified by `fact_identity`, so recording it twice keeps one. The Engine records
+facts a Brain proposes (`BrainDecision.proposed_facts`) through the `FactsWriter`, and a trusted
+payment confirmed by an authorised person becomes facts through `PaymentConfirmationService`;
+repositories do not persist the origin.
 
 ## The generic Brain that implements it
 
@@ -71,7 +75,7 @@ its responsibilities and design. In terms of this contract:
 - **The Brain proposes, the Core disposes.** A `BrainDecision` is a proposal. Approval, safety,
   opt-out, quota, persistence, idempotency, sending and scheduling execution stay in the Core; the
   Brain sends nothing, writes nothing and holds no quota.
-- **Facts are read, never written.** Status semantics are kept: confirmed is relied on, discovered
+- **Facts are read and proposed, never written.** Status semantics are kept: confirmed is relied on, discovered
   is known but unconfirmed, a hypothesis guides and is never asserted or promoted. Product interest
   is read from facts under the key `interest` (the value names a catalog product; the status gives
   the level) and from the lead's source columns.

@@ -14,6 +14,9 @@ ACTION_BOOKKEEPING_FAILED = "action.bookkeeping_failed"  # sent, but a follow-up
 BRAIN_DECISION = "brain.decision"
 SAFETY_BLOCKED = "safety.blocked"
 
+FACT_PROPOSAL_ACCEPTED = "fact.proposal_accepted"  # a Brain proposal the Core recorded
+FACT_PROPOSAL_REJECTED = "fact.proposal_rejected"  # one it refused; `reason` says why
+
 PROSPECT_OPTED_OUT = "prospect.opted_out"
 PROSPECT_PAUSED = "prospect.paused"
 PROSPECT_HANDOFF = "prospect.handoff"

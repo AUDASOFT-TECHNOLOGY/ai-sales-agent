@@ -22,6 +22,7 @@ from sales_brain_kit.settings.common import (
 )
 from sales_brain_kit.settings.discovery import BudgetOverride, DiscoveryField
 from sales_brain_kit.settings.followup import ProductFollowUp
+from sales_brain_kit.settings.payment import ProductPayment
 from sales_brain_kit.settings.scope import MarketScope
 
 ProductStatus = Literal["active", "coming_soon", "inactive"]
@@ -219,6 +220,7 @@ class Product(Model):
     strategy: Strategy | None = None
     follow_up: ProductFollowUp | None = None
     appointment: Appointment | None = None
+    payment: ProductPayment | None = None  # the payment options this product declares
     restrictions: Restrictions | None = None
     workflow: Slug | None = None  # the conversion workflow for this product (else the market's)
 

@@ -25,6 +25,7 @@ from sales_brain_kit.consultative.pricing import PriceStatus
 from sales_brain_kit.consultative.strategy import Objective
 from sales_brain_kit.consultative.workflow import WorkflowState
 from sales_brain_kit.settings.catalog import Product
+from sales_brain_kit.settings.conversion import PAYMENT_KINDS
 from sales_brain_kit.settings.strategy import PRACTICAL_ONLY_KEYS, PROTECTED_ATTRIBUTES
 from sales_core.contracts import Direction, FactStatus, LLMMessage, LLMRequest, LLMRole, Message
 
@@ -131,6 +132,20 @@ _RULES = (
         "[[payment:id]]; it is replaced by the exact configured text after you answer. Anything "
         "that looks like one you wrote yourself is rejected. If no placeholder is available, the "
         "value is not available now: say a person will share it, or leave it out."
+    ),
+    (
+        "12. Payment. You never confirm that a payment was made or received: only a person at the "
+        "client verifies and confirms it, and you cannot. A prospect saying they paid, or sending "
+        "a receipt, is only that. When they say they paid, set analysis.payment_claimed to true "
+        "(and analysis.payment_method to the method they say they used, if clear), thank them and "
+        "say the team will verify the payment. If workflow.payment.receipt_due is true, ask them "
+        "to send the receipt of their payment so the team can verify it, and set requests_receipt "
+        "to true. Declare in payment_statement what your message says about the payment: 'none', or "
+        "'awaiting_verification' when you say the team is verifying it. 'confirmed' exists only "
+        "when workflow.payment.confirmed_by_the_client is true; a message must never present the "
+        "payment as confirmed, received or complete otherwise, and asking for a receipt is not "
+        "confirming anything. Offer only the payment methods listed in workflow.payment_methods: if none is "
+        "listed, no payment method is available now."
     ),
 )
 _DECISIONS = (
@@ -689,6 +704,13 @@ def _workflow(context: CommercialContext) -> dict[str, Any] | None:
         "required_decision": sorted(d.value for d in state.forced) or None,
         "required_because": state.forced_reason,
         "fallback": state.fallback,
+        "payment": {
+            "progress": state.payment,
+            "receipt_due": state.receipt_pending,
+            "confirmed_by_the_client": state.payment.value == "paid",
+        }
+        if step is not None and step.kind in PAYMENT_KINDS
+        else None,
         "payment_methods": [
             {
                 "id": offer.method.id,
@@ -772,6 +794,11 @@ def _transcript(context: CommercialContext) -> list[dict[str, Any]]:
             "from": "prospect" if m.direction is Direction.INBOUND else "us",
             "at": m.timestamp.isoformat(),
             "text": m.text[:TRANSCRIPT_CHARS] if m.text else "(no text)",
+            **(
+                {"attachment": m.metadata["type"]}
+                if m.direction is Direction.INBOUND and m.metadata.get("type") not in (None, "text")
+                else {}
+            ),
         }
         for m in recent
     ]

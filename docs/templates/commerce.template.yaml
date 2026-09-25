@@ -37,7 +37,7 @@ payment:
       label: TODO(fill-in) method name
       provider: TODO(fill-in) provider (never shown to the prospect)
       applies_to: {products: [], markets: [], countries: [], currencies: []}   # empty means any
-      confirmation: {mode: provider, note: TODO(fill-in) what the prospect should expect}   # provider | manual | none
+      confirmation: {mode: manual, note: TODO(fill-in) what the prospect should expect}   # manual | none: a person at the client always confirms a payment
       instructions:                # the most specific matching one is used, exactly as written
         - id: default
           url: https://todo.invalid/pay
@@ -79,10 +79,8 @@ conversion:
         - id: pay
           kind: payment
           requires: {steps: [register]}
-          payment: {methods: []}   # empty: every method that applies
-          completes_when: {facts: [{key: payment-status, equals: [received]}]}
+          payment: {methods: []}   # empty: every method the product offers. Done once the prospect claims or proves a payment (never confirmed by this)
         - id: confirm
-          kind: payment_confirmation
+          kind: payment_confirmation   # done only when a person at the client confirms the payment in the CRM; no completes_when
           human: optional
-          completes_when: {facts: [{key: payment-status, equals: [confirmed]}]}
         - {id: done, kind: close}

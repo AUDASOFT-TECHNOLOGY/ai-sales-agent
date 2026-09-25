@@ -23,7 +23,10 @@ sales_app ──► sales_core ◄── sales_integrations
   `sales_app` (which finds a Brain's `SETTINGS_SPEC` with `importlib`). Brains may import it.
   See [brain-settings.md](brain-settings.md). Markets, prices per place, payment and conversion
   workflows are generic capabilities of the kit driven by client configuration
-  ([brain-commerce.md](brain-commerce.md)); the Core is unchanged by them.
+  ([brain-commerce.md](brain-commerce.md)); they do not change the Core. The two generic Core
+  capabilities they rely on (facts a Brain proposes, and the payment model in which only a person
+  authorised by the client confirms a payment) are in
+  [core-facts-and-payments.md](core-facts-and-payments.md). The Core names no payment provider.
 
 `tests/architecture/` enforces these rules.
 

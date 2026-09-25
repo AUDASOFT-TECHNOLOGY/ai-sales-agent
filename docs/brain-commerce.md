@@ -82,7 +82,8 @@ place while the place is unknown is flagged to the model as such. Customer segme
 
 `payment.methods[]` are the client's ways of getting paid. A method has a `kind` (`online`, `offline`,
 `other`), a scope (`applies_to`: products, markets, countries, currencies; empty means any),
-`instructions[]`, a `confirmation` (`provider`, `manual`, `none`, with a note for the prospect) and
+`instructions[]`, a `confirmation` (`manual` or `none`, with a note for the prospect: a payment is
+always confirmed by a person at the client, never by a provider) and
 reference metadata that is never shown. An instruction is exact data: its `text`, its `fields`
 (`label: value` lines) and its payment `url`, each optionally per language, plus its own scope. An
 `online` method needs a link, an `offline` one needs text or fields.
@@ -128,7 +129,8 @@ conversation uses: the product's `workflow`, else the prospect's market's, else
 | `inform` | informational; never blocks (blocks only if it has `completes_when`) |
 | `register` | `registration.mode`: `self_service` (a link), `agent_assisted` (the agent collects `collects` facts), `human_assisted` (a person) |
 | `appointment`, `callback` | uses the step's, the product's or the client's `appointment` settings |
-| `payment`, `payment_confirmation` | offers the payment methods that apply (optionally a subset) |
+| `payment` | offers the payment methods the product enables (optionally a subset); done when the prospect claims or proves a payment, never confirmed by it |
+| `payment_confirmation` | done only when a person at the client confirmed the payment (`core_payment_confirmed`); no `completes_when` |
 | `handoff`, `close` | end the workflow: hand the conversation to a person, or close it |
 | `custom` | any other client-defined step, with its own completion |
 
@@ -168,21 +170,22 @@ configuration that would hand over (intents, triggers, cadences, steps, appointm
 | who carries a scheduled callback out when it falls due | `appointment.handled_by` (`human`: hand over; `agent`: the agent contacts the prospect) |
 | notice needed for a callback | `appointment.min_notice_hours` |
 
-## 9. The Core is unchanged, and what that leaves for a later slice
+## 9. The Core, and the payment model of Slice 6c
 
-Nothing in Slice 6b modifies `sales_core`. The exact text is delivered through the existing
+Slice 6b itself did not modify `sales_core`. The exact text is delivered through the existing
 `MessageDraft`; workflow position is derived from facts the Core already hands the Brain
 (`BrainRequest.facts`, written by staff or another system through the Facts tab) and from the prospect's
-`stage` (which the Brain already sets through `new_stage`). `sales_core` names none of these concepts (an
-architecture test).
+`stage` (which the Brain already sets through `new_stage`). `sales_core` names none of these concepts,
+except the payment claim, proof and confirmation of Slice 6c (an architecture test).
 
-This leaves two things that need the Core and are therefore **not** done here (see the report of this
-slice): a Brain cannot yet **propose facts** (what registration collected, that a payment proof arrived),
-so today those facts are recorded by staff or an external process; and a **payment provider's
-confirmation** has no inbound path, so `confirmation.mode: provider` describes the provider's role but
-the fact `payment_status` must still be recorded by something. Both belong to a separate Core slice
-(proposed facts written through `FactsWriter`, then a payment-event intake). A stage set by the model is
-the model's assertion and should not be used to decide that money arrived.
+Slice 6c ([core-facts-and-payments.md](core-facts-and-payments.md)) added what the Core owed the kit: a
+Brain can **propose facts** (validated and recorded by the Core), and the payment model is fixed:
+**the agent never confirms a payment.** A prospect saying they paid is the fact `payment_claimed`, a
+receipt they send is `payment_proof_received` (both only *discovered*), and only a person authorised by
+the client confirms (`core_payment_confirmed`, source `human`, through `PaymentConfirmationService`).
+`PAID` is derived from that fact alone. A product declares `payment.online` / `payment.offline`
+(`receipt_required`): a disabled option is never offered and its link cannot be sent. A stage set by the
+model is never proof that money arrived.
 
 ## 10. Keeping it generic
 
@@ -208,6 +211,7 @@ flags.
 - No currency conversion, taxes, discounts, instalments or customer segments.
 - A market rests on one configured country fact; a prospect whose country is unknown gets no market rule.
 - The register is resolved before the prospect's latest message; a mirrored language does not re-resolve it.
-- Workflow completion needs facts or a stage recorded elsewhere until the Core lets a Brain propose facts.
-- Payment confirmation by a provider has no inbound path yet.
+- The kit records only payment claims and proofs as proposals; other facts (what registration collected)
+  still come from staff or another system until the kit proposes them.
+- Nothing calls the Core's payment confirmation yet: the CRM/Admin that will is not built.
 - Approved provider message templates are still not used.

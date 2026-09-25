@@ -8,7 +8,7 @@ from sales_core.contracts._validation import freeze_mapping, require_aware, requ
 from sales_core.contracts.action import SalesAction
 from sales_core.contracts.conversation import Conversation, MessageDraft
 from sales_core.contracts.enums import SCHEDULABLE_ACTION_TYPES, DecisionType, SalesActionType
-from sales_core.contracts.fact import Fact
+from sales_core.contracts.fact import Fact, FactProposal
 from sales_core.contracts.ids import ClientId
 from sales_core.contracts.prospect import Prospect
 
@@ -26,6 +26,9 @@ class ClientContext:
         require_text(self.client_id, "client_id")
         require_text(self.display_name, "display_name")
         object.__setattr__(self, "settings", freeze_mapping(self.settings))
+
+
+MAX_PROPOSED_FACTS = 20  # per decision; more is a malfunction, not thoroughness
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -63,6 +66,9 @@ class BrainDecision:
     new_stage: str | None = None  # client-specific label, stored verbatim on the prospect
     rationale: str = ""  # human-readable reason, written to the audit trail
     metadata: Mapping[str, str] = field(default_factory=dict)
+    # What the Brain says it learned. Proposals only: the Core validates each one and records the
+    # ones it accepts. A Brain never writes facts.
+    proposed_facts: tuple[FactProposal, ...] = ()
 
     def __post_init__(self) -> None:
         if (self.decision_type is DecisionType.SEND_MESSAGE) != (self.message is not None):
@@ -78,3 +84,6 @@ class BrainDecision:
         elif self.next_follow_up_at is not None:
             object.__setattr__(self, "next_action_type", SalesActionType.FOLLOW_UP)
         object.__setattr__(self, "metadata", freeze_mapping(self.metadata))
+        object.__setattr__(self, "proposed_facts", tuple(self.proposed_facts))
+        if len(self.proposed_facts) > MAX_PROPOSED_FACTS:
+            raise ValueError(f"at most {MAX_PROPOSED_FACTS} facts may be proposed at once")

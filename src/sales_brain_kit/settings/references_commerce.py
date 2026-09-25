@@ -194,6 +194,39 @@ def _check_payment(problems: list[str], settings: Any) -> None:
                     "scope, so which one is used would be arbitrary"
                 )
 
+    _check_product_payment(problems, settings)
+
+
+def _check_product_payment(problems: list[str], settings: Any) -> None:
+    """A product's declared options must point at real methods of the right kind, and an enabled
+    option needs a method that can actually be used (an online one carries its payment link)."""
+    methods = {m.id: m for m in settings.payment.methods}
+    for p, product in enumerate(settings.catalog.products):
+        if product.payment is None:
+            continue
+        for name, option, kinds in (
+            ("online", product.payment.online, {"online"}),
+            ("offline", product.payment.offline, {"offline", "other"}),
+        ):
+            where = f"catalog.products[{p}].payment.{name}"
+            for method_id in option.methods:
+                if method_id not in methods:
+                    problems.append(f"{where}.methods: {method_id!r} is not a payment method")
+                elif methods[method_id].kind not in kinds:
+                    problems.append(f"{where}.methods: {method_id!r} is not an {name} method")
+            usable = [
+                m
+                for m in methods.values()
+                if m.status == "active"
+                and m.kind in kinds
+                and (not option.methods or m.id in option.methods)
+                and (not m.applies_to.products or product.id in m.applies_to.products)
+            ]
+            if option.enabled and not usable:
+                problems.append(
+                    f"{where}: enabled, but no active {name} payment method applies to this product"
+                )
+
 
 # ---- conversion workflows ------------------------------------------------------------------------
 
@@ -229,6 +262,12 @@ def _check_workflow(
 ) -> None:
     ids = [step.id for step in workflow.steps]
     _duplicates(problems, f"{where}.steps", ids)
+    kinds = {step.kind for step in workflow.steps}
+    if "payment" in kinds and "payment_confirmation" not in kinds:
+        problems.append(
+            f"{where}.steps: a payment step needs a payment_confirmation step after it: a payment "
+            "is only confirmed by a person at the client"
+        )
     known = set(ids)
     for s, step in enumerate(workflow.steps):
         _check_step(problems, settings, f"{where}.steps[{s}]", step, known, field_keys)

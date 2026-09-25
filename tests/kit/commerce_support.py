@@ -18,7 +18,12 @@ from brain_support import (
     turns,
 )
 
-from sales_core.contracts import FactSource
+from sales_core.contracts import (
+    PAYMENT_CLAIMED_KEY,
+    PAYMENT_CONFIRMED_KEY,
+    PAYMENT_PROOF_KEY,
+    FactSource,
+)
 
 ONGOING = {
     "action": REPLY,
@@ -117,7 +122,7 @@ def commerce_doc() -> dict[str, Any]:
                 "label": {"en": "Card payment", "fr": "Paiement par carte"},
                 "provider": "Test Provider",
                 "applies_to": {"currencies": ["EUR", "USD"]},
-                "confirmation": {"mode": "provider", "note": "Confirmed automatically."},
+                "confirmation": {"mode": "manual", "note": "A person confirms the payment."},
                 "instructions": [
                     {"id": "default", "text": "Pay securely here:", "url": PAY_URL},
                 ],
@@ -177,18 +182,10 @@ def commerce_doc() -> dict[str, Any]:
                         "id": "pay",
                         "kind": "payment",
                         "requires": {"steps": ["register"]},
-                        "completes_when": {
-                            "facts": [
-                                {"key": "payment_status", "equals": ["received", "confirmed"]}
-                            ]
-                        },
                     },
                     {
                         "id": "confirm",
                         "kind": "payment_confirmation",
-                        "completes_when": {
-                            "facts": [{"key": "payment_status", "equals": ["confirmed"]}]
-                        },
                     },
                     {"id": "done", "kind": "close"},
                 ],
@@ -201,6 +198,21 @@ def commerce_doc() -> dict[str, Any]:
 def registered() -> list:
     """Facts of a prospect who chose alpha and finished registering."""
     return [interested(), known("registration_status", "registered"), known("full_name", "Alex")]
+
+
+def claimed():
+    """The prospect said they paid: discovered, from the prospect. Nothing verified."""
+    return fact(PAYMENT_CLAIMED_KEY, "claimed", DISCOVERED, source=FactSource.PROSPECT)
+
+
+def proof_sent():
+    """The prospect sent something that may be a receipt."""
+    return fact(PAYMENT_PROOF_KEY, "image", DISCOVERED, source=FactSource.PROSPECT)
+
+
+def paid(source: FactSource = FactSource.HUMAN):
+    """What the Core records when a person authorised by the client confirms a payment."""
+    return fact(PAYMENT_CONFIRMED_KEY, "confirmed", CONFIRMED, source=source)
 
 
 def at_payment(place: str = "Country A") -> list:
@@ -224,13 +236,16 @@ __all__ = [
     "answer",
     "at_payment",
     "brain_answers",
+    "claimed",
     "commerce_doc",
     "country",
     "fact",
     "interested",
     "known",
     "make_brain",
+    "paid",
     "payload_of",
+    "proof_sent",
     "registered",
     "request",
 ]

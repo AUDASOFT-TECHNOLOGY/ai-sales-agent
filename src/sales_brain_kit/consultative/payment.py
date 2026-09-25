@@ -14,7 +14,12 @@ from dataclasses import dataclass
 
 from sales_brain_kit.consultative.applicability import Place, specificity
 from sales_brain_kit.consultative.language import localize
+from sales_brain_kit.settings.catalog import Product
 from sales_brain_kit.settings.payment import PaymentInstruction, PaymentMethod, PaymentSettings
+
+# What a prospect may send as a receipt: media of these kinds (a channel's own `type`). Whether it
+# really is one, and whether the payment is real, is for a person at the client to check.
+RECEIPT_MEDIA = frozenset({"image", "document"})
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -30,10 +35,20 @@ def applicable_methods(
     place: Place,
     currency: str | None,
     only: Sequence[str] = (),
+    product: Product | None = None,
 ) -> tuple[MethodOffer, ...]:
+    """The methods that may be offered now. A product that declares its payment options
+    (`Product.payment`) offers only the options it enables: a method of a disabled option is never
+    offered, so neither it nor its link can reach the prospect."""
     offers = []
     for method in settings.methods:
         if method.status != "active" or (only and method.id not in only):
+            continue
+        if (
+            product is not None
+            and product.payment is not None
+            and not product.payment.allows(method)
+        ):
             continue
         if specificity(method.applies_to, place, product_id=product_id, currency=currency) is None:
             continue
@@ -65,3 +80,16 @@ def render_instruction(
     if instruction.url is not None:
         lines.append(instruction.url)
     return "\n".join(lines)
+
+
+def receipt_required(product: Product | None, offers: Sequence[MethodOffer]) -> bool:
+    """Whether the product asks the prospect for a receipt after paying offline. Only a product that
+    declares it does, and only while an offline method is on offer."""
+    if product is None or product.payment is None:
+        return False
+    offline = product.payment.offline
+    return (
+        offline.enabled
+        and offline.receipt_required
+        and any(o.method.kind != "online" for o in offers)
+    )

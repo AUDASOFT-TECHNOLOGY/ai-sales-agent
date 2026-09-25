@@ -12,7 +12,7 @@ configuration, safe) is decided by `validation.py`.
 import json
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any, get_args
+from typing import Any, Literal, get_args
 
 from pydantic import Field, ValidationError
 
@@ -20,7 +20,7 @@ from sales_brain_kit.consultative.context import CommercialContext
 from sales_brain_kit.consultative.errors import BrainOutputError
 from sales_brain_kit.settings.common import Model
 from sales_brain_kit.settings.discovery import StopSignal
-from sales_core.contracts import LLMResponse
+from sales_core.contracts import LLMResponse, PaymentProgress, payment_progress
 
 STOP_SIGNALS = frozenset(get_args(StopSignal))
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
@@ -42,6 +42,9 @@ class Analysis(Model):
     out_of_scope: bool = False
     stop_signals: tuple[str, ...] = Field(default=(), max_length=10)
     disqualified: tuple[Disqualification, ...] = Field(default=(), max_length=10)
+    # The prospect says they have paid. Only what they said: nothing here confirms a payment.
+    payment_claimed: bool = False
+    payment_method: str | None = Field(default=None, max_length=64)  # the method they say they used
 
 
 class FollowUpChoice(Model):
@@ -65,6 +68,10 @@ class BrainOutput(Model):
     handoff_reason: str | None = Field(default=None, max_length=500)
     handoff_briefing: str | None = Field(default=None, max_length=1500)
     close_reason: str | None = Field(default=None, max_length=500)
+    requests_receipt: bool = False  # the message asks the prospect to send their receipt
+    # What the message says about the payment: nothing, that it is being verified, or that it is
+    # confirmed. `confirmed` is only open once a person at the client confirmed it (see validation).
+    payment_statement: Literal["none", "awaiting_verification", "confirmed"] = "none"
     rationale: str = Field(default="", max_length=2000)
 
 
@@ -140,6 +147,11 @@ def response_schema(context: CommercialContext) -> dict[str, Any]:
     objections = {o.code for o in settings.conversation.objections}
     for product in settings.catalog.products:
         objections |= {o.code for o in product.objections}
+    paid = payment_progress(context.request.facts) is PaymentProgress.PAID
+    offered = [
+        offer.method.id
+        for offer in (context.plan.workflow.methods if context.plan.workflow else ())
+    ]
     return _object(
         {
             "decision": {"type": "string", "enum": sorted(d.value for d in plan.allowed_decisions)},
@@ -157,6 +169,8 @@ def response_schema(context: CommercialContext) -> dict[str, Any]:
                         "type": "array",
                         "items": {"type": "string", "enum": sorted(STOP_SIGNALS)},
                     },
+                    "payment_claimed": {"type": "boolean"},
+                    "payment_method": _choice(offered),
                     "disqualified": {
                         "type": "array",
                         "items": _object(
@@ -179,6 +193,11 @@ def response_schema(context: CommercialContext) -> dict[str, Any]:
             "handoff_reason": _text(),
             "handoff_briefing": _text(),
             "close_reason": _text(),
+            "requests_receipt": {"type": "boolean"},
+            "payment_statement": {
+                "type": "string",
+                "enum": ["none", "awaiting_verification", *(["confirmed"] if paid else [])],
+            },
             "rationale": {"type": "string"},
         }
     )

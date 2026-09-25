@@ -16,7 +16,17 @@ from commerce_support import ACCOUNT_NAME, ACCOUNT_NUMBER, PAY_URL, commerce_doc
 
 from sales_brain_kit import ConsultativeSalesBrain, parse_settings
 from sales_core.approval import ApprovalMode
-from sales_core.contracts import ActionStatus, Fact, FactStatus, ProspectId, ProspectStatus
+from sales_core.contracts import (
+    CONFIRM_PAYMENTS,
+    ActionStatus,
+    ConfirmingActor,
+    Fact,
+    FactStatus,
+    PaymentConfirmation,
+    ProspectId,
+    ProspectStatus,
+)
+from sales_core.payments import PaymentConfirmationService
 from sales_integrations.fakes import FakeLLMProvider
 
 
@@ -25,6 +35,7 @@ def world(*answers, doc=None):
     brain = ConsultativeSalesBrain(llm, parse_settings(doc or commerce_doc()))
     h = build(brain=brain, mode=ApprovalMode.APPROVAL, prospects=[prospect("p1")])
     h.facts = h.repo  # the fake repository is also the FactsReader, as the Sheets adapter is
+    h.facts_writer = h.repo
     h.engine = h.new_engine()
     h.llm = llm
     return h
@@ -38,6 +49,22 @@ def record(h, **facts):
             for key, value in facts.items()
         ],
     )
+
+
+def confirm_as_a_person(h):
+    """What the client's CRM does once someone checked the payment: the Core records it."""
+    receipt = PaymentConfirmationService(
+        repository=h.repo, facts=h.repo, facts_writer=h.repo, clock=h.clock
+    ).confirm(
+        PaymentConfirmation(
+            client_id=h.repo.client_id,
+            prospect_id=ProspectId("p1"),
+            confirmation_id="c-1",
+            actor=ConfirmingActor(actor_id="user-1", permissions={CONFIRM_PAYMENTS}),
+            confirmed_at=NOW,
+        )
+    )
+    assert receipt.accepted
 
 
 def registered_in_market_a(h):
@@ -113,7 +140,7 @@ class TestWorkflowDecisionsThroughTheEngine:
 
         h = world(closing())
         registered_in_market_a(h)
-        record(h, payment_status="confirmed")
+        confirm_as_a_person(h)
         h.engine.process_inbound(h.engine.receive_inbound(inbound("Thank you")))
         assert h.prospect("p1").status is ProspectStatus.CLOSED
 

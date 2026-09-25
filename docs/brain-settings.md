@@ -164,4 +164,4 @@ Fact extraction and recording by the Brain, rebuttal counting (`after_rebuttals`
 templates (`templates`), `conversation.media_handling`, enforcement of the remaining `inbound`
 limits, the Admin API and Web Admin, ContactPolicy, and any real client content.
 `discovery.when_no_product.inbound` is superseded by `incoming.no_product` and is not read. Also not
-implemented: customer segments in pricing, and provider-confirmed payments (see brain-commerce.md).
+implemented: customer segments in pricing. A payment is never confirmed by a provider: only by a person at the client (see core-facts-and-payments.md).

@@ -124,7 +124,14 @@ class TestParsing:
     def test_media_has_no_text_but_keeps_its_kind(self):
         raw, headers = signed(payload(messages=[message(type="image", image={"id": "x"})]))
         (event,) = parser().parse(raw, headers)
-        assert event.message.text == "" and event.message.metadata == {"type": "image"}
+        assert event.message.text == ""
+        # the kind, and the provider's reference to the media: nothing is downloaded or stored
+        assert event.message.metadata == {"type": "image", "media_id": "x"}
+
+    def test_media_without_an_id_keeps_only_its_kind(self):
+        raw, headers = signed(payload(messages=[message(type="document", document={})]))
+        (event,) = parser().parse(raw, headers)
+        assert event.message.metadata == {"type": "document"}
 
     def test_several_messages_in_one_delivery(self):
         raw, headers = signed(payload(messages=[message(id="1"), message(id="2")]))

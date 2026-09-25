@@ -35,7 +35,7 @@ from sales_brain_kit.consultative.history import count_questions
 from sales_brain_kit.consultative.language import match_language
 from sales_brain_kit.consultative.output import STOP_SIGNALS, Analysis, BrainOutput
 from sales_brain_kit.settings.catalog import Disqualifier, Objection, Product
-from sales_core.contracts import DecisionType
+from sales_core.contracts import DecisionType, PaymentProgress, payment_progress
 
 MAX_REQUESTED_HORIZON = timedelta(days=366)
 MAX_RATIONALE_CHARS = 300
@@ -106,6 +106,7 @@ def validate_output(output: BrainOutput, context: CommercialContext) -> Validate
     stage = _check_stage(output, context, problems)
     touch = _check_follow_up(decision, output, selected, required, context, problems)
     _check_reasons(decision, output, context, problems)
+    _check_payment(decision, output, analysis, context, problems)
 
     if problems:
         raise BrainOutputError(problems)
@@ -316,6 +317,77 @@ def _check_exact_values(
             f"the limit is {MAX_EXPANDED_CHARS}"
         )
     return expanded, tuple(dict.fromkeys(p.token for p in found))
+
+
+# ---- payment: a claim is not a confirmation ------------------------------------------------------
+
+
+def _check_payment(
+    decision: DecisionType,
+    output: BrainOutput,
+    analysis: Analysis,
+    context: CommercialContext,
+    problems: list[str],
+) -> None:
+    """What the prospect says about paying, and the receipt a product may ask for after it.
+
+    Nothing here (nor anywhere in the kit) confirms a payment: the model may report that the
+    prospect says they paid, and it must ask for the receipt when the product requires one. A person
+    at the client verifies and confirms.
+    """
+    state = context.plan.workflow
+    offered = {o.method.id: o.method for o in state.methods} if state is not None else {}
+    method = analysis.payment_method
+    if method is not None and method not in offered:
+        problems.append(f"analysis.payment_method: {method!r} is not a payment method on offer now")
+    _check_payment_statement(decision, output, context, problems)
+    pending = state is not None and state.receipt_pending
+    if output.requests_receipt and not pending:
+        problems.append("requests_receipt: no receipt is due now")
+    if decision is not DecisionType.SEND_MESSAGE or not pending or state is None:
+        return
+    claimed = state.payment is PaymentProgress.CLAIMED or analysis.payment_claimed
+    paid_online = method in offered and offered[method].kind == "online"
+    if claimed and not paid_online and not output.requests_receipt:
+        problems.append(
+            "the prospect says they paid and this product requires a receipt: ask them to send "
+            "the receipt of payment and set requests_receipt to true (do not say the payment is "
+            "confirmed)"
+        )
+
+
+def _check_payment_statement(
+    decision: DecisionType,
+    output: BrainOutput,
+    context: CommercialContext,
+    problems: list[str],
+) -> None:
+    """A message may present a payment as confirmed only once a person at the client confirmed it.
+
+    The model declares what its message says about the payment (`payment_statement`), and that is
+    held to the facts: `confirmed` is refused unless `payment_progress` is `PAID`, which only a
+    confirmation recorded by the Core can make it. A claim, a receipt, a receipt request, a stage or
+    the model's own wish do not. The same goes for a stage that marks the sale as won.
+    """
+    paid = payment_progress(context.request.facts) is PaymentProgress.PAID
+    statement = output.payment_statement
+    if statement == "confirmed" and not paid:
+        problems.append(
+            "payment_statement: the payment is not confirmed (only a person at the client "
+            "confirms it): do not present it as confirmed, received or complete"
+        )
+    if statement != "none" and decision is not DecisionType.SEND_MESSAGE:
+        problems.append("payment_statement: only a message can say something about the payment")
+    workflow = context.plan.workflow
+    confirms_payment = workflow is not None and any(
+        step.kind == "payment_confirmation" for step in workflow.workflow.steps
+    )
+    won = {s.id for s in context.settings.stages if s.milestone == "won"}
+    if output.stage in won and confirms_payment and not paid:
+        problems.append(
+            f"stage: {output.stage!r} marks the sale as won, which needs the payment confirmed by "
+            "a person at the client"
+        )
 
 
 # ---- the message ------------------------------------------------------------------------------------

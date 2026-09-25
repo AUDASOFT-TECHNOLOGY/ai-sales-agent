@@ -26,6 +26,7 @@ from sales_brain_kit.consultative.follow_up import FollowUpPolicy
 from sales_brain_kit.consultative.history import HistoryView
 from sales_brain_kit.consultative.interest import InterestLevel
 from sales_brain_kit.consultative.market import MarketContext
+from sales_brain_kit.consultative.payment import RECEIPT_MEDIA
 from sales_brain_kit.consultative.pricing import resolve_price
 from sales_brain_kit.consultative.selection import ProductSelection, SelectionBasis
 from sales_brain_kit.consultative.workflow import (
@@ -41,6 +42,7 @@ from sales_core.contracts import (
     DecisionType,
     Direction,
     SalesActionType,
+    payment_progress,
 )
 
 
@@ -151,6 +153,9 @@ def plan_conversation(
             focus=selection.focus,
             place=market.place,
             currency=resolve_price(primary, market.place).currency if primary else None,
+            payment=payment_progress(request.facts),
+            receipt_in_hand=request.action.action_type is SalesActionType.REPLY
+            and _is_receipt(history),
         )
     if by_person:
         discovery = not_needed("a promised callback is not the moment to ask questions")
@@ -204,6 +209,12 @@ def plan_conversation(
         terminal=terminal,
         workflow=workflow,
     )
+
+
+def _is_receipt(history: HistoryView) -> bool:
+    """The message being answered is media that may be a receipt (the prospect just sent it)."""
+    last = history.last_inbound
+    return last is not None and last.metadata.get("type") in RECEIPT_MEDIA
 
 
 def _callback_by_person(settings: ConsultativeSalesSettings, primary: Product | None) -> bool:

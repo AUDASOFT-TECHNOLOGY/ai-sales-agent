@@ -10,6 +10,9 @@ Public entry points (all serialised by one lock, so a client has a single writer
 - `dispatch()`  Phase B: send APPROVED actions after re-checking safety.
 - `receive_inbound()` / `process_inbound()`  Phase C: store a reply fast, then handle it.
 
+Facts a Brain proposes with its decision are validated and recorded here, through the `FactsWriter`
+port, before the decision takes effect: a Brain never writes facts itself.
+
 Inbound conversations (Phase C) are outside the daily outbound quota and are asked of the Brain
 with `ContactOrigin.INBOUND`. What happens with a sender who is not a prospect is `InboundPolicy`.
 """
@@ -25,6 +28,7 @@ from sales_core.contracts import (
     ActionId,
     ActionPriority,
     ActionStatus,
+    BrainDecision,
     BrainRequest,
     Channel,
     ClientContext,
@@ -33,6 +37,7 @@ from sales_core.contracts import (
     Conversation,
     DecisionType,
     Direction,
+    Fact,
     InboundMessage,
     Message,
     MessageId,
@@ -62,8 +67,16 @@ from sales_core.engine.models import (
     RunCollector,
     RunReport,
 )
+from sales_core.facts import ProposalRejection, review_proposals
 from sales_core.planner import plan_daily_actions
-from sales_core.ports import Brain, Clock, FactsReader, MessagingChannel, SalesRepository
+from sales_core.ports import (
+    Brain,
+    Clock,
+    FactsReader,
+    FactsWriter,
+    MessagingChannel,
+    SalesRepository,
+)
 from sales_core.safety import (
     BlockReason,
     SafetyVerdict,
@@ -94,9 +107,17 @@ class Engine:
         clock: Clock,
         config: EngineConfig,
         facts: FactsReader | None = None,
+        facts_writer: FactsWriter | None = None,
     ) -> None:
         if repository.client_id != client.client_id:
             raise ValueError("repository is bound to a different client than the engine")
+        if facts_writer is not None:
+            if facts_writer.client_id != client.client_id:
+                raise ValueError("facts writer is bound to a different client than the engine")
+            if facts is None:
+                # Proposals are checked against what is already known, and a fact nobody reads
+                # back would never reach the Brain.
+                raise ValueError("a facts writer needs a facts reader")
         self._client = client
         self._repo = repository
         self._brain = brain
@@ -104,6 +125,7 @@ class Engine:
         self._clock = clock
         self._config = config
         self._facts = facts  # None: no facts are known, the Brain gets an empty collection
+        self._facts_writer = facts_writer  # None: facts a Brain proposes are refused, not lost
         self._lock = threading.RLock()
         self._events: list[AuditEvent] = []  # audit events not yet written
 
@@ -156,7 +178,8 @@ class Engine:
         if prospect is None or not verdict.allowed:
             self._block(action, prospect, verdict, run)
             return
-        decision = self._brain.decide(self._request_for(action, prospect, now))
+        request = self._request_for(action, prospect, now)
+        decision = self._brain.decide(request)
         validate_decision(decision, now)
         self._emit_for(
             ev.BRAIN_DECISION,
@@ -168,6 +191,7 @@ class Engine:
             next_action_at=decision.next_follow_up_at,
             stage=decision.new_stage,
         )
+        facts = self._review_proposed_facts(action, request, decision)
 
         if self._dry_run:
             self._emit_for(
@@ -175,9 +199,11 @@ class Engine:
                 action,
                 decision=decision.decision_type,
                 message=decision.message.text if decision.message else None,
+                proposed_facts=len(decision.proposed_facts) or None,
             )
             run.outcome(action.action_id, None, f"dry run: {decision.decision_type}")
             return
+        self._record_facts(action, prospect, facts)
 
         if decision.decision_type is DecisionType.SEND_MESSAGE:
             status = status_after_proposal(self._config.mode)
@@ -198,6 +224,66 @@ class Engine:
         elif decision.decision_type is DecisionType.CLOSE:
             self._emit_for(ev.PROSPECT_CLOSED, action, rationale=decision.rationale or None)
         run.outcome(action.action_id, ActionStatus.COMPLETED, str(decision.decision_type))
+
+    def _review_proposed_facts(
+        self, action: SalesAction, request: BrainRequest, decision: BrainDecision
+    ) -> tuple[Fact, ...]:
+        """The facts the Core accepts from a Brain's proposals. Refusals are audited, never raised:
+        a bad proposal costs the Brain that fact, not the whole decision.
+
+        The record is dated by the action (persisted before the Brain is asked, so a retry has the
+        same date) and signed with its id: the same result processed twice is the same observation.
+        """
+        proposals = decision.proposed_facts
+        if not proposals:
+            return ()
+        if self._facts_writer is None:
+            for proposal in proposals:
+                self._emit_for(
+                    ev.FACT_PROPOSAL_REJECTED,
+                    action,
+                    actor="brain",
+                    key=proposal.key,
+                    reason=ProposalRejection.NO_WRITER,
+                )
+            return ()
+        review = review_proposals(
+            proposals,
+            client_id=self._client.client_id,
+            prospect=request.prospect,
+            conversation=request.conversation,
+            existing=request.facts,
+            recorded_at=action.due_at,
+            recorded_by=f"brain-proposal:{action.action_id}",
+        )
+        for rejected in review.rejected:
+            self._emit_for(
+                ev.FACT_PROPOSAL_REJECTED,
+                action,
+                actor="brain",
+                key=rejected.proposal.key,
+                reason=rejected.reason,
+            )
+        return review.accepted
+
+    def _record_facts(
+        self, action: SalesAction, prospect: Prospect, facts: tuple[Fact, ...]
+    ) -> None:
+        """Persist accepted facts through the writer before the decision takes effect. If this
+        fails the action fails with it and is retried: nothing of the decision has been applied."""
+        if not facts or self._facts_writer is None:
+            return
+        self._facts_writer.append_facts(prospect.prospect_id, facts)
+        for fact in facts:
+            evidence = fact.evidence
+            self._emit_for(
+                ev.FACT_PROPOSAL_ACCEPTED,
+                action,
+                actor="brain",
+                key=fact.key,
+                status=fact.status,
+                source=evidence.source if evidence else None,
+            )
 
     def _request_for(self, action: SalesAction, prospect: Prospect, now: datetime) -> BrainRequest:
         conversation = self._repo.get_conversation(action.prospect_id)

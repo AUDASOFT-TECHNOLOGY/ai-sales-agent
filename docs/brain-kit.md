@@ -90,8 +90,9 @@ lead's source columns (`discovery.fields[].source_columns`) count as *discovered
 shown facts that are declared discovery fields (plus `language`), and never a protected attribute
 unless a qualification rule of a product in focus needs it.
 
-Nothing here promotes a status. Extracting facts from the conversation and recording them are later
-slices; the Core has no channel for a Brain to propose facts yet.
+Nothing here promotes a status. The Core now accepts facts a Brain proposes
+(`BrainDecision.proposed_facts`, see [core-facts-and-payments.md](core-facts-and-payments.md)); the kit's
+output schema does not emit proposals yet, so extraction from the conversation is a later kit slice.
 
 ## 4. Product catalog and product interest
 
@@ -235,9 +236,12 @@ objective `advance_workflow`. See [brain-commerce.md](brain-commerce.md).
 
 ## 11. Known limitations
 
-- Facts are not extracted or recorded: a Brain cannot propose facts through the current contracts, so
-  workflow steps that depend on what the agent collected (registration data, a payment proof) rely on
-  facts recorded by staff or another system until a Core slice adds proposed facts.
+- The kit does not propose facts yet: the Core accepts them (`BrainDecision.proposed_facts`) but the
+  model's output schema carries none, so workflow steps that depend on what the agent collected
+  (registration data, a payment proof) rely on facts recorded by staff or another system until the
+  kit emits proposals. Payment is the exception: the kit proposes `payment_claimed` and
+  `payment_proof_received` (discovered), and only a person's confirmation in the client's CRM records
+  `core_payment_confirmed`.
 - Rebuttals are not counted (`max_rebuttals > 0` and `handoff.triggers[].after_rebuttals` are
   guidance only); only the no-rebuttal handoff is enforced.
 - Approved provider templates (`templates`) are not selected; the Brain always writes free text.

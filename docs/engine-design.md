@@ -210,6 +210,11 @@ Only from explicit state, never by reading message text:
    the decision must survive from proposal to approval, possibly days and a restart later, and a
    human should be able to edit it in the Sheet.
 4. **`SalesRepository.find_prospect_by_contact(phone/email)`** for mapping inbound messages.
+5. **`BrainDecision.proposed_facts`** and an optional `FactsWriter` on the Engine: in Phases A and C,
+   after the Brain answers and before the decision is applied, the Engine validates the proposed facts
+   and records the accepted ones (audited as `fact.proposal_accepted` / `fact.proposal_rejected`). See
+   [core-facts-and-payments.md](core-facts-and-payments.md). A payment is confirmed only by a person at
+   the client, through `PaymentConfirmationService`, never through the Engine.
 
 ## 9. Layout
 
