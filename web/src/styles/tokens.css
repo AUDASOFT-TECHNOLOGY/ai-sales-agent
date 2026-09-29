@@ -1,0 +1,258 @@
+/* REVENSA · Nocturne design tokens.
+   Source of truth: docs/naga-client-ui-design-system.md (sections 2 to 9, 28).
+   Components consume semantic tokens only; raw scales exist to define them. */
+
+@property --mood-a {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.16;
+}
+@property --mood-b {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.09;
+}
+@property --mood-c {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+@property --ring-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* ── Primitives ─────────────────────────────── */
+  --abyss-0: #070914;
+  --abyss-1: #0a0d1b;
+  --abyss-2: #0e1224;
+  --abyss-3: #141a30;
+  --abyss-4: #1c2440;
+
+  --aether-200: #ddd6ff;
+  --aether-300: #c3b7ff;
+  --aether-400: #a996ff;
+  --aether-500: #8470f2;
+  --aether-600: #6c57db;
+  --aether-700: #5443b8;
+  --aether-800: #3a2f85;
+  --aether-900: #241c55;
+
+  --ice-200: #c6ebf8;
+  --ice-300: #9eddf3;
+  --ice-400: #6fcbeb;
+  --ice-500: #5cc3e6;
+  --ice-600: #3ba6cc;
+  --ice-700: #2a83a6;
+  --ice-900: #0e3345;
+
+  --emerald-300: #8debc2;
+  --emerald-400: #5fe0a8;
+  --emerald-500: #34c98e;
+  --emerald-600: #22a672;
+  --emerald-900: #0c3b2b;
+
+  --amber-300: #f7d58b;
+  --amber-400: #f2be5c;
+  --amber-500: #e8a63a;
+  --amber-600: #c4861f;
+  --amber-900: #45300c;
+
+  --rose-300: #f9b4c2;
+  --rose-400: #f58aa0;
+  --rose-500: #ec6584;
+  --rose-600: #c94766;
+  --rose-900: #451523;
+
+  --champagne-300: #f1e6d3;
+  --champagne-400: #e9dac1;
+  --champagne-500: #d4be98;
+
+  /* ── Semantic ───────────────────────────────── */
+  --bg: var(--abyss-0);
+  --text-1: #eef1f8;
+  --text-2: #b7bfd3;
+  --text-3: #98a2bc;
+  --text-disabled: #66718f;
+
+  --line-1: rgb(255 255 255 / 0.07);
+  --line-2: rgb(255 255 255 / 0.12);
+  --line-control: rgb(255 255 255 / 0.38);
+
+  --agent: var(--aether-500);
+  --agent-text: var(--aether-400);
+  --agent-fill: var(--aether-600);
+  --action: var(--ice-500);
+  --action-text: var(--ice-400);
+  --action-hi: var(--ice-300);
+  --success: var(--emerald-500);
+  --success-text: var(--emerald-400);
+  --attention: var(--amber-500);
+  --attention-text: var(--amber-400);
+  --danger: var(--rose-500);
+  --danger-text: var(--rose-400);
+  --seal: var(--champagne-400);
+
+  --tint-agent: 132 112 242;
+  --tint-action: 92 195 230;
+  --tint-success: 52 201 142;
+  --tint-attention: 232 166 58;
+  --tint-danger: 236 101 132;
+  --tint-seal: 233 218 193;
+  --tint-neutral: 183 191 211;
+  --tint: var(--tint-action);
+
+  --focus-ring: var(--ice-300);
+  --on-action: #04121a;
+  --on-success: #031a12;
+  --on-danger: #1e0710;
+  --on-agent: #ffffff;
+
+  /* ── Type ───────────────────────────────────── */
+  --font-ui: "Geist Variable", "IBM Plex Sans Arabic", system-ui, sans-serif;
+  --font-voice: "Plus Jakarta Sans Variable", "IBM Plex Sans Arabic", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  /* ── Space (4 px base) ──────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-14: 56px;
+  --space-18: 72px;
+  --space-24: 96px;
+
+  --gutter: 14px;
+
+  /* ── Radius ─────────────────────────────────── */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-2xl: 36px;
+  --radius-full: 9999px;
+
+  /* ── Glass ──────────────────────────────────── */
+  --glass-1-fill: linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.02));
+  --glass-2-fill: linear-gradient(180deg, rgb(255 255 255 / 0.085), rgb(255 255 255 / 0.03));
+  --glass-4-fill: linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 40%),
+    rgb(14 18 36 / 0.78);
+  --glass-1-solid: #0f1324;
+  --glass-2-solid: #141a30;
+  --glass-4-solid: #0e1224;
+  --well-fill: rgb(0 0 0 / 0.3);
+
+  /* ── Shadows ────────────────────────────────── */
+  --shadow-1: 0 1px 2px rgb(2 3 10 / 0.4), 0 6px 20px -10px rgb(2 3 10 / 0.55);
+  --shadow-2: 0 2px 4px rgb(2 3 10 / 0.35), 0 18px 40px -16px rgb(2 3 10 / 0.7);
+  --shadow-3: 0 2px 4px rgb(2 3 10 / 0.35), 0 22px 48px -18px rgb(2 3 10 / 0.7),
+    0 0 60px -14px rgb(var(--tint) / 0.35);
+  --shadow-4: 0 40px 120px -24px rgb(2 3 10 / 0.85), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-inset: inset 0 1px 2px rgb(2 3 10 / 0.5);
+  --shadow-focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--focus-ring);
+
+  /* ── Motion ─────────────────────────────────── */
+  --dur-instant: 90ms;
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 350ms;
+  --dur-slower: 500ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ── Layout ─────────────────────────────────── */
+  --rail-w: 216px;
+  --rail-w-collapsed: 64px;
+  --bar-h: 52px;
+  --tabbar-h: 58px;
+}
+
+@media (min-width: 600px) {
+  :root {
+    --gutter: 18px;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --gutter: 24px;
+  }
+}
+@media (min-width: 1680px) {
+  :root {
+    --gutter: 32px;
+  }
+}
+
+/* Mood: the shell sets data-mood from the agent's aggregate state (doc section 3.2). */
+:root {
+  --mood-a: 0.16;
+  --mood-b: 0.09;
+  --mood-c: 0;
+  --mood-c-tint: var(--tint-attention);
+  transition:
+    --mood-a 1.2s ease,
+    --mood-b 1.2s ease,
+    --mood-c 1.2s ease;
+}
+:root[data-mood="working"] {
+  --mood-a: 0.22;
+  --mood-b: 0.12;
+}
+:root[data-mood="attention"] {
+  --mood-a: 0.12;
+  --mood-c: 0.14;
+  --mood-c-tint: var(--tint-attention);
+}
+:root[data-mood="win"] {
+  --mood-a: 0.14;
+  --mood-c: 0.16;
+  --mood-c-tint: var(--tint-success);
+}
+:root[data-mood="trouble"] {
+  --mood-a: 0.1;
+  --mood-c: 0.12;
+  --mood-c-tint: var(--tint-danger);
+}
+:root[data-mood="paused"] {
+  --mood-a: 0.07;
+  --mood-b: 0.04;
+}
+
+/* Blur radii (doc 7.1): halved on small screens, reduced in lite performance mode (26.3). */
+:root {
+  --glass-blur-1: 20px;
+  --glass-blur-2: 28px;
+  --glass-blur-4: 40px;
+}
+@media (max-width: 599px) {
+  :root {
+    --glass-blur-1: 10px;
+    --glass-blur-2: 14px;
+    --glass-blur-4: 20px;
+  }
+}
+:root[data-perf="lite"] {
+  --glass-blur-1: 8px;
+  --glass-blur-2: 10px;
+  --glass-blur-4: 14px;
+}
+
+/* Contrast preference (doc 27.1): stronger borders and solid fills. */
+@media (prefers-contrast: more) {
+  :root {
+    --line-1: rgb(255 255 255 / 0.28);
+    --line-2: rgb(255 255 255 / 0.4);
+    --text-2: #dbe1ee;
+    --text-3: #c3cade;
+  }
+}

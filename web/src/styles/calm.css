@@ -1,0 +1,356 @@
+/* Calm pass ("show less, reveal more when needed"): more air, one column, fewer boxes, details on demand.
+   Loaded last on purpose: it refines spacing and hierarchy without touching the palette or the glass. */
+
+/* ── Space ────────────────────────────────────── */
+.page { gap: 24px; padding-block: 8px 32px; }
+.page--focus { max-width: 900px; }
+.prospects.page--focus { max-width: 1100px; }
+.dashboard.page--focus { max-width: 1100px; }
+.page-head { gap: 14px; }
+.section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.section__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.section__title { margin: 0; }
+.link-btn { font-size: 13px; min-height: 32px; }
+.divider { margin-block: 4px; }
+
+/* ── Disclosure: secondary detail on demand ───── */
+.disclosure { border-block-start: 1px solid var(--line-1); }
+.disclosure:last-child { border-block-end: 1px solid var(--line-1); }
+.disclosure__btn { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 46px; text-align: start; color: var(--text-1); border-radius: var(--radius-md); }
+.disclosure__title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.disclosure__hint { margin-inline-start: auto; font-size: 13px; }
+.disclosure__chev { flex: none; color: var(--text-2); transition: transform var(--dur-base) var(--ease-out); margin-inline-start: auto; }
+.disclosure__hint + .disclosure__chev { margin-inline-start: 0; }
+.disclosure[data-open] .disclosure__chev { transform: rotate(180deg); }
+.disclosure__panel { overflow: hidden; }
+.disclosure__inner { display: grid; gap: 14px; padding-block: 4px 18px; }
+.disclosure-group { display: grid; }
+
+/* ── Needs you: rows, not cards ───────────────── */
+.need-list { display: grid; gap: 10px; }
+.need-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border-radius: var(--radius-xl);
+  background: var(--glass-1-fill);
+  border: 1px solid rgb(var(--tint-attention) / 0.32);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), var(--shadow-1);
+}
+.need-row__text { display: grid; gap: 6px; min-width: 0; }
+.need-row__meta { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 699px) {
+  .need-row { grid-template-columns: auto minmax(0, 1fr); padding: 14px 12px; gap: 12px; }
+  .need-row .btn { grid-column: 1 / -1; width: 100%; }
+}
+.need-preview { padding: 12px 14px; border-radius: var(--radius-lg); background: rgb(0 0 0 / 0.26); border: 1px solid var(--line-1); font-size: 14px; line-height: 22px; color: var(--text-1); }
+
+/* ── Today: a short thread, the rest in a drawer ─ */
+.thread__item, .thread__now { padding-block: 8px; }
+.thread__body { gap: 3px; }
+
+/* ── Results: one number that matters ─────────── */
+.results { padding: 24px; }
+.results__grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 28px; align-items: center; }
+.results__main { display: grid; gap: 8px; }
+.results__num { line-height: 1; }
+.results__arrow { display: inline; vertical-align: -2px; margin-inline-end: 4px; }
+.results__side { display: grid; gap: 18px; margin: 0; }
+.results__side dd { margin: 0; }
+.results__note { margin-block-start: 16px; padding-block-start: 12px; border-block-start: 1px solid var(--line-1); }
+@media (max-width: 799px) {
+  .results { padding: 18px 14px; }
+  .results__grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .results__side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ── Prospects: a list you can read at a glance ── */
+.plist { overflow: hidden; --glass-radius: var(--radius-xl); }
+.plist table { width: 100%; border-collapse: collapse; }
+.plist tr { border-block-end: 1px solid var(--line-1); transition: background var(--dur-fast) var(--ease-out); }
+.plist tr:last-child { border-block-end: 0; }
+@media (hover: hover) { .plist tbody tr:hover { background: rgb(255 255 255 / 0.035); } }
+.plist tr[data-selected] { background: rgb(var(--tint-action) / 0.09); }
+.plist th, .plist td { text-align: start; padding: 0; font-weight: inherit; vertical-align: middle; }
+.plist__who { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 8px 14px 18px; text-align: start; border-radius: var(--radius-md); }
+.plist__text { display: grid; gap: 4px; min-width: 0; }
+.plist__why { color: var(--text-2); font-size: 13px; }
+.plist__status { width: 150px; padding-inline: 8px; }
+.plist__next { width: 200px; padding: 0 18px 0 8px; }
+.plist__next > span:last-child { display: block; }
+@media (max-width: 999px) {
+  .plist table, .plist tbody, .plist tr, .plist th, .plist td { display: block; width: auto; }
+  .plist__who { padding: 14px 14px 8px; }
+  .plist td.plist__status, .plist td.plist__next { padding: 0 14px 0 80px; width: auto; }
+  .plist td.plist__status { padding-block-end: 4px; }
+  .plist td.plist__next { padding-block: 6px 14px; }
+}
+.prospects__tools { justify-content: flex-start; gap: 10px; }
+.search-field { min-height: 38px; min-width: min(100%, 260px); }
+.dossier__inner { padding: 20px 18px 24px; gap: 16px; }
+.dossier__head { gap: 12px; }
+.drawer { width: min(460px, 100vw); }
+.drawer__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 18px 10px; }
+.drawer__body { display: grid; gap: 22px; padding: 10px 18px 24px; }
+.dossier .drawer__head { display: none; }
+.bank { padding-inline: 8px; }
+.bank__head { padding-block-end: 14px; }
+
+/* ── Conversation: the thread, and nothing beside it ─ */
+.convo[data-wide] { grid-template-columns: 300px minmax(0, 1fr); gap: 16px; }
+.convo-item { padding: 10px 12px; gap: 10px; }
+.convo-item__text { gap: 3px; }
+.convo-list__head { padding: 16px 14px 8px; }
+.thread-view__head { padding: 12px 16px; gap: 10px; }
+.msgs { padding: 18px 18px 12px; gap: 8px; }
+.msg { max-width: min(600px, 84%); }
+.msg__bubble { padding: 10px 14px; font-size: 14px; line-height: 21px; }
+.msg__time { padding-block-start: 2px; }
+.draft { padding: 12px 14px; font-size: 14px; line-height: 21px; gap: 10px; }
+.pay-notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 16px; background: rgb(var(--tint-attention) / 0.1); border-block-end: 1px solid rgb(var(--tint-attention) / 0.28); }
+.pay-notice--done { background: rgb(var(--tint-success) / 0.09); border-color: rgb(var(--tint-success) / 0.26); }
+.handoff { margin: 12px 16px 0; padding: 12px 14px; gap: 12px; }
+.composer { padding: 12px 16px 14px; }
+@media (max-width: 599px) {
+  .msgs { padding: 14px 12px 12px; }
+  .msg { max-width: 92%; }
+  .thread-view__head { padding: 12px; flex-wrap: wrap; }
+}
+
+/* ── Configure: a command center — every domain as a card, one full-width detail below ─── */
+.configure { padding-block-end: 40px; max-width: none; display: grid; gap: 18px; }
+.cc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.cc-card { padding: 14px; display: grid; gap: 10px; text-align: start; cursor: pointer; transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-fast) var(--ease-out); }
+@media (hover: hover) { .cc-card:hover { transform: translateY(-2px); } }
+.cc-card[data-active] { --glass-edge-a: 0.6; }
+.cc-card__top { display: flex; align-items: flex-start; justify-content: space-between; }
+.cc-card__icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--radius-md); color: var(--ice-300); background: rgb(var(--tint-action) / 0.12); border: 1px solid rgb(var(--tint-action) / 0.26); }
+.cc-dot { width: 8px; height: 8px; border-radius: 50%; margin-block-start: 4px; flex: none; }
+.cc-dot[data-tint="success"] { background: var(--emerald-400); box-shadow: 0 0 8px rgb(var(--tint-success) / 0.7); }
+.cc-dot[data-tint="attention"] { background: var(--amber-400); box-shadow: 0 0 8px rgb(var(--tint-attention) / 0.7); }
+.cc-card__stat { margin-block-start: auto; padding-block-start: 8px; border-block-start: 1px solid var(--line-1); font-size: 11px; color: var(--text-3); }
+.cc-card__stat b { color: var(--text-1); font-weight: 600; }
+.cc-detail { container-type: inline-size; padding: 22px; display: grid; gap: 18px; --glass-radius: var(--radius-2xl); }
+.cc-detail__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.cc-detail__body { display: grid; gap: 18px; }
+.cfg-group { display: grid; gap: 16px; }
+.cfg-group__head { display: flex; align-items: center; gap: 10px; }
+.cfg-group__icon { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--radius-sm); background: rgb(var(--tint-action) / 0.14); border: 1px solid rgb(var(--tint-action) / 0.28); color: var(--ice-300); }
+.cfg-fields { display: grid; gap: 18px; border: 0; padding: 0; margin: 0; min-width: 0; max-width: 600px; }
+.switch-row { gap: 12px; }
+@media (max-width: 799px) { .cc-detail { padding: 18px 14px; gap: 16px; } }
+.dial { gap: 24px; }
+
+/* ── Runway: one calm column ──────────────────── */
+.runway-page { max-width: 640px; gap: 24px; }
+.runway-hero { justify-items: center; text-align: center; gap: 16px; }
+.runway-hero .wordmark { margin-block-end: 6px; }
+.runway__node { width: 40px; height: 40px; }
+.runway__line { inset-block-start: 20px; }
+.runway__gate { gap: 8px; }
+.runway__gate:not([data-state="current"]) .runway__label { display: none; }
+.runway__gate[data-state="current"] .runway__label { position: static; max-width: 130px; font-size: 13px; color: var(--text-1); }
+.runway { padding-block-end: 4px; }
+.gate-card { padding: 22px; gap: 16px; }
+.gate-form { max-width: none; gap: 16px; }
+.runway-done { display: grid; justify-items: center; }
+@media (max-width: 699px) {
+  .gate-card { padding: 18px 14px; }
+  .runway__gate[data-state="current"] .runway__label { position: absolute; inset-block-start: 50px; inset-inline: 0; max-width: none; }
+  .runway { padding-block-end: 24px; }
+}
+
+/* Agent Voice: open spacing keeps the sans readable at every size. */
+.voice { letter-spacing: 0; word-spacing: 0.06em; }
+.voice-l { letter-spacing: -0.01em; }
+
+/* Prospects header: title, then one row of tools */
+.prospects .page-head { display: grid; gap: 28px; align-items: start; }
+.prospects__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; width: 100%; }
+.prospects__tools .search-field { flex: 1 1 280px; }
+
+.runway-note { display: grid; justify-items: center; gap: 4px; text-align: center; }
+
+/* Keep focused and scrolled-to elements clear of the floating tab bar */
+@media (max-width: 599px) { html { scroll-padding-block-end: calc(var(--tabbar-h) + 32px); } }
+
+@media (max-width: 479px) {
+  .runway__node { width: 42px; height: 42px; font-size: 16px; }
+  .runway__line { inset-block-start: 21px; inset-inline: 22px; }
+  .runway__gates { gap: 0; }
+}
+
+/* ── Home: opportunities ──────────────────────── */
+.opp-list { display: grid; gap: 8px; }
+.opp-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: var(--radius-xl); background: var(--glass-1-fill); border: 1px solid var(--line-2); transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out); }
+@media (hover: hover) { .opp-row:hover { border-color: rgb(var(--tint-success) / 0.4); background: var(--glass-2-fill); } }
+.opp-row__text { display: grid; gap: 3px; flex: 1; min-width: 0; }
+@media (max-width: 599px) { .opp-row { flex-wrap: wrap; padding: 12px; gap: 10px; } .opp-row__text { flex-basis: calc(100% - 64px); } }
+
+/* ── Sales path: a vertical, plain-language journey ─ */
+.spath-wrap { display: grid; gap: 16px; }
+.spath { display: grid; gap: 0; }
+.spath__step { position: relative; display: flex; gap: 14px; padding-block-end: 16px; }
+.spath__step:last-child { padding-block-end: 0; }
+.spath__step:not(:last-child)::before { content: ""; position: absolute; inset-inline-start: 17px; inset-block: 38px 2px; width: 2px; background: linear-gradient(180deg, var(--ice-500), var(--aether-500)); opacity: 0.55; }
+.spath__node { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; font-weight: 600; font-size: 14px; color: var(--ice-200); background: rgb(var(--tint-action) / 0.12); border: 1.5px solid rgb(var(--tint-action) / 0.5); }
+.spath__text { display: grid; gap: 2px; padding-block-start: 6px; }
+.spath__step[data-you] .spath__node { color: var(--champagne-300); background: rgb(var(--tint-seal) / 0.12); border-color: rgb(var(--tint-seal) / 0.55); box-shadow: 0 0 24px -6px rgb(var(--tint-seal) / 0.5); }
+.spath__step[data-you] .t-h3 { color: var(--champagne-300); }
+.spath__note { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--radius-lg); background: rgb(var(--tint-action) / 0.09); border: 1px solid rgb(var(--tint-action) / 0.28); font-size: 14px; line-height: 21px; color: var(--text-1); }
+.spath__note svg { flex: none; color: var(--ice-300); }
+
+/* ── Language and style ───────────────────────── */
+.lstyle { display: grid; gap: 18px; }
+.callout { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius-lg); background: rgb(var(--tint-agent) / 0.1); border: 1px solid rgb(var(--tint-agent) / 0.3); font-size: 14px; line-height: 21px; color: var(--text-1); }
+.callout svg { flex: none; margin-block-start: 3px; color: var(--aether-300); }
+.callout--sm { padding: 10px 12px; font-size: 13px; line-height: 19px; display: grid; gap: 8px; }
+.signals { display: grid; gap: 10px; }
+.signals li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.signals__n { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-size: 12px; font-weight: 600; background: rgb(var(--tint-agent) / 0.2); color: var(--aether-200); }
+
+.field .segmented { justify-self: start; }
+.cfg-group .disclosure:last-child { border-block-end: 0; }
+
+/* ── Command: "What REVENSA is doing today" stat panel (sections 2, 4) ─ */
+.today-panel { padding: 22px 24px; display: grid; gap: 18px; }
+.today-panel__main { display: grid; gap: 6px; }
+.today-panel__breakdown { color: var(--text-2); font-size: 13px; max-width: 60ch; }
+.stat-strip { display: flex; flex-wrap: wrap; gap: 16px 24px; padding-block-start: 14px; border-block-start: 1px solid var(--line-1); margin: 0; }
+.stat-strip li { display: grid; gap: 3px; min-width: 100px; }
+.stat-strip li[data-emphasis] span:last-child { color: var(--amber-300); }
+@media (max-width: 599px) { .today-panel { padding: 16px 14px; } .stat-strip { gap: 12px 16px; } }
+
+/* Needs row: the kind label sits above the name (doc 19.5), the meta line leads with the why. */
+.need-row__kind { display: flex; align-items: center; gap: 5px; color: var(--amber-300); }
+.why-list { display: grid; gap: 8px; padding-inline-start: 16px; list-style: disc; color: var(--text-1); font-size: 13px; line-height: 20px; }
+.why-list li::marker { color: var(--aether-400); }
+
+/* Prospects list: product column and the inline recommendation for prospects needing a decision. */
+.plist__product { width: 120px; padding-inline: 8px; }
+.plist__product > span:first-child { display: block; }
+.plist__recommend { display: flex; align-items: flex-start; gap: 5px; margin-block-start: 6px; color: var(--aether-200); font-size: 12px; line-height: 17px; max-width: 30ch; }
+.plist__recommend svg { flex: none; margin-block-start: 2px; }
+@media (max-width: 999px) {
+  .plist td.plist__product { padding: 0 14px 0 80px; width: auto; padding-block: 4px; }
+}
+
+/* Dossier: the recommendation callout, matching the "callout" language established in Strategy.tsx. */
+.recommend-box { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius-lg); background: rgb(var(--tint-agent) / 0.1); border: 1px solid rgb(var(--tint-agent) / 0.3); font-size: 13px; line-height: 19px; color: var(--text-1); }
+.recommend-box svg { flex: none; margin-block-start: 2px; color: var(--aether-300); }
+
+/* Opportunities: prospect, situation, next automatic step (section 4). */
+.opp-row { align-items: flex-start; flex-wrap: wrap; }
+.opp-row__top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.opp-row__next { display: block; }
+
+/* A compact single-number result preview, reused where a screen only needs one figure. */
+.results--compact { padding: 18px 20px; }
+.results--compact .results__main { display: grid; gap: 6px; }
+.results--compact .results__num { line-height: 1; }
+
+/* Conversation "Why REVENSA does this" panel, inside the Details drawer. */
+.why-panel { display: grid; gap: 10px; padding-block-start: 6px; border-block-start: 1px solid var(--line-1); }
+.why-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.why-panel__head h3 { display: flex; align-items: center; gap: 6px; }
+
+/* Follow-up, business-first list; the technical timeline (CadenceEditor) sits behind a disclosure. */
+.followup-plain { display: grid; gap: 10px; }
+.followup-plain li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.followup-plain__n { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-size: 12px; font-weight: 600; background: rgb(var(--tint-action) / 0.15); color: var(--ice-200); }
+.followup-plain li[data-stop] { color: var(--text-2); }
+.followup-plain li[data-stop] .followup-plain__n { background: rgb(255 255 255 / 0.08); color: var(--text-3); }
+
+/* Autonomy dial: the permanent reassurance line (section 12). */
+.dial__limit-note { display: flex; align-items: center; gap: 6px; padding-block-start: 4px; }
+
+/* Results page and the CEO report preview (sections 11, 15). */
+.report-panel { padding: 18px 20px; display: grid; gap: 14px; }
+.report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px 16px; margin: 0; }
+.report-grid dd { margin: 0; }
+.report-highlight { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: var(--radius-md); background: rgb(var(--tint-agent) / 0.09); border: 1px solid rgb(var(--tint-agent) / 0.26); font-size: 13px; line-height: 19px; }
+.report-highlight svg { flex: none; margin-block-start: 2px; color: var(--aether-300); }
+@media (max-width: 599px) { .report-panel { padding: 16px 14px; } }
+
+/* ── Dashboard: status bar + quota, filterable KPIs, funnel/pipeline, actions, products ── */
+.dash-top { display: grid; gap: 10px; }
+.dash-top > * { min-height: 90px; box-sizing: border-box; }
+
+/* Today's quota strip, directly under the status bar. */
+.dash-quota { display: flex; flex-direction: row; align-items: center; gap: 12px; padding: 10px 14px; }
+.dash-quota .budget { flex: none; }
+.dash-quota__note { margin: 0; flex: 1; min-width: 0; }
+.dash-quota__link { flex: none; white-space: nowrap; }
+@media (max-width: 599px) { .dash-quota { flex-direction: column; align-items: flex-start; } .dash-quota__link { white-space: normal; } }
+
+.dash-filters { align-items: center; }
+.dash-filters__controls { gap: 10px; min-width: 0; }
+@media (max-width: 599px) {
+  .dash-filters__controls { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; padding-block-end: 4px; }
+  .dash-filters__controls .segmented { flex: none; }
+}
+
+/* KPI cards: a headline number, plus either an embedded trend shape or a rate bar. */
+.dash-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 10px; }
+.dash-kpi { padding: 12px 14px; display: grid; gap: 6px; align-content: start; --glass-radius: var(--radius-lg); }
+.dash-kpi .chip { width: fit-content; }
+.dash-kpi__trend { height: 26px; }
+.mini-trend { display: block; }
+.dash-kpi__bar { height: 5px; border-radius: var(--radius-full); background: var(--abyss-3); overflow: hidden; margin-block: 2px; }
+.dash-kpi__bar-fill { height: 100%; border-radius: var(--radius-full); }
+
+.dash-charts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.dash-chart-panel { min-width: 0; padding: 14px 16px; display: grid; gap: 10px; align-content: start; }
+.dash-chart-panel__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+
+.stage-seg { display: grid; gap: 10px; }
+.stage-seg__bar { display: flex; height: 12px; border-radius: var(--radius-full); overflow: hidden; background: var(--abyss-3); }
+.stage-seg__slice:not(:first-child) { border-inline-start: 2px solid var(--abyss-1); }
+.stage-seg__legend { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.stage-seg__legend li { display: flex; align-items: center; gap: 6px; font-size: 11px; min-width: 0; }
+.stage-seg__dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.stage-seg__label { flex: 1; min-width: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.stage-seg__count { flex: none; color: var(--text-1); font-weight: 600; }
+
+/* Needs you + Closest to paying, side by side so the contrast between them needs no caption. */
+.dash-action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 10px; align-items: start; }
+.dash-action-col { display: grid; gap: 10px; align-content: start; }
+.dash-action-col__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dash-action-col__note { margin: 0; }
+.dash-action-col .need-row { padding: 12px 14px; gap: 10px; }
+.dash-action-col .opp-row { padding: 10px 12px; gap: 8px; }
+
+/* Product performance: one compact card per catalogue product. */
+.dash-product-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.dash-product-card { padding: 12px 14px; gap: 8px; }
+
+.bar-meter-list { min-width: 0; display: grid; gap: 12px; }
+.bar-meter { min-width: 0; }
+.bar-meter__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-block-end: 5px; }
+.bar-meter__label { min-width: 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
+.bar-meter__value { flex: none; font-size: 12px; color: var(--text-2); }
+.bar-meter__track { height: 8px; border-radius: var(--radius-full); background: var(--abyss-3); overflow: hidden; }
+.bar-meter__track[data-dashed] { background: repeating-linear-gradient(90deg, var(--line-2) 0 6px, transparent 6px 12px); }
+.bar-meter__fill { height: 100%; border-radius: var(--radius-full); }
+
+.dash-footlinks { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.dash-footlinks .link-btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Configure: the catalogue's orientation note, above the product cards. */
+.catalogue-note { max-width: 70ch; }
+
+/* Prospects: the catalogue-product filter select, matched to the segmented controls beside it. */
+.prospects__product-select { min-width: 180px; }
+
+/* ── Report history: today's report in full, then a simple timeline of past days ── */
+.report-timeline { display: grid; gap: 4px; }
+.report-timeline__row { display: flex; gap: 12px; }
+.report-timeline__rail { flex: none; width: 14px; display: flex; flex-direction: column; align-items: center; }
+.report-timeline__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--abyss-3); border: 2px solid var(--line-2); }
+.report-timeline__dot--today { background: var(--agent); border-color: var(--agent); }
+.report-timeline__line { flex: 1; width: 2px; background: var(--line-1); margin-block: 4px; }
+.report-timeline__today { flex: 1; margin-block-end: 6px; }
+.report-timeline__past { flex: 1; padding-block: 4px 16px; display: grid; gap: 3px; }
+.report-timeline__date { font-size: 13px; font-weight: 600; margin: 0; }

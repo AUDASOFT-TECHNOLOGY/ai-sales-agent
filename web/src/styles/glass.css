@@ -1,0 +1,125 @@
+/* Glass layers (doc section 7). One base class; the level sets the variables.
+   Ingredients: fill, backdrop, sheen border, inner highlight, diffuse shadow. */
+.glass {
+  --glass-fill: var(--glass-1-fill);
+  --glass-solid: var(--glass-1-solid);
+  --glass-blur: var(--glass-blur-1);
+  --glass-sat: 140%;
+  --glass-radius: var(--radius-lg);
+  --glass-shadow: var(--shadow-1);
+  position: relative;
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border-radius: var(--glass-radius);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), var(--glass-shadow);
+  isolation: isolate;
+}
+/* Sheen border: 1px gradient painted in the border box only, via mask */
+.glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgb(var(--glass-edge, 255 255 255) / var(--glass-edge-a, 0.2)),
+    rgb(255 255 255 / 0.04) 40%,
+    rgb(255 255 255 / 0.09)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+.glass[data-level="2"] {
+  --glass-fill: var(--glass-2-fill);
+  --glass-solid: var(--glass-2-solid);
+  --glass-blur: var(--glass-blur-2);
+  --glass-sat: 160%;
+  --glass-shadow: var(--shadow-2);
+  --glass-edge-a: 0.28;
+}
+.glass[data-level="3"] {
+  --glass-fill: var(--glass-2-fill);
+  --glass-solid: var(--glass-2-solid);
+  --glass-blur: var(--glass-blur-2);
+  --glass-sat: 160%;
+  --glass-shadow: var(--shadow-3);
+  --glass-edge: var(--tint);
+  --glass-edge-a: 0.5;
+}
+/* Level 3: tinted halo at the top edge */
+.glass[data-level="3"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(60% 60% at 50% 0%, rgb(var(--tint) / 0.16), transparent 70%);
+  z-index: 0;
+}
+.glass[data-level="4"] {
+  --glass-fill: var(--glass-4-fill);
+  --glass-solid: var(--glass-4-solid);
+  --glass-blur: var(--glass-blur-4);
+  --glass-sat: 150%;
+  --glass-radius: var(--radius-2xl);
+  --glass-shadow: var(--shadow-4);
+  --glass-edge-a: 0.32;
+}
+/* Level -1: well, sinks into the surface (inputs, code, inset areas) */
+.well {
+  background: var(--well-fill);
+  box-shadow: var(--shadow-inset);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+}
+/* Flat rows inside a glass panel: never per-row backdrop-filter (doc 7.4.4) */
+.flat-glass {
+  background: rgb(255 255 255 / 0.03);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+}
+
+[data-tint="agent"] { --tint: var(--tint-agent); }
+[data-tint="action"] { --tint: var(--tint-action); }
+[data-tint="success"] { --tint: var(--tint-success); }
+[data-tint="attention"] { --tint: var(--tint-attention); }
+[data-tint="danger"] { --tint: var(--tint-danger); }
+[data-tint="seal"] { --tint: var(--tint-seal); }
+[data-tint="neutral"] { --tint: var(--tint-neutral); }
+
+/* Fallbacks: no backdrop-filter, reduced transparency, contrast, forced colors */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass {
+    background: var(--glass-solid);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--glass-solid);
+  }
+}
+@media (prefers-contrast: more) {
+  .glass {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--glass-solid);
+  }
+}
+@media (forced-colors: active) {
+  .glass {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+  .glass::before,
+  .glass::after {
+    display: none;
+  }
+}

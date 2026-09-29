@@ -22,3 +22,9 @@ Thumbs.db
 
 # Versioned client settings written at runtime (client business data; back it up, do not commit)
 /config/
+
+# Web (REVENSA frontend prototype)
+web/node_modules/
+web/dist/
+web/.verify/
+web/.verify-dev.log

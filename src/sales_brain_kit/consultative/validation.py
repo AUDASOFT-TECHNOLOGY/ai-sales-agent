@@ -227,6 +227,11 @@ def _required(
             decisions=frozenset({DecisionType.HANDOFF_TO_HUMAN}),
             reason=f"objection {objection.code!r} is handed to a human without a rebuttal",
         )
+    if objection is not None and objection.max_rebuttals == 0 and objection.then == "drop":
+        return _Required(
+            decisions=frozenset({DecisionType.CLOSE}),
+            reason=f"objection {objection.code!r} is dropped without a rebuttal",
+        )
     if behaviour == "honour_and_close":
         return _Required(
             decisions=frozenset({DecisionType.CLOSE}),

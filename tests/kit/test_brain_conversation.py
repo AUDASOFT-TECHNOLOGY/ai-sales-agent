@@ -206,6 +206,18 @@ class TestObjections:
         )
         assert decision.decision_type is DecisionType.HANDOFF_TO_HUMAN
 
+    def test_an_objection_the_client_drops_without_a_rebuttal(self):
+        doc = set_at(settings_doc(), "catalog.products.0.objections.0.max_rebuttals", 0)
+        doc = set_at(doc, "catalog.products.0.objections.0.then", "drop")
+        pushing = answer(selected_product="alpha", analysis={"objection": "price"})
+        assert "objection 'price' is dropped without a rebuttal" in refused(
+            pushing, doc=doc, **ONGOING, facts=self.facts
+        )
+        decision = decide(
+            closing(analysis={"objection": "price"}), doc=doc, **ONGOING, facts=self.facts
+        )
+        assert decision.decision_type is DecisionType.CLOSE
+
     def test_an_unresolved_objection_schedules_its_own_follow_up(self):
         doc = set_at(
             settings_doc(),
