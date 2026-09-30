@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertTriangle, CheckCircle2, Rocket } from "lucide-react";
-import { useI18n } from "../i18n";
+import { useI18n, type MessageKey } from "../i18n";
 import { useStore } from "../mock/store";
 import { Button } from "../ui/Button";
 import { Glass } from "../ui/Glass";
@@ -52,7 +52,7 @@ export function PublishBar() {
         onOpenChange={setOpen}
         size="lg"
         title={t("configure.reviewTitle")}
-        description={`Draft based on version ${state.publishedVersion}`}
+        description={t("publishBar.draftBasedOn", { n: state.publishedVersion })}
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)}>
@@ -67,8 +67,8 @@ export function PublishBar() {
                 toast({
                   tone: "success",
                   title: t("configure.published", { n: version }),
-                  body: "The agent applies it at its next cycle.",
-                  undo: () => toast({ tone: "info", title: `Rolled back to version ${state.publishedVersion}` }),
+                  body: t("publishBar.appliesNextCycle"),
+                  undo: () => toast({ tone: "info", title: t("publishBar.rolledBackTo", { n: state.publishedVersion }) }),
                 });
               }}
             >
@@ -78,23 +78,27 @@ export function PublishBar() {
         }
       >
         <ul className="review-list">
-          {state.changes.map((c) => (
-            <li key={c} className="row">
-              <span className="review-list__mark" aria-hidden />
-              <span>{c}</span>
-            </li>
-          ))}
+          {state.changes.map((c) => {
+            const [key, ...rest] = c.split("::");
+            const value = rest.join("::");
+            return (
+              <li key={c} className="row">
+                <span className="review-list__mark" aria-hidden />
+                <span>{value ? t(key as MessageKey, { value }) : t(key as MessageKey)}</span>
+              </li>
+            );
+          })}
         </ul>
         <div className="stack">
           <p className="t-label c-2">{t("configure.checks")}</p>
           <p className="row c-success t-body-sm">
-            <CheckCircle2 size={16} aria-hidden /> Structure
+            <CheckCircle2 size={16} aria-hidden /> {t("publishBar.checks.structure")}
           </p>
           <p className="row c-success t-body-sm">
-            <CheckCircle2 size={16} aria-hidden /> References
+            <CheckCircle2 size={16} aria-hidden /> {t("publishBar.checks.references")}
           </p>
           <p className="row c-attention t-body-sm">
-            <AlertTriangle size={16} aria-hidden /> Suggestion: Offers, Growth is missing a benefit to lead with. It can still be published.
+            <AlertTriangle size={16} aria-hidden /> {t("publishBar.checks.suggestion")}
           </p>
         </div>
       </Modal>

@@ -1,6 +1,7 @@
 /** SAMPLE DATA ONLY. Every name, number, price and sentence in this file is invented so the
  *  interface can be judged visually. Nothing here is a real client fact and nothing is connected.
  *  In the real product these values come from the Admin API (docs/naga-client-ui-design-system.md C5). */
+import type { MessageKey } from "../i18n";
 import { deriveReadiness } from "./offers";
 import type {
   Conversation,
@@ -12,6 +13,7 @@ import type {
   ProductPerformance,
   Prospect,
   ReportDay,
+  ResolvedNeed,
   Stage,
   StageSlice,
   ThreadEvent,
@@ -24,14 +26,14 @@ export const USER = { name: "Sami", initials: "SK", role: "Owner" };
  *  pipeline starts at "Contacted" rather than an "Unsorted" backlog. Registration and payment were
  *  merged into one stage because, for this business, a prospect commits and pays in the same move. */
 export const STAGES: Stage[] = [
-  { id: "contacted", label: "Contacted" },
-  { id: "discussing", label: "In discussion" },
-  { id: "interested", label: "Interested" },
-  { id: "registration_payment", label: "Converted" },
-  { id: "won", label: "Paid", milestone: "won" },
+  { id: "contacted", label: "funnel.contacted" },
+  { id: "discussing", label: "stage.discussing" },
+  { id: "interested", label: "stage.interested" },
+  { id: "registration_payment", label: "funnel.converted" },
+  { id: "won", label: "stage.paid", milestone: "won" },
 ];
 
-export const PATH_STEPS = ["Contacted", "In discussion", "Interested", "Converted", "Paid"];
+export const PATH_STEPS: MessageKey[] = ["funnel.contacted", "stage.discussing", "stage.interested", "funnel.converted", "stage.paid"];
 
 export const PROSPECTS: Prospect[] = [
   {
@@ -42,11 +44,11 @@ export const PROSPECTS: Prospect[] = [
     status: "paused",
     stage: "interested",
     attention: "waiting",
-    last: "12 min ago",
-    read: "Asked for a discount I can't offer.",
-    next: "Waiting for you",
+    last: "prospect.amira.last",
+    read: "prospect.amira.read",
+    next: "prospect.next.waitingForYou",
     interest: "Foundation",
-    recommendation: "Offer Growth instead: it already includes what a discount on Foundation would try to make up for.",
+    recommendation: "prospect.amira.recommendation",
     step: 1,
     facts: [
       { key: "Interest", value: "Foundation", status: "discovered", source: "conversation", excerpt: "Foundation is made for exactly that.", when: "Yesterday 16:45" },
@@ -64,11 +66,11 @@ export const PROSPECTS: Prospect[] = [
     status: "paused",
     stage: "registration_payment",
     attention: "waiting",
-    last: "1 h ago",
-    read: "Says she paid and sent a receipt.",
-    next: "Waiting for you",
+    last: "prospect.leila.last",
+    read: "prospect.leila.read",
+    next: "prospect.next.waitingForYou",
     interest: "Growth",
-    recommendation: "Review her receipt and confirm the payment; her registration is otherwise complete.",
+    recommendation: "prospect.leila.recommendation",
     step: 3,
     facts: [
       { key: "Interest", value: "Growth", status: "confirmed", source: "prospect", excerpt: "I already sell, I want more customers." },
@@ -85,11 +87,11 @@ export const PROSPECTS: Prospect[] = [
     status: "active",
     stage: "discussing",
     attention: "working",
-    last: "8 min ago",
-    read: "Answered two discovery questions.",
-    next: "Follow up today, 11:00",
+    last: "prospect.karim.last",
+    read: "prospect.karim.read",
+    next: "prospect.karim.next",
     interest: "Foundation",
-    recommendation: "Approve the payment-options reply I drafted; he's ready to move forward.",
+    recommendation: "prospect.karim.recommendation",
     step: 0,
     facts: [
       { key: "Interest", value: "Foundation", status: "discovered", source: "conversation" },
@@ -105,11 +107,11 @@ export const PROSPECTS: Prospect[] = [
     status: "active",
     stage: "registration_payment",
     attention: "working",
-    last: "34 min ago",
-    read: "Filling in his registration details with me.",
-    next: "Registration reminder, 14:00",
+    last: "prospect.youssef.last",
+    read: "prospect.youssef.read",
+    next: "prospect.youssef.next",
     interest: "Growth",
-    recommendation: "Nudge him to finish registering; everything else is already agreed.",
+    recommendation: "prospect.youssef.recommendation",
     step: 2,
     facts: [
       { key: "Interest", value: "Growth", status: "confirmed", source: "prospect" },
@@ -126,11 +128,11 @@ export const PROSPECTS: Prospect[] = [
     status: "active",
     stage: "discussing",
     attention: "working",
-    last: "2 h ago",
-    read: "Curious, hasn't answered the last question yet.",
-    next: "Follow up tomorrow, 10:00",
+    last: "prospect.nour.last",
+    read: "prospect.nour.read",
+    next: "prospect.nour.next",
     interest: "Foundation",
-    recommendation: "Send one value-focused example tomorrow instead of another question.",
+    recommendation: "prospect.nour.recommendation",
     step: 0,
     facts: [
       { key: "Interest", value: "Foundation", status: "hypothesis", source: "brain_inference" },
@@ -145,11 +147,11 @@ export const PROSPECTS: Prospect[] = [
     status: "new",
     stage: "contacted",
     attention: "none",
-    last: "Not contacted",
-    read: "New in your Sheet this morning.",
-    next: "First message today, 11:30",
+    last: "prospect.notContacted",
+    read: "prospect.newInSheet",
+    next: "prospect.rami.next",
     interest: "Not known yet",
-    recommendation: "Send a warm first message; nothing is known about him yet.",
+    recommendation: "prospect.rami.recommendation",
     step: 0,
     facts: [{ key: "Country", value: "Tunisia", status: "confirmed", source: "client_data" }],
   },
@@ -161,11 +163,11 @@ export const PROSPECTS: Prospect[] = [
     status: "new",
     stage: "contacted",
     attention: "none",
-    last: "Not contacted",
-    read: "New in your Sheet this morning.",
-    next: "First message today, 11:45",
+    last: "prospect.notContacted",
+    read: "prospect.newInSheet",
+    next: "prospect.salma.next",
     interest: "Not known yet",
-    recommendation: "Send a warm first message; nothing is known about her yet.",
+    recommendation: "prospect.salma.recommendation",
     step: 0,
     facts: [],
   },
@@ -177,11 +179,11 @@ export const PROSPECTS: Prospect[] = [
     status: "active",
     stage: "interested",
     attention: "working",
-    last: "3 h ago",
-    read: "Liked the Growth overview, comparing options.",
-    next: "Follow up tomorrow, 09:30",
+    last: "prospect.hedi.last",
+    read: "prospect.hedi.read",
+    next: "prospect.hedi.next",
     interest: "Growth",
-    recommendation: "Share one proof point from a similar business tomorrow, to help him decide.",
+    recommendation: "prospect.hedi.recommendation",
     step: 1,
     facts: [
       { key: "Interest", value: "Growth", status: "discovered", source: "conversation" },
@@ -197,11 +199,11 @@ export const PROSPECTS: Prospect[] = [
     status: "active",
     stage: "registration_payment",
     attention: "working",
-    last: "5 h ago",
-    read: "Has the payment details, deciding when to pay.",
-    next: "Payment reminder, tomorrow 10:00",
+    last: "prospect.ines.last",
+    read: "prospect.ines.read",
+    next: "prospect.ines.next",
     interest: "Foundation",
-    recommendation: "A light reminder tomorrow should be enough; she already has everything she needs to pay.",
+    recommendation: "prospect.ines.recommendation",
     step: 3,
     facts: [
       { key: "Interest", value: "Foundation", status: "confirmed", source: "prospect" },
@@ -217,9 +219,9 @@ export const PROSPECTS: Prospect[] = [
     status: "closed",
     stage: "won",
     attention: "won",
-    last: "Yesterday",
-    read: "Payment confirmed. Welcome message sent.",
-    next: "Nothing planned",
+    last: "time.yesterday",
+    read: "prospect.walid.read",
+    next: "prospect.next.nothingPlanned",
     interest: "Foundation",
     step: 4,
     facts: [
@@ -235,9 +237,9 @@ export const PROSPECTS: Prospect[] = [
     status: "closed",
     stage: "won",
     attention: "won",
-    last: "2 days ago",
-    read: "Payment confirmed. Onboarding started.",
-    next: "Nothing planned",
+    last: "time.daysAgo2",
+    read: "prospect.mariem.read",
+    next: "prospect.next.nothingPlanned",
     interest: "Growth",
     step: 4,
     facts: [
@@ -254,9 +256,9 @@ export const PROSPECTS: Prospect[] = [
     lostReason: "declined",
     stage: "discussing",
     attention: "lost",
-    last: "3 days ago",
-    read: "Asked me to stop. I won't contact him again.",
-    next: "None, ever",
+    last: "time.daysAgo3",
+    read: "prospect.anis.read",
+    next: "prospect.next.noneEver",
     interest: "Foundation",
     step: 0,
     facts: [
@@ -273,9 +275,9 @@ export const PROSPECTS: Prospect[] = [
     lostReason: "no_response",
     stage: "interested",
     attention: "lost",
-    last: "9 days ago",
-    read: "No reply after 3 reminders. The follow-up cadence is used up.",
-    next: "None, ever",
+    last: "time.daysAgo9",
+    read: "prospect.hazem.read",
+    next: "prospect.next.noneEver",
     interest: "Growth",
     step: 1,
     facts: [{ key: "Interest", value: "Growth", status: "discovered", source: "conversation" }],
@@ -287,41 +289,93 @@ export const NEEDS: NeedItem[] = [
     id: "n1",
     kind: "draft",
     prospectId: "karim",
-    reason: "A reply about the payment options, ready for your eyes.",
-    waiting: "waiting 12 min",
+    reason: "need.n1.reason",
+    waiting: "time.waiting12min",
     preview:
       "Happy to explain. Foundation can be paid by bank transfer or online, and I'll send the exact details once you choose.",
-    factors: ["Asked how to pay for Foundation", "Interest confirmed in the conversation", "Ready to move to payment", "High priority: a hot lead"],
+    factors: ["need.n1.factor1", "need.n1.factor2", "need.n1.factor3", "need.n1.factor4"],
   },
   {
     id: "n2",
     kind: "payment",
     prospectId: "leila",
-    reason: "Leila says she paid and sent a receipt.",
-    waiting: "waiting 1 h",
-    factors: ["Says a bank transfer was made this morning", "Sent a file that may be a receipt", "The agent can never confirm a payment itself", "Only a person at Naga can verify and confirm it"],
+    reason: "need.n2.reason",
+    waiting: "time.waiting1h",
+    factors: ["need.n2.factor1", "need.n2.factor2", "need.n2.factor3", "need.n2.factor4"],
   },
   {
     id: "n3",
     kind: "handoff",
     prospectId: "amira",
-    reason: "Amira asked for a discount I can't offer. She'd like to speak with someone.",
-    waiting: "waiting 12 min",
-    factors: ["Asked for a discount outside what I may offer", "Growth may fit her better than a discount", "She asked to speak with a person"],
+    reason: "need.n3.reason",
+    waiting: "time.waiting12min",
+    factors: ["need.n3.factor1", "need.n3.factor2", "need.n3.factor3"],
+  },
+];
+
+/** Needs already settled before this session started, so the notification history isn't empty on
+ *  first load. New entries are prepended live as the reducer resolves a need (see mock/store.tsx). */
+export const NEED_HISTORY: ResolvedNeed[] = [
+  {
+    id: "n-h1",
+    kind: "payment",
+    prospectId: "walid",
+    reason: "need.nh1.reason",
+    waiting: "time.waiting40min",
+    resolution: "confirmed",
+    resolvedAt: "time.yesterday",
+  },
+  {
+    id: "n-h2",
+    kind: "draft",
+    prospectId: "youssef",
+    reason: "need.nh2.reason",
+    waiting: "time.waiting20min",
+    preview: "Quick reminder: your registration for Growth is almost done, just the last step left.",
+    resolution: "approved",
+    resolvedAt: "time.yesterday",
+  },
+  {
+    id: "n-h3",
+    kind: "handoff",
+    prospectId: "hedi",
+    reason: "need.nh3.reason",
+    waiting: "time.waiting15min",
+    resolution: "handled",
+    resolvedAt: "time.daysAgo2",
+  },
+  {
+    id: "n-h4",
+    kind: "payment",
+    prospectId: "mariem",
+    reason: "need.nh4.reason",
+    waiting: "time.waiting1h",
+    resolution: "confirmed",
+    resolvedAt: "time.daysAgo2",
+  },
+  {
+    id: "n-h5",
+    kind: "draft",
+    prospectId: "anis",
+    reason: "need.nh5.reason",
+    waiting: "time.waiting2h",
+    preview: "Understood, I won't reach out again. Wishing you the best.",
+    resolution: "declined",
+    resolvedAt: "time.daysAgo3",
   },
 ];
 
 export const THREAD: ThreadEvent[] = [
-  { id: "t1", time: "09:02", kind: "sent", who: "Amira B.", voice: "I introduced Foundation and asked what she hopes to achieve.", detail: "Sent to Amira Ben Salah" },
-  { id: "t2", time: "09:14", kind: "received", who: "Amira B.", voice: "She replied within twelve minutes.", detail: "Reply from Amira Ben Salah" },
-  { id: "t3", time: "09:14", kind: "fact", who: "Amira B.", voice: "She wants to start something online.", detail: "Goal, learned from her message" },
-  { id: "t4", time: "09:31", kind: "sent", who: "Youssef G.", voice: "I walked Youssef through the registration form.", detail: "Sent to Youssef Gharbi" },
-  { id: "t5", time: "09:48", kind: "decision", who: "Hedi B.", voice: "Hedi is comparing options, so I sent a short overview and waited.", detail: "Decision for Hedi Bouzid" },
-  { id: "t6", time: "10:05", kind: "payment", who: "Leila M.", voice: "Leila says she has paid. I can't verify that, so this is yours.", detail: "Payment claimed, proof received", needsYou: true },
-  { id: "t7", time: "10:20", kind: "handoff", who: "Amira B.", voice: "Amira asked for a discount. I stopped and passed her to you.", detail: "Handed to a person", needsYou: true },
-  { id: "t8", time: "11:00", kind: "scheduled", who: "Karim T.", voice: "Follow up with Karim about the payment options.", detail: "Planned", future: true },
-  { id: "t9", time: "11:30", kind: "scheduled", who: "Rami C.", voice: "First message to Rami, a warm introduction.", detail: "Planned", future: true },
-  { id: "t10", time: "14:00", kind: "human", who: "Youssef G.", voice: "A registration reminder, if Youssef hasn't finished.", detail: "Planned", future: true },
+  { id: "t1", time: "09:02", kind: "sent", who: "Amira B.", voice: "thread.t1.voice", detail: "thread.t1.detail" },
+  { id: "t2", time: "09:14", kind: "received", who: "Amira B.", voice: "thread.t2.voice", detail: "thread.t2.detail" },
+  { id: "t3", time: "09:14", kind: "fact", who: "Amira B.", voice: "thread.t3.voice", detail: "thread.t3.detail" },
+  { id: "t4", time: "09:31", kind: "sent", who: "Youssef G.", voice: "thread.t4.voice", detail: "thread.t4.detail" },
+  { id: "t5", time: "09:48", kind: "decision", who: "Hedi B.", voice: "thread.t5.voice", detail: "thread.t5.detail" },
+  { id: "t6", time: "10:05", kind: "payment", who: "Leila M.", voice: "thread.t6.voice", detail: "thread.t6.detail", needsYou: true },
+  { id: "t7", time: "10:20", kind: "handoff", who: "Amira B.", voice: "thread.t7.voice", detail: "thread.t7.detail", needsYou: true },
+  { id: "t8", time: "11:00", kind: "scheduled", who: "Karim T.", voice: "thread.t8.voice", detail: "thread.planned", future: true },
+  { id: "t9", time: "11:30", kind: "scheduled", who: "Rami C.", voice: "thread.t9.voice", detail: "thread.planned", future: true },
+  { id: "t10", time: "14:00", kind: "human", who: "Youssef G.", voice: "thread.t10.voice", detail: "thread.planned", future: true },
 ];
 
 /** What today's 14 commercial actions actually are (section "What REVANSA is doing today"): most of
@@ -337,7 +391,7 @@ export const ACTIONS_TODAY = {
 
 /** The one qualitative line of today's CEO report (section 11): authored the same way KPI
  *  `caption`s already are elsewhere in this file, never a fabricated statistic. */
-export const CEO_REPORT_HIGHLIGHT = "Most conversations today circled back to payment options and pricing.";
+export const CEO_REPORT_HIGHLIGHT: MessageKey = "report.today.highlight";
 
 const s = (n: number, base: number, amp: number, phase = 0) =>
   Array.from({ length: n }, (_, i) => Math.round(base + Math.sin(i * 0.9 + phase) * amp + i * (amp / 6)));
@@ -443,14 +497,11 @@ export const CONVERSATIONS: Conversation[] = [
     payment: "none",
     notes: {
       learned: PROSPECTS[0]!.facts.slice(0, 3),
-      decided: [
-        "Answered her question about price first, then asked one question about her goal.",
-        "She asked for a discount, which is outside what I may offer. I stopped and passed her to you.",
-      ],
-      handoff: "Amira asked to speak with someone about a discount.",
+      decided: ["convo.amira.decided1", "convo.amira.decided2"],
+      handoff: "convo.amira.handoff",
     },
     reasoning: {
-      factors: ["A discount is outside what the agent may offer", "Growth already covers what she is asking for", "She is a beginner, which Growth does not assume"],
+      factors: ["convo.amira.factor1", "convo.amira.factor2", "convo.amira.factor3"],
       confidence: "medium",
     },
     messages: [
@@ -469,10 +520,10 @@ export const CONVERSATIONS: Conversation[] = [
     payment: "proof_received",
     notes: {
       learned: PROSPECTS[1]!.facts,
-      decided: ["She says she paid and sent a receipt. I can't verify a payment, so I recorded what she said and stopped."],
+      decided: ["convo.leila.decided1"],
     },
     reasoning: {
-      factors: ["Already an active seller, matching Growth's audience", "Explicitly asked for more customers", "Budget compatible: chose Growth without hesitating", "Growth was already presented and accepted"],
+      factors: ["convo.leila.factor1", "convo.leila.factor2", "convo.leila.factor3", "convo.leila.factor4"],
       confidence: "high",
     },
     messages: [
@@ -492,10 +543,10 @@ export const CONVERSATIONS: Conversation[] = [
     draft: [{ text: "Happy to explain. Foundation can be paid by bank transfer or online, and I'll send the exact details once you choose." }],
     notes: {
       learned: PROSPECTS[2]!.facts,
-      decided: ["He asked how to pay. A draft is ready for your approval."],
+      decided: ["convo.karim.decided1"],
     },
     reasoning: {
-      factors: ["Explicitly asked how to pay for Foundation", "Foundation matches a beginner changing careers", "Budget was never raised as a concern", "Foundation was already presented earlier in the conversation"],
+      factors: ["convo.karim.factor1", "convo.karim.factor2", "convo.karim.factor3", "convo.karim.factor4"],
       confidence: "high",
     },
     messages: [
@@ -513,10 +564,10 @@ export const CONVERSATIONS: Conversation[] = [
     payment: "none",
     notes: {
       learned: PROSPECTS[3]!.facts,
-      decided: ["He said he'd finish later. I scheduled a friendly reminder for 14:00."],
+      decided: ["convo.youssef.decided1"],
     },
     reasoning: {
-      factors: ["Wants freelance income, matching Growth", "Already registering: budget and fit are settled", "Growth was already presented and accepted"],
+      factors: ["convo.youssef.factor1", "convo.youssef.factor2", "convo.youssef.factor3"],
       confidence: "high",
     },
     messages: [
@@ -530,7 +581,7 @@ export const CONVERSATIONS: Conversation[] = [
  *  data, exactly like ACTIONS_TODAY above — this prototype only has 12 sample prospects to derive
  *  live figures from, so a six-month cumulative total has to be authored, not computed. */
 export const SINCE_START = {
-  startDate: "3 March 2026",
+  startDate: "2026-03-03",
   months: 6,
   prospectsTotal: 1284,
   conversationsTotal: 2010,
@@ -546,7 +597,7 @@ export const SINCE_START = {
  *  never show a different total than the KPI card above it. */
 export const DASHBOARD_PERIODS: Record<"7d" | "30d" | "3m" | "all", DashboardPeriodStat> = {
   "7d": {
-    label: "7 days",
+    label: "dashboard.period.7d",
     contacted: 58,
     responseRate: 71,
     conversionRate: 12,
@@ -556,7 +607,7 @@ export const DASHBOARD_PERIODS: Record<"7d" | "30d" | "3m" | "all", DashboardPer
     trend: distribute(58, [6, 7, 6, 8, 9, 11, 13]),
   },
   "30d": {
-    label: "30 days",
+    label: "dashboard.period.30d",
     contacted: 214,
     responseRate: 68,
     conversionRate: 14,
@@ -566,7 +617,7 @@ export const DASHBOARD_PERIODS: Record<"7d" | "30d" | "3m" | "all", DashboardPer
     trend: distribute(214, [7, 8, 9, 10, 12]),
   },
   "3m": {
-    label: "3 months",
+    label: "dashboard.period.3m",
     contacted: 560,
     responseRate: 65,
     conversionRate: 15,
@@ -576,7 +627,7 @@ export const DASHBOARD_PERIODS: Record<"7d" | "30d" | "3m" | "all", DashboardPer
     trend: distribute(560, s(13, 34, 14, 1)),
   },
   all: {
-    label: "Since the start",
+    label: "dashboard.period.all",
     contacted: 1284,
     responseRate: 68,
     conversionRate: 16,
@@ -591,10 +642,10 @@ export const DASHBOARD_PERIODS: Record<"7d" | "30d" | "3m" | "all", DashboardPer
  *  prospects currently open (not the full six-month total, and not affected by the period filter —
  *  it always reflects the present moment), hand-authored the same way as the rest of this file. */
 export const STAGE_BREAKDOWN: StageSlice[] = [
-  { id: "new", label: "New", count: 9, tint: "action" },
-  { id: "active", label: "In conversation", count: 8, tint: "agent" },
-  { id: "waiting", label: "Ready to decide", count: 4, tint: "attention" },
-  { id: "won", label: "Won", count: 3, tint: "success" },
+  { id: "new", label: "status.new", count: 9, tint: "action" },
+  { id: "active", label: "status.active", count: 8, tint: "agent" },
+  { id: "waiting", label: "stageBreakdown.readyToDecide", count: 4, tint: "attention" },
+  { id: "won", label: "stageBreakdown.won", count: 3, tint: "success" },
 ];
 
 /** Since-start performance per catalogue product, keyed to OFFERS above. Masterclass is coming
@@ -609,8 +660,8 @@ export const PRODUCT_PERFORMANCE: ProductPerformance[] = [
  *  CEO, kept so a past day can be reopened. Today's own entry is computed live in History.tsx from
  *  the same state Results.tsx already reads; only the days before it need authored sample data. */
 export const REPORT_HISTORY_PAST: ReportDay[] = [
-  { date: "Yesterday", time: "20:00", contacted: 14, replies: 9, conversationsOpen: 4, paymentsToConfirm: 2, interventions: 2, highlight: "Ines Khemiri finished registering for Foundation." },
-  { date: "2 days ago", time: "20:00", contacted: 11, replies: 7, conversationsOpen: 5, paymentsToConfirm: 0, interventions: 0, highlight: "A quiet day: no intervention was needed." },
-  { date: "3 days ago", time: "20:00", contacted: 9, replies: 6, conversationsOpen: 4, paymentsToConfirm: 1, interventions: 1, highlight: "One follow-up was stopped because the prospect asked to stop." },
-  { date: "4 days ago", time: "20:00", contacted: 8, replies: 5, conversationsOpen: 3, paymentsToConfirm: 1, interventions: 1, highlight: "Walid Ayari became a new Foundation client." },
+  { date: "time.yesterday", time: "20:00", contacted: 14, replies: 9, conversationsOpen: 4, paymentsToConfirm: 2, interventions: 2, highlight: "report.history1.highlight" },
+  { date: "time.daysAgo2", time: "20:00", contacted: 11, replies: 7, conversationsOpen: 5, paymentsToConfirm: 0, interventions: 0, highlight: "report.history2.highlight" },
+  { date: "time.daysAgo3", time: "20:00", contacted: 9, replies: 6, conversationsOpen: 4, paymentsToConfirm: 1, interventions: 1, highlight: "report.history3.highlight" },
+  { date: "time.daysAgo4", time: "20:00", contacted: 8, replies: 5, conversationsOpen: 3, paymentsToConfirm: 1, interventions: 1, highlight: "report.history4.highlight" },
 ];

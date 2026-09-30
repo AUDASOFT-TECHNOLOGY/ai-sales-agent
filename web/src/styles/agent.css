@@ -312,7 +312,11 @@
 
 /* ── Daily budget ─────────────────────────────── */
 .budget { position: relative; display: flex; align-items: center; gap: 10px; }
-.budget__num { position: absolute; inset-inline-start: 0; width: 72px; height: 72px; display: grid; place-content: center; text-align: center; line-height: 1; }
+/* physical left/right, not inset-inline-*: .budget__num carries its own forced ltr
+   direction (via .tabular, so "14/20" always reads left-to-right), which would make a
+   logical inset resolve against that instead of the document's direction. */
+.budget__num { position: absolute; left: 0; width: 88px; height: 88px; display: grid; place-content: center; text-align: center; line-height: 1; }
+[dir="rtl"] .budget__num { left: auto; right: 0; }
 .budget__text { display: grid; gap: 2px; padding-inline-start: 4px; }
 .budget svg { flex: none; }
 

@@ -68,7 +68,7 @@ There is no frontend stack to inherit, so this is a proposal, made before any im
 | Routing | **React Router** | Route-per-screen, drawers as nested routes so links are shareable. |
 | Charts | **Hand-built SVG** for the signature visuals, `d3-scale` and `d3-shape` for maths only | The signature visuals (Ribbon, Thread, Dial, Pulse) are the product identity. A chart library would impose its look. |
 | Icons | **Lucide** plus a small custom set | Consistent 1.5px stroke; custom glyphs for agent concepts (section 10). |
-| Fonts | **Self-hosted** Geist, Geist Mono, Instrument Serif, IBM Plex Sans Arabic, Noto Naskh Arabic | No third-party font request (privacy, CSP, speed). All are open licences. |
+| Fonts | **Self-hosted** Geist, Geist Mono, Instrument Serif, Tajawal, Noto Naskh Arabic | No third-party font request (privacy, CSP, speed). All are open licences. |
 | Living documentation | **Storybook** with the a11y addon | This document is the spec; Storybook is the executable reference. |
 | Tests | **Vitest**, **Playwright**, **axe-core** in CI, visual regression on Storybook | Accessibility and contrast are release gates, not reviews (section 27). |
 | Browser baseline | Last two versions of Chrome, Edge, Firefox, Safari (16.4+), iOS Safari, Android Chrome | Needs `backdrop-filter`, container queries, `color-mix()`, `@property`. Fallbacks for each are specified. |
@@ -428,7 +428,7 @@ cross-fade and stays under 20% of the aurora's opacity, so it is felt rather tha
 | **Interface** | **Geist** (variable, 300 to 700) | `system-ui, sans-serif` | Precise, modern, excellent numerals, open licence |
 | **Agent Voice** | **Instrument Serif** (regular and italic) | `Georgia, serif` | A refined display serif. It makes the agent audibly different from the interface |
 | **Exact values, ids, code** | **Geist Mono** | `ui-monospace, monospace` | Verbatim values, references |
-| **Arabic UI** | **IBM Plex Sans Arabic** | `Geist`, system Arabic | Matches Geist's proportions |
+| **Arabic UI** | **Tajawal** | `Geist`, system Arabic | Matches Geist's proportions |
 | **Arabic Agent Voice** | **Noto Naskh Arabic** | serif Arabic | Instrument Serif has no Arabic; Naskh is the closest register |
 
 Fonts are subset by script and loaded with `font-display: swap` (metric-adjusted fallbacks to avoid
@@ -2387,5 +2387,5 @@ Recorded so they are decided on purpose, not by accident.
 | 6 | **Manual stage override** in the Dossier | allowed as a labelled, audited action; no drag in the River |
 | 7 | **Team and roles inside the client console** | operator-managed in v1; read-only list in Settings, Team |
 | 8 | **Live updates** | polling first; SSE when the Admin API exists |
-| 9 | **Font licences**: Geist, Instrument Serif, IBM Plex Sans Arabic, Noto Naskh Arabic are open licences | confirm at Phase 0 and record in the repository |
+| 9 | **Font licences**: Geist, Instrument Serif, Tajawal, Noto Naskh Arabic are open licences | confirm at Phase 0 and record in the repository |
 | 10 | **Rehearsal** (sandbox conversation) and **Agent-assisted authoring** (draft an offer from a page) | future, out of scope; both must keep exact values out of any model (the same rule as today) |

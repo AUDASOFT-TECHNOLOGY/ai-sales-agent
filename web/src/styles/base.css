@@ -74,6 +74,8 @@ svg {
 .t-numeral-m,
 .tabular {
   font-variant-numeric: tabular-nums lining-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 .t-h1 {
   font-size: clamp(22px, 2.4vw, 28px);
@@ -118,6 +120,8 @@ svg {
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 20px;
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 /* The Agent Voice (doc 4.3): words the agent wrote or narrates. A warm geometric sans (Plus Jakarta Sans),
    upright, generous size and leading. Identity comes from the font, the violet rule at its edge and the spark,

@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { motion } from "motion/react";
-import { Bell, ChevronsLeft, ChevronsRight, History, MessageSquare, Rocket, Search, SlidersHorizontal, Users, Radar } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, History, MessageSquare, Rocket, Search, SlidersHorizontal, Users, Radar } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { TENANT, USER } from "../mock/data";
 import { useStore } from "../mock/store";
@@ -13,6 +13,7 @@ import { Wordmark, BrandMark } from "../ui/Brand";
 import { ToastViewport } from "../ui/Toasts";
 import { PrototypeControls } from "../prototype/PrototypeControls";
 import { CommandPalette } from "./CommandPalette";
+import { NotificationsBell } from "./Notifications";
 import { PublishBar } from "./PublishBar";
 import { ScreenFallback } from "./ScreenFallback";
 import { cx } from "../ui/cx";
@@ -32,6 +33,7 @@ const TITLE: Record<string, MessageKey> = {
   "/conversations": "convo.title",
   "/history": "nav.history",
   "/configure": "configure.title",
+  "/notifications": "notifications.title",
 };
 
 function Aurora() {
@@ -100,7 +102,6 @@ function Rail({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => voi
 function ContextBar({ onPalette }: { onPalette: () => void }) {
   const { t, locale, setLocale } = useI18n();
   const { pathname } = useLocation();
-  const navigate = useNavigate();
   const { state, agentState } = useStore();
   const label = useAgentLabel(agentState, state.needs.length);
   const title = TITLE[pathname] ?? TITLE["/" + pathname.split("/")[1]!] ?? "command.title";
@@ -127,12 +128,7 @@ function ContextBar({ onPalette }: { onPalette: () => void }) {
         <kbd className="kbd">⌘K</kbd>
       </button>
       <PrototypeControls />
-      <Tip label={t("bar.needsYou")}>
-        <IconButton label={`${t("bar.needsYou")}: ${state.needs.length}`} onClick={() => navigate("/dashboard")} className="bar__bell">
-          <Bell size={20} />
-          {state.live && state.needs.length > 0 ? <span className="bar__bell-dot tabular">{state.needs.length}</span> : null}
-        </IconButton>
-      </Tip>
+      <NotificationsBell />
       <PopoverCard
         label={t("bar.menu")}
         trigger={

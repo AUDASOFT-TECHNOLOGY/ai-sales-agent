@@ -9,6 +9,7 @@ const Dashboard = lazy(() => import("./screens/Dashboard").then((m) => ({ defaul
 const Configure = lazy(() => import("./screens/configure/Configure").then((m) => ({ default: m.Configure })));
 const Conversations = lazy(() => import("./screens/Conversations").then((m) => ({ default: m.Conversations })));
 const History = lazy(() => import("./screens/History").then((m) => ({ default: m.History })));
+const Notifications = lazy(() => import("./screens/Notifications").then((m) => ({ default: m.Notifications })));
 const Prospects = lazy(() => import("./screens/Prospects").then((m) => ({ default: m.Prospects })));
 const Runway = lazy(() => import("./screens/Runway").then((m) => ({ default: m.Runway })));
 
@@ -35,6 +36,7 @@ export function App() {
               <Route path="configure/:section" element={<Configure />} />
               <Route path="results" element={<Navigate to="/dashboard" replace />} />
               <Route path="history" element={<History />} />
+              <Route path="notifications" element={<Notifications />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
           </Routes>

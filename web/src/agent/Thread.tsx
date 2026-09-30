@@ -40,12 +40,12 @@ function ThreadNode({ event, compact }: { event: ThreadEvent; compact?: boolean 
         </GlyphTile>
       </div>
       <div className="thread__body">
-        <p className="voice voice-s">{event.voice}</p>
+        <p className="voice voice-s">{t(event.voice)}</p>
         {compact ? (
           event.needsYou ? <p className="thread__flag t-body-sm">{t("convo.needsYou")}</p> : null
         ) : (
           <p className="c-3 t-body-sm">
-            {event.detail}
+            {t(event.detail)}
             {event.future ? <> · {t("thread.planned")}</> : null}
             {event.needsYou ? <span className="thread__flag"> · {t("convo.needsYou")}</span> : null}
           </p>

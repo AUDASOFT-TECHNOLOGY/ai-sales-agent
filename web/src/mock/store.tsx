@@ -7,9 +7,10 @@
  *  localStorage (see `persist` below). Nothing in Configure is decorative: if a field can be typed
  *  into, it is because there is a real state field behind it. */
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from "react";
-import { CONVERSATIONS, NEEDS, OFFERS, PROSPECTS, STAGES } from "./data";
+import type { MessageKey } from "../i18n";
+import { CONVERSATIONS, NEED_HISTORY, NEEDS, OFFERS, PROSPECTS, STAGES } from "./data";
 import { deriveReadiness } from "./offers";
-import type { AgentStateKey, CadenceStep, Conversation, LostReason, Mode, NeedItem, Offer, OfferAsset, PaymentProfile, Prospect, Role, Tone } from "./types";
+import type { AgentStateKey, CadenceStep, Conversation, LostReason, Mode, NeedItem, NeedResolution, Offer, OfferAsset, PaymentProfile, Prospect, ResolvedNeed, Role, Tone } from "./types";
 
 export type GateId = "sheet" | "offer" | "payment" | "voice" | "path" | "live";
 export const GATES: GateId[] = ["sheet", "offer", "payment", "voice", "path", "live"];
@@ -33,6 +34,8 @@ interface State {
   ceiling: Mode;
   role: Role;
   needs: NeedItem[];
+  /** Every need once it's settled, newest first: the notification history (doc 19.5's trail). */
+  needHistory: ResolvedNeed[];
   prospects: Prospect[];
   conversations: Conversation[];
   offers: Offer[];
@@ -73,6 +76,7 @@ const initial: State = {
   ceiling: "ask",
   role: "owner",
   needs: NEEDS,
+  needHistory: NEED_HISTORY,
   prospects: PROSPECTS,
   conversations: CONVERSATIONS,
   offers: OFFERS,
@@ -94,9 +98,9 @@ const initial: State = {
   optOutWords: ["stop", "unsubscribe"],
   followUp: {
     steps: [
-      { days: 2, label: "First reminder" },
-      { days: 3, label: "Second reminder" },
-      { days: 4, label: "Last follow-up" },
+      { days: 2, label: "offers.cadence.seed.first" },
+      { days: 3, label: "offers.cadence.seed.second" },
+      { days: 4, label: "offers.cadence.seed.last" },
     ],
     stopConditions: ["asked_to_stop", "not_interested"],
     customStopConditions: [],
@@ -190,15 +194,19 @@ function reducer(state: State, action: Action): State {
     case "pause":
       return { ...state, paused: action.value };
     case "mode":
-      return { ...state, requestedMode: action.value, changes: addChange(state.changes, "Autonomy: level changed") };
+      return { ...state, requestedMode: action.value, changes: addChange(state.changes, "changelog.autonomy") };
     case "role":
       return { ...state, role: action.value };
-    case "resolveNeed":
-      return { ...state, needs: state.needs.filter((n) => n.id !== action.id) };
-    case "approveDraft":
+    case "resolveNeed": {
+      const { needs, history } = resolveNeeds(state.needs, state.needHistory, (n) => n.id === action.id, "dismissed");
+      return { ...state, needs, needHistory: history };
+    }
+    case "approveDraft": {
+      const { needs, history } = resolveNeeds(state.needs, state.needHistory, (n) => n.kind === "draft" && n.prospectId === action.prospectId, "approved");
       return {
         ...state,
-        needs: state.needs.filter((n) => !(n.kind === "draft" && n.prospectId === action.prospectId)),
+        needs,
+        needHistory: history,
         conversations: state.conversations.map((c) =>
           c.prospectId === action.prospectId
             ? {
@@ -214,32 +222,39 @@ function reducer(state: State, action: Action): State {
         ),
         dailyUsed: state.dailyUsed + 1,
       };
-    case "declineDraft":
+    }
+    case "declineDraft": {
+      const { needs, history } = resolveNeeds(state.needs, state.needHistory, (n) => n.kind === "draft" && n.prospectId === action.prospectId, "declined");
       return {
         ...state,
-        needs: state.needs.filter((n) => !(n.kind === "draft" && n.prospectId === action.prospectId)),
+        needs,
+        needHistory: history,
         conversations: state.conversations.map((c) =>
           c.prospectId === action.prospectId ? { ...c, draft: undefined, needsYou: false } : c,
         ),
       };
-    case "takeOver":
+    }
+    case "takeOver": {
+      const { needs, history } = resolveNeeds(state.needs, state.needHistory, (n) => n.kind === "handoff" && n.prospectId === action.prospectId, "handled");
       return {
         ...state,
-        needs: state.needs.filter((n) => !(n.kind === "handoff" && n.prospectId === action.prospectId)),
+        needs,
+        needHistory: history,
         conversations: state.conversations.map((c) =>
           c.prospectId === action.prospectId
             ? { ...c, needsYou: false, notes: { ...c.notes, handoff: undefined } }
             : c,
         ),
         prospects: state.prospects.map((p) =>
-          p.id === action.prospectId ? { ...p, next: "You are handling this conversation", attention: "none" } : p,
+          p.id === action.prospectId ? { ...p, next: "prospect.next.handlingConversation", attention: "none" } : p,
         ),
       };
+    }
     case "giveBack":
       return {
         ...state,
         prospects: state.prospects.map((p) =>
-          p.id === action.prospectId ? { ...p, next: "I'll follow up tomorrow, 10:00", attention: "working" } : p,
+          p.id === action.prospectId ? { ...p, next: "prospect.next.followUpTomorrow", attention: "working" } : p,
         ),
       };
     case "sendHuman":
@@ -257,12 +272,14 @@ function reducer(state: State, action: Action): State {
             : c,
         ),
       };
-    case "confirmPayment":
+    case "confirmPayment": {
+      const { needs, history } = resolveNeeds(state.needs, state.needHistory, (n) => n.kind === "payment" && n.prospectId === action.prospectId, "confirmed");
       return {
         ...state,
         winPulse: state.winPulse + 1,
         winActive: true,
-        needs: state.needs.filter((n) => !(n.kind === "payment" && n.prospectId === action.prospectId)),
+        needs,
+        needHistory: history,
         conversations: state.conversations.map((c) =>
           c.prospectId === action.prospectId
             ? {
@@ -284,14 +301,15 @@ function reducer(state: State, action: Action): State {
                 status: "closed",
                 attention: "won",
                 step: 4,
-                read: "Payment confirmed. Welcome message scheduled.",
-                next: "Nothing planned",
+                read: "prospect.confirmPayment.read",
+                next: "prospect.next.nothingPlanned",
                 recommendation: undefined,
                 facts: [...p.facts, { key: "Payment", value: "Confirmed", status: "confirmed", source: "human", excerpt: "Confirmed by Sami K." }],
               }
             : p,
         ),
       };
+    }
     case "setProspectStage": {
       return {
         ...state,
@@ -335,7 +353,7 @@ function reducer(state: State, action: Action): State {
     case "publish":
       return { ...state, changes: [], publishedVersion: state.publishedVersion + 1 };
     case "limit":
-      return { ...state, dailyLimit: action.value, changes: addChange(state.changes, "Schedule: daily limit changed") };
+      return { ...state, dailyLimit: action.value, changes: addChange(state.changes, "changelog.dailyLimit") };
     case "degraded":
       return { ...state, degraded: action.value };
     case "toast":
@@ -346,7 +364,7 @@ function reducer(state: State, action: Action): State {
       return {
         ...state,
         offers: [action.offer, ...state.offers],
-        changes: addChange(state.changes, `Offers: ${action.offer.name} added`),
+        changes: addChange(state.changes, `changelog.offerAdded::${action.offer.name}`),
         gates: { ...state.gates, offer: true },
       };
     case "updateOffer": {
@@ -357,14 +375,14 @@ function reducer(state: State, action: Action): State {
         const merged = { ...o, ...action.patch };
         return { ...merged, ...deriveReadiness(merged) };
       });
-      return { ...state, offers, changes: addChange(state.changes, `Offers: ${editedName} edited`) };
+      return { ...state, offers, changes: addChange(state.changes, `changelog.offerEdited::${editedName}`) };
     }
     case "removeOffer": {
       const removed = state.offers.find((o) => o.id === action.id);
       return {
         ...state,
         offers: state.offers.filter((o) => o.id !== action.id),
-        changes: addChange(state.changes, `Offers: ${removed?.name ?? "a product"} removed`),
+        changes: addChange(state.changes, `changelog.offerRemoved::${removed?.name ?? "a product"}`),
       };
     }
     case "reorderOffer": {
@@ -382,7 +400,7 @@ function reducer(state: State, action: Action): State {
         const merged = { ...o, assets: [...o.assets, asset] };
         return { ...merged, ...deriveReadiness(merged) };
       });
-      return { ...state, offers, changes: addChange(state.changes, "Offers: sales material added") };
+      return { ...state, offers, changes: addChange(state.changes, "changelog.materialAdded") };
     }
     case "removeOfferAsset": {
       const offers = state.offers.map((o) => {
@@ -390,7 +408,7 @@ function reducer(state: State, action: Action): State {
         const merged = { ...o, assets: o.assets.filter((a) => a.id !== action.assetId) };
         return { ...merged, ...deriveReadiness(merged) };
       });
-      return { ...state, offers, changes: addChange(state.changes, "Offers: sales material removed") };
+      return { ...state, offers, changes: addChange(state.changes, "changelog.materialRemoved") };
     }
     case "addMarket": {
       const name = action.name.trim();
@@ -399,7 +417,7 @@ function reducer(state: State, action: Action): State {
         ...state,
         markets: [...state.markets, name],
         paymentProfiles: [...state.paymentProfiles, { market: name, methods: [], instructions: "", link: "" }],
-        changes: addChange(state.changes, `Business: ${name} added as a target country`),
+        changes: addChange(state.changes, `changelog.marketAdded::${name}`),
       };
     }
     case "removeMarket": {
@@ -412,7 +430,7 @@ function reducer(state: State, action: Action): State {
           return { ...merged, ...deriveReadiness(merged) };
         }),
         paymentProfiles: state.paymentProfiles.filter((p) => p.market !== action.name),
-        changes: addChange(state.changes, `Business: ${action.name} removed as a target country`),
+        changes: addChange(state.changes, `changelog.marketRemoved::${action.name}`),
       };
     }
     case "setPaymentProfile": {
@@ -420,41 +438,53 @@ function reducer(state: State, action: Action): State {
       const paymentProfiles = exists
         ? state.paymentProfiles.map((p) => (p.market === action.market ? { ...p, ...action.patch } : p))
         : [...state.paymentProfiles, { market: action.market, methods: [], instructions: "", link: "", ...action.patch }];
-      return { ...state, paymentProfiles, changes: addChange(state.changes, `Payment: ${action.market} details changed`) };
+      return { ...state, paymentProfiles, changes: addChange(state.changes, `changelog.paymentChanged::${action.market}`) };
     }
     case "setSheetUrl":
-      return { ...state, sheet: { url: action.url, verified: false }, changes: addChange(state.changes, "Business: Google Sheet link changed") };
+      return { ...state, sheet: { url: action.url, verified: false }, changes: addChange(state.changes, "changelog.sheetLinkChanged") };
     case "verifySheet":
       return { ...state, sheet: { ...state.sheet, verified: true }, gates: { ...state.gates, sheet: true } };
     case "setLanguages":
-      return { ...state, languages: action.value, changes: addChange(state.changes, "Voice: languages changed") };
+      return { ...state, languages: action.value, changes: addChange(state.changes, "changelog.languagesChanged") };
     case "setDefaultLanguage":
-      return { ...state, defaultLanguage: action.value, changes: addChange(state.changes, "Voice: default language changed") };
+      return { ...state, defaultLanguage: action.value, changes: addChange(state.changes, "changelog.defaultLanguageChanged") };
     case "setTone":
-      return { ...state, tone: action.value, changes: addChange(state.changes, "Voice: starting style changed") };
+      return { ...state, tone: action.value, changes: addChange(state.changes, "changelog.styleChanged") };
     case "setHandoff":
-      return { ...state, handoffEnabled: action.value, changes: addChange(state.changes, "Sales strategy: handoff changed") };
+      return { ...state, handoffEnabled: action.value, changes: addChange(state.changes, "changelog.handoffChanged") };
     case "setScheduleDays":
-      return { ...state, schedule: { ...state.schedule, days: action.value }, changes: addChange(state.changes, "Schedule: working days changed") };
+      return { ...state, schedule: { ...state.schedule, days: action.value }, changes: addChange(state.changes, "changelog.workingDaysChanged") };
     case "setScheduleHours":
-      return { ...state, schedule: { ...state.schedule, start: action.start, end: action.end }, changes: addChange(state.changes, "Schedule: hours changed") };
+      return { ...state, schedule: { ...state.schedule, start: action.start, end: action.end }, changes: addChange(state.changes, "changelog.hoursChanged") };
     case "setOptOutWords":
-      return { ...state, optOutWords: action.value, changes: addChange(state.changes, "Schedule: opt-out words changed") };
+      return { ...state, optOutWords: action.value, changes: addChange(state.changes, "changelog.optOutChanged") };
     case "setFollowUpSteps":
-      return { ...state, followUp: { ...state.followUp, steps: action.value }, changes: addChange(state.changes, "Follow-up: cadence changed") };
+      return { ...state, followUp: { ...state.followUp, steps: action.value }, changes: addChange(state.changes, "changelog.cadenceChanged") };
     case "setFollowUpStop":
-      return { ...state, followUp: { ...state.followUp, stopConditions: action.value }, changes: addChange(state.changes, "Follow-up: stop rules changed") };
+      return { ...state, followUp: { ...state.followUp, stopConditions: action.value }, changes: addChange(state.changes, "changelog.stopRulesChanged") };
     case "setFollowUpCustomStop":
-      return { ...state, followUp: { ...state.followUp, customStopConditions: action.value }, changes: addChange(state.changes, "Follow-up: stop rules changed") };
+      return { ...state, followUp: { ...state.followUp, customStopConditions: action.value }, changes: addChange(state.changes, "changelog.stopRulesChanged") };
     case "setCeoReport":
-      return { ...state, ceoReport: { ...state.ceoReport, ...action.patch }, changes: addChange(state.changes, "WhatsApp: daily report changed") };
+      return { ...state, ceoReport: { ...state.ceoReport, ...action.patch }, changes: addChange(state.changes, "changelog.dailyReportChanged") };
     case "setAgentPhone":
-      return { ...state, agentPhone: action.value, changes: addChange(state.changes, "Connections: WhatsApp Business number changed") };
+      return { ...state, agentPhone: action.value, changes: addChange(state.changes, "changelog.whatsappNumberChanged") };
   }
 }
 
 function addChange(list: string[], label: string): string[] {
   return list.includes(label) ? list : [...list, label];
+}
+
+/** Moves the needs matching `match` out of the active list and into the history, newest first. */
+function resolveNeeds(
+  needs: NeedItem[],
+  history: ResolvedNeed[],
+  match: (n: NeedItem) => boolean,
+  resolution: NeedResolution,
+): { needs: NeedItem[]; history: ResolvedNeed[] } {
+  const resolved = needs.filter(match).map((n) => ({ ...n, resolution, resolvedAt: "time.justNow" as MessageKey }));
+  if (resolved.length === 0) return { needs, history };
+  return { needs: needs.filter((n) => !match(n)), history: [...resolved, ...history] };
 }
 
 const MODE_RANK: Record<Mode, number> = { observe: 0, ask: 1, auto: 2 };

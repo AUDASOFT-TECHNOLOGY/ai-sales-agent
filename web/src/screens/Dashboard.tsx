@@ -22,8 +22,8 @@ import { Segmented } from "../ui/Controls";
 import { Drawer } from "../ui/Overlays";
 
 const LIVE_EVENTS: ThreadEvent[] = [
-  { id: "live1", time: "10:34", kind: "received", who: "Nour J.", voice: "Nour answered my last question about what she wants to learn.", detail: "Reply from Nour Jebali" },
-  { id: "live2", time: "10:36", kind: "sent", who: "Nour J.", voice: "I shared a short overview of Foundation and asked one follow-up question.", detail: "Sent to Nour Jebali" },
+  { id: "live1", time: "10:34", kind: "received", who: "Nour J.", voice: "thread.live1.voice", detail: "thread.live1.detail" },
+  { id: "live2", time: "10:36", kind: "sent", who: "Nour J.", voice: "thread.live2.voice", detail: "thread.live2.detail" },
 ];
 
 type Period = "7d" | "30d" | "3m" | "all";
@@ -44,9 +44,9 @@ const TREND_UNIT_NOUN: Record<DashboardPeriodStat["trendUnit"], { current: Messa
  *  fabricated: every figure is hand-authored sample data (mock/data.ts), exactly like the rest of
  *  this prototype, and says so in its own comments. */
 export function Dashboard() {
-  const { t, n } = useI18n();
+  const { t, n, d } = useI18n();
   const navigate = useNavigate();
-  const { state, dispatch, toast, agentState, mode, canConfirmPayments } = useStore();
+  const { state, dispatch, toast, agentState, canConfirmPayments } = useStore();
   const label = useAgentLabel(agentState, state.needs.length);
   const [events, setEvents] = useState<ThreadEvent[]>(THREAD);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -89,18 +89,6 @@ export function Dashboard() {
   const trendNoun = TREND_UNIT_NOUN[stat.trendUnit];
   const stageTotal = STAGE_BREAKDOWN.reduce((sum, s) => sum + s.count, 0);
 
-  const heroSentence = !state.live
-    ? t("dashboard.hero.notLive")
-    : agentState === "paused"
-      ? t("dashboard.hero.paused")
-      : agentState === "observing"
-        ? t("dashboard.hero.observing")
-        : needs > 0
-          ? needs === 1
-            ? t("dashboard.hero.decisionsWaiting.one")
-            : t("dashboard.hero.decisionsWaiting.many", { n: n(needs) })
-          : t("dashboard.hero.nothingNeeds");
-
   return (
     <div className="page page--focus dashboard">
       <div className="page-head">
@@ -113,12 +101,9 @@ export function Dashboard() {
         </div>
         <div className="hero__text">
           <p className="hero__sentence" id="hero-title">
-            <span className="c-3">{t("command.greeting", { name: USER.name })} — </span>
-            {heroSentence}
+            {t("command.greeting", { name: USER.name })}
           </p>
-          <p className="hero__status c-2">
-            {label} · {t(`mode.${mode}` as MessageKey)}
-          </p>
+          <p className="hero__status c-2">{label}</p>
         </div>
         {!state.live ? (
           <LinkButton to="/setup" variant="primary" trailing={<ArrowRight size={18} className="mirror" aria-hidden />}>
@@ -132,7 +117,7 @@ export function Dashboard() {
       </Glass>
 
       <Glass className="panel dash-quota">
-        <DailyBudget used={state.dailyUsed} limit={state.dailyLimit} label={t("command.budget")} caption={t("command.budget.of", { used: state.dailyUsed, limit: state.dailyLimit })} />
+        <DailyBudget used={state.dailyUsed} limit={state.dailyLimit} label={t("command.budget")} />
         <p className="c-2 t-body-sm dash-quota__note">
           {t("dashboard.quota.note", {
             new: n(ACTIONS_TODAY.newProspects),
@@ -151,7 +136,7 @@ export function Dashboard() {
         <div className="section__head dash-filters">
           <div>
             <h2 className="t-h2" id="perf-h">
-              {t("dashboard.activitySince", { date: SINCE_START.startDate })}
+              {t("dashboard.activitySince", { date: d(SINCE_START.startDate) })}
             </h2>
             <p className="c-3 t-body-sm">{t("dashboard.monthsCollaboration", { n: SINCE_START.months })}</p>
           </div>
@@ -213,7 +198,7 @@ export function Dashboard() {
           <Glass level={2} tint="success" className="dash-kpi">
             <span className="c-2 t-body-sm">{t("dashboard.kpi.revenue")}</span>
             <span className="t-numeral-l tabular c-success">{stat.revenue}</span>
-            <span className="c-3 t-body-sm">{t("dashboard.firstTimeOutreach", { label: stat.label.toLowerCase() })}</span>
+            <span className="c-3 t-body-sm">{t(stat.label)}</span>
           </Glass>
         </div>
 
@@ -281,10 +266,10 @@ export function Dashboard() {
                       <span className="opp-row__text">
                         <span className="opp-row__top">
                           <span className="t-h3">{p.name}</span>
-                          <MilestoneChip label={STAGES.find((s) => s.id === p.stage)?.label ?? p.stage} />
+                          <MilestoneChip label={t(STAGES.find((s) => s.id === p.stage)?.label ?? (p.stage as MessageKey))} />
                         </span>
-                        <span className="voice voice-s">{p.read}</span>
-                        <span className="opp-row__next c-3 t-body-sm">{t("dashboard.nextAutomaticStep", { next: p.next })}</span>
+                        <span className="voice voice-s">{t(p.read)}</span>
+                        <span className="opp-row__next c-3 t-body-sm">{t("dashboard.nextAutomaticStep", { next: t(p.next) })}</span>
                       </span>
                     </Link>
                   </li>
@@ -357,7 +342,7 @@ export function Dashboard() {
       />
 
       <Drawer open={dayOpen} onOpenChange={setDayOpen} title={`${t("command.thread")} · ${TENANT.timezoneLabel}`}>
-        <DailyBudget used={state.dailyUsed} limit={state.dailyLimit} label={t("command.budget")} caption={t("command.budget.of", { used: state.dailyUsed, limit: state.dailyLimit })} />
+        <DailyBudget used={state.dailyUsed} limit={state.dailyLimit} label={t("command.budget")} />
         <DayThread events={events} nowTime={nowTime} agentState={agentState} />
       </Drawer>
 

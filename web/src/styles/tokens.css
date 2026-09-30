@@ -113,8 +113,8 @@
   --on-agent: #ffffff;
 
   /* ── Type ───────────────────────────────────── */
-  --font-ui: "Geist Variable", "IBM Plex Sans Arabic", system-ui, sans-serif;
-  --font-voice: "Plus Jakarta Sans Variable", "IBM Plex Sans Arabic", system-ui, sans-serif;
+  --font-ui: "Geist Variable", "Tajawal", system-ui, sans-serif;
+  --font-voice: "Plus Jakarta Sans Variable", "Tajawal", system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, monospace;
 
   /* ── Space (4 px base) ──────────────────────── */

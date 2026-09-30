@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, Lock, Minus, Plus, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
-import { useI18n } from "../i18n";
+import { useI18n, type MessageKey } from "../i18n";
 import type { CadenceStep, Offer } from "../mock/types";
 
 export type { CadenceStep };
@@ -141,14 +141,16 @@ export function CadenceEditor({ steps, onChange }: { steps: CadenceStep[]; onCha
           <span className="t-label c-2">{t("offers.cadence.firstMessage")}</span>
           <span className="c-3 t-body-sm">{t("offers.cadence.day0")}</span>
         </li>
-        {steps.map((s, i) => (
+        {steps.map((s, i) => {
+          const stepLabel = t(s.label as MessageKey);
+          return (
           <li key={i} className="cadence__step">
-            <span className="t-label c-2">{s.label}</span>
+            <span className="t-label c-2">{stepLabel}</span>
             <span className="row">
               <button
                 type="button"
                 className="icon-btn cadence__btn"
-                aria-label={t("offers.cadence.fewerDays", { label: s.label })}
+                aria-label={t("offers.cadence.fewerDays", { label: stepLabel })}
                 disabled={s.days <= 1}
                 onClick={() => onChange(steps.map((x, j) => (j === i ? { ...x, days: x.days - 1 } : x)))}
               >
@@ -158,7 +160,7 @@ export function CadenceEditor({ steps, onChange }: { steps: CadenceStep[]; onCha
               <button
                 type="button"
                 className="icon-btn cadence__btn"
-                aria-label={t("offers.cadence.moreDays", { label: s.label })}
+                aria-label={t("offers.cadence.moreDays", { label: stepLabel })}
                 disabled={cumulative[i]! >= SCALE * 0.78}
                 onClick={() => onChange(steps.map((x, j) => (j === i ? { ...x, days: x.days + 1 } : x)))}
               >
@@ -166,7 +168,8 @@ export function CadenceEditor({ steps, onChange }: { steps: CadenceStep[]; onCha
               </button>
             </span>
           </li>
-        ))}
+          );
+        })}
       </ul>
       <div className="row row--wrap">
         <Button

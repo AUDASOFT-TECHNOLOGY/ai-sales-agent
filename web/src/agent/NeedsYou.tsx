@@ -36,10 +36,10 @@ export function NeedRow({ item, prospect, onOpen }: { item: NeedItem; prospect: 
           <Icon size={14} aria-hidden /> {t(cfg.labelKey)}
         </p>
         <p className="t-h3">{prospect.name}</p>
-        <p className="voice voice-s">{item.reason}</p>
+        <p className="voice voice-s">{t(item.reason)}</p>
         <p className="need-row__meta c-3 t-body-sm">
-          {item.factors?.[0] ? <>{item.factors[0]} · </> : null}
-          {item.waiting}
+          {item.factors?.[0] ? <>{t(item.factors[0])} · </> : null}
+          {t(item.waiting)}
         </p>
       </div>
       <Button variant="primary" onClick={onOpen} trailing={<ArrowRight size={16} className="mirror" aria-hidden />}>
@@ -68,7 +68,7 @@ export function NeedDetailDialog({ item, prospect, onClose, onApprove, onDecline
       open={item !== null && prospect !== undefined}
       onOpenChange={(o) => !o && onClose()}
       title={prospect?.name ?? ""}
-      description={cfg ? `${t(cfg.labelKey)} · ${item?.waiting}` : undefined}
+      description={cfg && item ? `${t(cfg.labelKey)} · ${t(item.waiting)}` : undefined}
       tint="attention"
       footer={
         item?.kind === "draft" ? (
@@ -99,13 +99,13 @@ export function NeedDetailDialog({ item, prospect, onClose, onApprove, onDecline
     >
       {item ? (
         <>
-          <p className="voice voice-m voice-block">{item.reason}</p>
+          <p className="voice voice-m voice-block">{t(item.reason)}</p>
           {item.factors && item.factors.length > 0 ? (
             <div className="stack">
               <p className="t-label c-3">{t("needs.whyNow")}</p>
               <ul className="why-list">
                 {item.factors.map((f) => (
-                  <li key={f}>{f}</li>
+                  <li key={f}>{t(f)}</li>
                 ))}
               </ul>
             </div>
@@ -116,7 +116,7 @@ export function NeedDetailDialog({ item, prospect, onClose, onApprove, onDecline
               <p className="need-preview">{item.preview}</p>
             </div>
           ) : null}
-          {prospect ? <p className="c-2">{prospect.place} · {t("needs.lastMessage", { last: prospect.last })}</p> : null}
+          {prospect ? <p className="c-2">{prospect.place} · {t("needs.lastMessage", { last: t(prospect.last) })}</p> : null}
         </>
       ) : null}
     </Modal>

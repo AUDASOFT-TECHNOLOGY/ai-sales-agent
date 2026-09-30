@@ -210,7 +210,7 @@ export function GuardrailSlider({ label, value, onChange, min, cap, scaleMax, lo
 }
 
 /* ── Daily budget arc ── */
-export function DailyBudget({ used, limit, label, caption }: { used: number; limit: number; label: string; caption: string }) {
+export function DailyBudget({ used, limit, label, caption }: { used: number; limit: number; label: string; caption?: string }) {
   const ratio = Math.min(used / limit, 1);
   const C = 2 * Math.PI * 40;
   const tint = ratio >= 1 ? "attention" : ratio >= 0.9 ? "attention" : "action";
@@ -239,7 +239,7 @@ export function DailyBudget({ used, limit, label, caption }: { used: number; lim
       </div>
       <div className="budget__text">
         <p className="t-label c-2">{label}</p>
-        <p className="c-3 t-body-sm">{caption}</p>
+        {caption ? <p className="c-3 t-body-sm">{caption}</p> : null}
       </div>
     </div>
   );

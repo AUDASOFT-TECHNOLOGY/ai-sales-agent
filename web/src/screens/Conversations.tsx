@@ -27,7 +27,7 @@ export function Conversations() {
 
   const convo = state.conversations.find((c) => c.prospectId === id);
   const prospect = state.prospects.find((p) => p.id === id);
-  const tookOver = !!prospect && prospect.next === "You are handling this conversation";
+  const tookOver = !!prospect && prospect.next === "prospect.next.handlingConversation";
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -109,7 +109,7 @@ export function Conversations() {
         <AnimatePresence>
           {convo.notes.handoff ? (
             <HandoffBanner
-              reason={convo.notes.handoff}
+              reason={t(convo.notes.handoff)}
               onTakeOver={() => {
                 dispatch({ type: "takeOver", prospectId: convo.prospectId });
                 toast({ tone: "info", title: t("convo.toast.handling.title"), body: t("convo.toast.handling.body") });
@@ -168,7 +168,7 @@ export function Conversations() {
             </div>
             <ul className="why-list">
               {convo.reasoning.factors.map((f) => (
-                <li key={f}>{f}</li>
+                <li key={f}>{t(f)}</li>
               ))}
             </ul>
           </section>

@@ -177,7 +177,7 @@ export function AgentNotes({ conversation }: { conversation: Conversation }) {
           <p className="t-label c-3">{t("convo.decided")}</p>
           {conversation.notes.decided.map((d) => (
             <p key={d} className="voice voice-s notes__decided">
-              “{d}”
+              “{t(d)}”
             </p>
           ))}
         </div>

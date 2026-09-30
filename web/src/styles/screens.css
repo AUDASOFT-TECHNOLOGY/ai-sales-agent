@@ -41,7 +41,7 @@
 .hero__orb { display: grid; place-items: center; flex: none; }
 .hero__text { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .hero__sentence { margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; }
-.hero__status { margin: 0; font-size: 11px; }
+.hero__status { margin: 0; font-size: 15px; }
 @media (max-width: 699px) {
   .hero { flex-wrap: wrap; padding: 12px; }
   .hero__text { flex-basis: 100%; }

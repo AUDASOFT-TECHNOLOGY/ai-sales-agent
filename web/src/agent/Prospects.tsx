@@ -20,17 +20,18 @@ import { MilestoneChip, ProspectStatusChip } from "./StatusChips";
  *  any point in the pipeline, not just at the end. */
 function Bank({ stage, here, selectedId, onSelect }: { stage: Stage; here: Prospect[]; selectedId?: string; onSelect: (id: string) => void }) {
   const { t } = useI18n();
+  const stageLabel = t(stage.label);
   return (
-    <section className="bank" data-milestone={stage.milestone} aria-label={t("prospects.bank.count", { stage: stage.label, n: here.length })}>
+    <section className="bank" data-milestone={stage.milestone} aria-label={t("prospects.bank.count", { stage: stageLabel, n: here.length })}>
       <header className="bank__head">
-        <h3 className="t-label c-2">{stage.label}</h3>
+        <h3 className="t-label c-2">{stageLabel}</h3>
         <span className="bank__count tabular c-3 t-body-sm">{here.length}</span>
       </header>
       <ul className="bank__beads">
         {here.map((p) => (
           <motion.li key={p.id} layout layoutId={`bead-${p.id}`} transition={{ type: "spring", stiffness: 240, damping: 28 }}>
-            <Tip label={`${p.name} · ${p.read}`}>
-              <button type="button" className="bead-btn" data-selected={selectedId === p.id || undefined} onClick={() => onSelect(p.id)} aria-label={`${p.name}, ${p.read}`} aria-pressed={selectedId === p.id}>
+            <Tip label={`${p.name} · ${t(p.read)}`}>
+              <button type="button" className="bead-btn" data-selected={selectedId === p.id || undefined} onClick={() => onSelect(p.id)} aria-label={`${p.name}, ${t(p.read)}`} aria-pressed={selectedId === p.id}>
                 <Bead initials={p.initials} attention={p.attention} size={40} />
               </button>
             </Tip>
@@ -54,7 +55,7 @@ export function OpportunityRiver({ prospects, selectedId, onSelect }: { prospect
         {STAGES.map((stage) => (
           <Bank key={stage.id} stage={stage} here={prospects.filter((p) => p.stage === stage.id && p.status !== "lost")} selectedId={selectedId} onSelect={onSelect} />
         ))}
-        <Bank stage={{ id: "stopped", label: t("status.lost"), milestone: "lost" }} here={stopped} selectedId={selectedId} onSelect={onSelect} />
+        <Bank stage={{ id: "stopped", label: "status.lost", milestone: "lost" }} here={stopped} selectedId={selectedId} onSelect={onSelect} />
       </div></Glass>
     </LayoutGroup>
   );
@@ -82,7 +83,7 @@ export function ProspectLedger({ prospects, selectedId, onSelect }: { prospects:
                   <Bead initials={p.initials} attention={p.attention} size={48} />
                   <span className="plist__text">
                     <span className="t-h3">{p.name}</span>
-                    <span className="voice voice-s plist__why">{p.read}</span>
+                    <span className="voice voice-s plist__why">{t(p.read)}</span>
                   </span>
                 </button>
               </th>
@@ -90,7 +91,7 @@ export function ProspectLedger({ prospects, selectedId, onSelect }: { prospects:
                 <ProspectStatusChip status={p.status} stage={p.stage} lostReason={p.lostReason} />
                 {p.attention === "waiting" && p.recommendation ? (
                   <p className="plist__recommend">
-                    <Sparkles size={14} aria-hidden /> {p.recommendation}
+                    <Sparkles size={14} aria-hidden /> {t(p.recommendation)}
                   </p>
                 ) : null}
               </td>
@@ -100,7 +101,7 @@ export function ProspectLedger({ prospects, selectedId, onSelect }: { prospects:
               </td>
               <td className="plist__next">
                 <span className="c-3 t-body-sm">{t("prospects.col.next")}</span>
-                <span>{p.next}</span>
+                <span>{t(p.next)}</span>
               </td>
             </tr>
           ))}
@@ -118,7 +119,7 @@ export function PathTrack({ step }: { step: number }) {
       {PATH_STEPS.map((label, i) => (
         <li key={label} data-state={i < step ? "done" : i === step ? "current" : "next"} aria-current={i === step ? "step" : undefined}>
           <span className="path-track__dot">{i < step ? <Check size={11} strokeWidth={3} aria-hidden /> : null}</span>
-          <span className="t-body-sm">{label}</span>
+          <span className="t-body-sm">{t(label)}</span>
         </li>
       ))}
     </ol>
@@ -137,7 +138,7 @@ function DossierBody({ prospect, onClose }: { prospect: Prospect; onClose?: () =
         <div className="dossier__title">
           <h2 className="t-h2">{prospect.name}</h2>
           <p className="c-2">
-            {prospect.place} · {prospect.last}
+            {prospect.place} · {t(prospect.last)}
           </p>
         </div>
         {onClose ? (
@@ -148,16 +149,16 @@ function DossierBody({ prospect, onClose }: { prospect: Prospect; onClose?: () =
       </header>
       <div className="row row--wrap">
         <ProspectStatusChip status={prospect.status} stage={prospect.stage} lostReason={prospect.lostReason} />
-        <MilestoneChip won={stage?.milestone === "won"} label={stage?.label ?? ""} />
+        <MilestoneChip won={stage?.milestone === "won"} label={stage ? t(stage.label) : ""} />
         <Chip tint="action" outline>
           {prospect.interest}
         </Chip>
       </div>
       <div className="stack">
-        <p className="voice voice-m voice-block">{prospect.read}</p>
+        <p className="voice voice-m voice-block">{t(prospect.read)}</p>
         <p className="c-2">
           <span className="c-3">{t("prospects.col.next")}: </span>
-          {prospect.next}
+          {t(prospect.next)}
         </p>
       </div>
       {prospect.recommendation ? (
@@ -165,7 +166,7 @@ function DossierBody({ prospect, onClose }: { prospect: Prospect; onClose?: () =
           <Sparkles size={20} aria-hidden />
           <span>
             <strong>{t("prospects.recommends", { brand: t("brand.name") })}</strong>
-            {prospect.recommendation}
+            {t(prospect.recommendation)}
           </span>
         </p>
       ) : null}
@@ -206,7 +207,7 @@ function DossierBody({ prospect, onClose }: { prospect: Prospect; onClose?: () =
                 >
                   {STAGES.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.label}
+                      {t(s.label)}
                     </option>
                   ))}
                 </select>

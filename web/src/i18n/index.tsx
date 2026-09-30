@@ -18,6 +18,8 @@ interface I18n {
   t: (key: MessageKey, vars?: Vars) => string;
   /** Formats a number in the interface locale (Intl), never by hand. */
   n: (value: number, options?: Intl.NumberFormatOptions) => string;
+  /** Formats a date in the interface locale (Intl), never by hand. */
+  d: (value: string | Date, options?: Intl.DateTimeFormatOptions) => string;
 }
 
 const Ctx = createContext<I18n | null>(null);
@@ -53,11 +55,21 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const value = useMemo<I18n>(() => {
     const t = (key: MessageKey, vars?: Vars) => {
       const raw = catalogs[locale][key] ?? en[key] ?? key;
-      return vars ? raw.replace(/\{(\w+)\}/g, (_, name: string) => String(vars[name] ?? `{${name}}`)) : raw;
+      return vars
+        ? raw.replace(/\{(\w+)\}/g, (_, name: string) => {
+            const v = vars[name];
+            if (v === undefined) return `{${name}}`;
+            // Isolate numbers/mixed-script values so they keep their own left-to-right
+            // reading order instead of being pulled to the wrong end of an RTL sentence.
+            return typeof v === "number" ? `⁦${v}⁩` : String(v);
+          })
+        : raw;
     };
     const n = (v: number, options?: Intl.NumberFormatOptions) =>
       new Intl.NumberFormat(locale === "ar" ? "ar-TN-u-nu-latn" : "en", options).format(v);
-    return { locale, dir, setLocale, t, n };
+    const d = (v: string | Date, options: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", year: "numeric" }) =>
+      new Intl.DateTimeFormat(locale === "ar" ? "ar-TN-u-nu-latn" : "en", options).format(typeof v === "string" ? new Date(v) : v);
+    return { locale, dir, setLocale, t, n, d };
   }, [locale, dir, setLocale]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

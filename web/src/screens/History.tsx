@@ -89,7 +89,7 @@ export function History() {
               <Sparkles size={18} aria-hidden />
               <span>
                 <strong>{t("history.worthKnowing")}</strong>
-                {CEO_REPORT_HIGHLIGHT}
+                {t(CEO_REPORT_HIGHLIGHT)}
               </span>
             </p>
             <p className="c-2 t-body-sm">
@@ -108,7 +108,7 @@ export function History() {
             </div>
             <div className="report-timeline__past">
               <p className="report-timeline__date">
-                {day.date} — {day.time}
+                {t(day.date)} — {day.time}
               </p>
               <p className="c-2 t-body-sm">
                 {t("history.past.contactedReplies", { contacted: day.contacted, replies: day.replies })}
@@ -119,7 +119,7 @@ export function History() {
                     ? t("history.past.intervention.one")
                     : t("history.past.intervention.many", { n: day.interventions })}
               </p>
-              <p className="c-3 t-body-sm">{day.highlight}</p>
+              <p className="c-3 t-body-sm">{t(day.highlight)}</p>
             </div>
           </div>
         ))}

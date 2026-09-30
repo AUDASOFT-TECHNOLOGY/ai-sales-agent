@@ -48,7 +48,7 @@ export interface CadenceStep {
 
 export interface Stage {
   id: string;
-  label: string;
+  label: MessageKey;
   /** Generic milestone a stage may carry; the client's own label is what is shown. */
   milestone?: "won" | "lost";
 }
@@ -63,12 +63,12 @@ export interface Prospect {
   attention: Attention;
   /** Set only while `status` is "lost"; cleared when the prospect is reopened. */
   lostReason?: LostReason;
-  last: string;
-  read: string;
-  next: string;
+  last: MessageKey;
+  read: MessageKey;
+  next: MessageKey;
   interest: string;
   /** What REVANSA recommends doing next, in the client's own words. Empty for prospects with no clear next move yet. */
-  recommendation?: string;
+  recommendation?: MessageKey;
   facts: Fact[];
   step: number;
 }
@@ -78,11 +78,22 @@ export interface NeedItem {
   id: string;
   kind: NeedKind;
   prospectId: string;
-  reason: string;
-  waiting: string;
+  reason: MessageKey;
+  waiting: MessageKey;
   preview?: string;
   /** Why REVANSA is asking now, short bullets shown in the detail view (section "Why now?"). */
-  factors?: string[];
+  factors?: MessageKey[];
+}
+
+/** How a need was settled, for the notification history: a draft is approved or declined, a
+ *  handoff is handled, a payment is confirmed, a failed action is dismissed once it's dealt with. */
+export type NeedResolution = "approved" | "declined" | "handled" | "confirmed" | "dismissed";
+
+/** A need that left the "needs you" list, kept for the notification history so nothing a person
+ *  acted on is lost once it's off the active list. */
+export interface ResolvedNeed extends NeedItem {
+  resolution: NeedResolution;
+  resolvedAt: MessageKey;
 }
 
 export type ThreadKind = "sent" | "received" | "fact" | "decision" | "handoff" | "payment" | "scheduled" | "human";
@@ -91,8 +102,8 @@ export interface ThreadEvent {
   time: string;
   kind: ThreadKind;
   who: string;
-  voice: string;
-  detail: string;
+  voice: MessageKey;
+  detail: MessageKey;
   /** Future intentions are ghosts. */
   future?: boolean;
   needsYou?: boolean;
@@ -137,13 +148,13 @@ export interface Conversation {
   messages: Message[];
   notes: {
     learned: Fact[];
-    decided: string[];
-    handoff?: string;
+    decided: MessageKey[];
+    handoff?: MessageKey;
   };
   payment: "none" | "claimed" | "proof_received" | "paid";
   draft?: MessagePart[];
   /** Why the agent is recommending what it's recommending right now, and how sure it is. */
-  reasoning?: { factors: string[]; confidence: "high" | "medium" | "low" };
+  reasoning?: { factors: MessageKey[]; confidence: "high" | "medium" | "low" };
 }
 
 export type OfferAssetKind = "doc" | "image" | "video" | "testimonial" | "link";
@@ -188,7 +199,7 @@ export interface PaymentProfile {
  *  3 months, a month for "since the start"), so the chart never disagrees with the headline number
  *  above it. */
 export interface DashboardPeriodStat {
-  label: string;
+  label: MessageKey;
   contacted: number;
   responseRate: number;
   conversionRate: number;
@@ -201,7 +212,7 @@ export interface DashboardPeriodStat {
 /** One row of the "prospects by stage" breakdown on the Dashboard. */
 export interface StageSlice {
   id: string;
-  label: string;
+  label: MessageKey;
   count: number;
   tint: "action" | "agent" | "attention" | "success";
 }
@@ -218,12 +229,12 @@ export interface ProductPerformance {
 /** One past day's report, for the Report history screen. Today's own report is computed live from
  *  state, the same way Results.tsx already does it — only the days before it are hand-authored here. */
 export interface ReportDay {
-  date: string;
+  date: MessageKey;
   time: string;
   contacted: number;
   replies: number;
   conversationsOpen: number;
   paymentsToConfirm: number;
   interventions: number;
-  highlight: string;
+  highlight: MessageKey;
 }
