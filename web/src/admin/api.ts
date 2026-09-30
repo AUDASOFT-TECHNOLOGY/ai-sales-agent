@@ -139,3 +139,57 @@ export function adminListClients(): Promise<ClientSummary[]> {
 export function adminGetClient(clientId: string): Promise<ClientDetail> {
   return request<ClientDetail>(`/clients/${encodeURIComponent(clientId)}`);
 }
+
+// `agent_id === client_id` today: there is exactly one Brain per client, presented here as "the
+// client's agent" (see src/sales_app/api/admin_agents.py). Both fields are kept on the response
+// so a future move to several agents per client only has to stop treating them as equal.
+export type AgentStatus = "active" | "disabled";
+
+export interface AgentBrain {
+  factory: string | null;
+  settings_version: number | null;
+}
+
+export interface AgentLLM {
+  provider: string | null;
+  model: string | null;
+}
+
+export interface AgentSummary {
+  agent_id: string;
+  client_id: string;
+  display_name: string;
+  status: AgentStatus;
+  mode: string | null;
+  brain: AgentBrain;
+  llm: AgentLLM;
+}
+
+export interface AgentChannels {
+  sheets: string | null;
+  whatsapp: string | null;
+}
+
+export interface AgentSchedule {
+  daily_at: string | null;
+  days: string[];
+  prepare_every_minutes: number | null;
+  dispatch_every_minutes: number | null;
+  recover_every_minutes: number | null;
+}
+
+export interface AgentDetail extends AgentSummary {
+  timezone: string | null;
+  daily_action_limit: number | null;
+  max_attempts: number | null;
+  channels: AgentChannels;
+  schedule: AgentSchedule;
+}
+
+export function adminListAgents(): Promise<AgentSummary[]> {
+  return request<AgentSummary[]>("/agents");
+}
+
+export function adminGetAgent(agentId: string): Promise<AgentDetail> {
+  return request<AgentDetail>(`/agents/${encodeURIComponent(agentId)}`);
+}

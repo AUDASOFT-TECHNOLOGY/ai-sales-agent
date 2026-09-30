@@ -14,6 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 
 from sales_app.api.admin import create_admin_router
+from sales_app.api.admin_agents import create_admin_agents_router
 from sales_app.api.admin_clients import create_admin_clients_router
 from sales_app.bootstrap import Application
 from sales_app.logs import client_logger
@@ -50,6 +51,7 @@ def create_app(application: Application, *, run_scheduler: bool = True) -> FastA
     app = FastAPI(title="AI Sales Agent Core", lifespan=lifespan)
     app.include_router(create_admin_router(application))
     app.include_router(create_admin_clients_router(application))
+    app.include_router(create_admin_agents_router(application))
 
     @app.get("/health")
     def health() -> dict[str, str]:
