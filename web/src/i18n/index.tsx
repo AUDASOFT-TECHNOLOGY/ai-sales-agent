@@ -24,7 +24,7 @@ const Ctx = createContext<I18n | null>(null);
 
 function initialLocale(): Locale {
   try {
-    const saved = window.localStorage.getItem("revensa.locale");
+    const saved = window.localStorage.getItem("revansa.locale");
     if (saved === "en" || saved === "ar") return saved;
   } catch {
     /* storage can be unavailable; the interface still renders */
@@ -44,7 +44,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
     try {
-      window.localStorage.setItem("revensa.locale", next);
+      window.localStorage.setItem("revansa.locale", next);
     } catch {
       /* ignore */
     }

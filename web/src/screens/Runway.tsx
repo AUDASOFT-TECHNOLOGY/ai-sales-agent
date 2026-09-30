@@ -130,7 +130,7 @@ function GateForm({ gate, onDone }: { gate: GateId; onDone: () => void }) {
             Test connection
           </Button>
           <ol className="test-steps" aria-live="polite">
-            {["We can open your Sheet", "It has the columns REVENSA needs", "The information lines up"].map((s, i) => (
+            {["We can open your Sheet", "It has the columns REVANSA needs", "The information lines up"].map((s, i) => (
               <li key={s} data-state={tested > i ? "ok" : running && tested === i ? "run" : "idle"}>
                 {tested > i ? <Check size={15} aria-hidden /> : running && tested === i ? <Loader2 size={15} className="btn__spin" aria-hidden /> : <span className="test-steps__dot" aria-hidden />}
                 <span className="t-body-sm">{s}</span>
@@ -240,7 +240,7 @@ function GateForm({ gate, onDone }: { gate: GateId; onDone: () => void }) {
       ) : !state.live ? (
         <div className="gate-form__foot">
           <p className="c-attention t-body-sm">Waiting for activation.</p>
-          <Button variant="agent" onClick={() => { dispatch({ type: "goLive" }); toast({ tone: "success", title: "REVENSA is live", body: `Running in "${t(`mode.${mode}` as MessageKey)}" mode.` }); }}>
+          <Button variant="agent" onClick={() => { dispatch({ type: "goLive" }); toast({ tone: "success", title: "REVANSA is live", body: `Running in "${t(`mode.${mode}` as MessageKey)}" mode.` }); }}>
             Prototype: simulate the administrator's approval
           </Button>
         </div>

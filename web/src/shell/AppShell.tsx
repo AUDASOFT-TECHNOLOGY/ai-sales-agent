@@ -200,7 +200,7 @@ export function AppShell() {
   const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState(() => {
     try {
-      return window.localStorage.getItem("revensa.rail") === "collapsed";
+      return window.localStorage.getItem("revansa.rail") === "collapsed";
     } catch {
       return false;
     }
@@ -226,7 +226,7 @@ export function AppShell() {
     setCollapsed((c) => {
       const next = !c;
       try {
-        window.localStorage.setItem("revensa.rail", next ? "collapsed" : "expanded");
+        window.localStorage.setItem("revansa.rail", next ? "collapsed" : "expanded");
       } catch {
         /* ignore */
       }

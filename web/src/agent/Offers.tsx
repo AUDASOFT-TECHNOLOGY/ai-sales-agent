@@ -103,13 +103,13 @@ export function OfferCard({
   );
 }
 
-const MAX_TOUCHES = 4;
+const MAX_REMINDERS = 4;
 
-/** Follow-up cadence as a horizontal timeline; the platform's minimum gap and touch limit are drawn as locked zones (doc 17.2). */
+/** Follow-up cadence as a horizontal timeline; the platform's minimum gap and reminder limit are drawn as locked zones (doc 17.2). */
 export function CadenceEditor({ steps, onChange }: { steps: CadenceStep[]; onChange: (steps: CadenceStep[]) => void }) {
   const { t } = useI18n();
   const SCALE = 16;
-  const atCap = steps.length >= MAX_TOUCHES;
+  const atCap = steps.length >= MAX_REMINDERS;
   const cumulative = steps.reduce<number[]>((acc, s) => [...acc, (acc[acc.length - 1] ?? 0) + s.days], []);
   const pos = (d: number) => `${(d / SCALE) * 100}%`;
   return (
@@ -154,13 +154,13 @@ export function CadenceEditor({ steps, onChange }: { steps: CadenceStep[]; onCha
           size="sm"
           variant="secondary"
           leading={<Plus size={16} aria-hidden />}
-          disabledReason={atCap ? `Up to ${MAX_TOUCHES} touches, set by your platform` : undefined}
-          onClick={() => onChange([...steps, { days: 3, label: `Touch ${steps.length + 1}` }])}
+          disabledReason={atCap ? `Up to ${MAX_REMINDERS} reminders, set by your platform` : undefined}
+          onClick={() => onChange([...steps, { days: 3, label: `Reminder ${steps.length + 1}` }])}
         >
-          Add a touch
+          Add a reminder
         </Button>
         <span className="c-3 t-body-sm">
-          {t("configure.tab.followup")}: at least 1 hour apart · up to {MAX_TOUCHES} touches · set by your platform
+          {t("configure.tab.followup")}: at least 1 hour apart · up to {MAX_REMINDERS} reminders · set by your platform
         </span>
       </div>
     </div>

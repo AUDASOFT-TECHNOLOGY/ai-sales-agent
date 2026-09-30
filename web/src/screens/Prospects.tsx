@@ -13,7 +13,7 @@ export function Prospects() {
   const { t, n } = useI18n();
   const { state } = useStore();
   const [params, setParams] = useSearchParams();
-  const view: View = params.get("view") === "river" ? "river" : "list";
+  const view: View = params.get("view") === "list" ? "list" : "river";
   const filter: Filter = params.get("filter") === "needs" ? "needs" : "all";
   const product = params.get("product") ?? "all";
   const q = params.get("q") ?? "";
@@ -22,7 +22,7 @@ export function Prospects() {
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
     for (const [k, v] of Object.entries(patch)) {
-      if (v === null || v === "" || (k === "view" && v === "list") || (k === "filter" && v === "all") || (k === "product" && v === "all")) next.delete(k);
+      if (v === null || v === "" || (k === "view" && v === "river") || (k === "filter" && v === "all") || (k === "product" && v === "all")) next.delete(k);
       else next.set(k, v);
     }
     setParams(next, { replace: true });

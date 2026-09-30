@@ -157,10 +157,10 @@ export function Conversations() {
       <Drawer open={detailsOpen} onOpenChange={setDetailsOpen} title={prospect.name}>
         <PaymentSeal progress={convo.payment} confirmedBy={USER.name + " K."} canConfirm={canConfirmPayments} onReview={() => { setDetailsOpen(false); setConfirming(true); }} />
         {convo.reasoning ? (
-          <section className="why-panel" aria-label="Why REVENSA does this">
+          <section className="why-panel" aria-label="Why REVANSA does this">
             <div className="why-panel__head">
               <h3 className="t-label c-2">
-                <Sparkles size={16} aria-hidden className="c-agent" /> Why REVENSA does this
+                <Sparkles size={16} aria-hidden className="c-agent" /> Why REVANSA does this
               </h3>
               <span className={`chip why-panel__conf`} data-tint={convo.reasoning.confidence === "high" ? "success" : convo.reasoning.confidence === "medium" ? "attention" : "neutral"}>
                 Confidence: {convo.reasoning.confidence}

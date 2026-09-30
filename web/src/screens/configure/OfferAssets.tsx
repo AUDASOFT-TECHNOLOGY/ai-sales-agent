@@ -15,7 +15,7 @@ const KIND_META: Record<OfferAssetKind, { label: string; icon: LucideIcon; tint:
   link: { label: "Link", icon: Link2, tint: "neutral" },
 };
 
-/** Everything besides the one-sentence summary that helps REVENSA convince a prospect: spec
+/** Everything besides the one-sentence summary that helps REVANSA convince a prospect: spec
  *  sheets, photos, demo videos, customer testimonials. A summary alone isn't enough material for
  *  an agent to answer a prospect's real questions — this is where a CEO adds more. */
 export function OfferAssetEditor({ offer }: { offer: Offer }) {
@@ -36,10 +36,10 @@ export function OfferAssetEditor({ offer }: { offer: Offer }) {
       <div className="cfg-group">
         <div>
           <h3 className="t-h3">Sales material</h3>
-          <p className="c-2">Documents, photos, videos and testimonials REVENSA can point to when a prospect asks for more.</p>
+          <p className="c-2">Documents, photos, videos and testimonials REVANSA can point to when a prospect asks for more.</p>
         </div>
         {offer.assets.length === 0 ? (
-          <p className="c-attention t-body-sm">No supporting material yet. Add a document, photo, video or testimonial to help REVENSA convince this prospect.</p>
+          <p className="c-attention t-body-sm">No supporting material yet. Add a document, photo, video or testimonial to help REVANSA convince this prospect.</p>
         ) : (
           <ul className="asset-list">
             {offer.assets.map((a) => {

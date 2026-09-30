@@ -12,7 +12,7 @@ export function BusinessSection() {
   const { state, dispatch } = useStore();
   const [step, setStep] = useState(state.sheet.verified ? 3 : 0);
   const [running, setRunning] = useState(false);
-  const steps = ["We can open your Sheet", "It has the columns REVENSA needs", "The information lines up"];
+  const steps = ["We can open your Sheet", "It has the columns REVANSA needs", "The information lines up"];
   const run = () => {
     setRunning(true);
     setStep(0);
@@ -35,7 +35,7 @@ export function BusinessSection() {
         </div>
       </Group>
       <hr className="divider" />
-      <Group title="Google Sheet" hint="REVENSA reads your prospects from here, and only from here." icon={Table2}>
+      <Group title="Google Sheet" hint="REVANSA reads your prospects from here, and only from here." icon={Table2}>
         <TextInput
           label="Sheet link"
           value={state.sheet.url}
@@ -44,7 +44,7 @@ export function BusinessSection() {
         />
         <Disclosure title="What should my Sheet look like?" hint="One row per prospect">
           <p className="c-2 t-body-sm">
-            One row per prospect, with a column for their name, one for their phone number, and one for their country. Extra columns are fine — REVENSA only reads the ones it needs.
+            One row per prospect, with a column for their name, one for their phone number, and one for their country. Extra columns are fine — REVANSA only reads the ones it needs.
           </p>
         </Disclosure>
         <div className="row row--wrap">
@@ -62,11 +62,11 @@ export function BusinessSection() {
         </div>
         <div className="callout callout--sm">
           <p className="c-2">
-            Share the Sheet with this address so REVENSA can read it. This is a safe, read-only address REVENSA uses — sharing your Sheet with it gives it access to nothing else.
+            Share the Sheet with this address so REVANSA can read it. This is a safe, read-only address REVANSA uses — sharing your Sheet with it gives it access to nothing else.
           </p>
           <p className="row">
-            <code className="t-mono">agent@revensa-sample.iam.example</code>
-            <button type="button" className="icon-btn" aria-label="Copy address" onClick={() => void navigator.clipboard?.writeText("agent@revensa-sample.iam.example")}>
+            <code className="t-mono">agent@revansa-sample.iam.example</code>
+            <button type="button" className="icon-btn" aria-label="Copy address" onClick={() => void navigator.clipboard?.writeText("agent@revansa-sample.iam.example")}>
               <Copy size={18} />
             </button>
           </p>

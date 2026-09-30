@@ -163,7 +163,7 @@ function DossierBody({ prospect, onClose }: { prospect: Prospect; onClose?: () =
         <p className="recommend-box">
           <Sparkles size={20} aria-hidden />
           <span>
-            <strong>REVENSA recommends: </strong>
+            <strong>REVANSA recommends: </strong>
             {prospect.recommendation}
           </span>
         </p>

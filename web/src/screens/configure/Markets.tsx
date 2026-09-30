@@ -13,7 +13,7 @@ export function MarketsDrawer({ open, onOpenChange }: { open: boolean; onOpenCha
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} title="Target countries">
-      <p className="c-2 t-body-sm">Where REVENSA sells your products, and where payment details are set separately for each.</p>
+      <p className="c-2 t-body-sm">Where REVANSA sells your products, and where payment details are set separately for each.</p>
       <ul className="market-list">
         {state.markets.map((m) => {
           const count = state.offers.filter((o) => o.markets.includes(m)).length;

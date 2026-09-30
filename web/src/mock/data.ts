@@ -324,7 +324,7 @@ export const THREAD: ThreadEvent[] = [
   { id: "t10", time: "14:00", kind: "human", who: "Youssef G.", voice: "A registration reminder, if Youssef hasn't finished.", detail: "Planned", future: true },
 ];
 
-/** What today's 14 commercial actions actually are (section "What REVENSA is doing today"): most of
+/** What today's 14 commercial actions actually are (section "What REVANSA is doing today"): most of
  *  the daily quota is follow-ups and reminders on prospects already in conversation, not only new
  *  contacts. Hand-authored sample data, exactly like the KPI numbers below. */
 export const ACTIONS_TODAY = {
@@ -526,7 +526,7 @@ export const CONVERSATIONS: Conversation[] = [
   },
 ];
 
-/** Since REVENSA went live with this client: the Dashboard's headline numbers. Hand-authored sample
+/** Since REVANSA went live with this client: the Dashboard's headline numbers. Hand-authored sample
  *  data, exactly like ACTIONS_TODAY above — this prototype only has 12 sample prospects to derive
  *  live figures from, so a six-month cumulative total has to be authored, not computed. */
 export const SINCE_START = {
@@ -598,14 +598,14 @@ export const STAGE_BREAKDOWN: StageSlice[] = [
 ];
 
 /** Since-start performance per catalogue product, keyed to OFFERS above. Masterclass is coming
- *  soon, so it honestly has nothing to report yet — REVENSA never invents a number here. */
+ *  soon, so it honestly has nothing to report yet — REVANSA never invents a number here. */
 export const PRODUCT_PERFORMANCE: ProductPerformance[] = [
   { offerId: "foundation", prospectsOriented: 742, conversionRate: 11, revenueValue: 97500, revenueLabel: "97 500 TND" },
   { offerId: "growth", prospectsOriented: 498, conversionRate: 22, revenueValue: 88900, revenueLabel: "88 900 TND" },
   { offerId: "masterclass", prospectsOriented: 0, conversionRate: null, revenueValue: null, revenueLabel: null },
 ];
 
-/** Report history (new "Report history" menu): every daily WhatsApp report REVENSA has sent this
+/** Report history (new "Report history" menu): every daily WhatsApp report REVANSA has sent this
  *  CEO, kept so a past day can be reopened. Today's own entry is computed live in History.tsx from
  *  the same state Results.tsx already reads; only the days before it need authored sample data. */
 export const REPORT_HISTORY_PAST: ReportDay[] = [

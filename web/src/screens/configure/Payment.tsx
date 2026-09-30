@@ -16,7 +16,7 @@ export function PaymentProfileEditor({ market, profile, onChange }: { market: st
   const { state } = useStore();
   const viewer = state.role === "viewer";
   return (
-    <Group title={`How you get paid — ${market}`} hint="Exact values REVENSA gives a prospect, never rewritten." icon={CreditCard}>
+    <Group title={`How you get paid — ${market}`} hint="Exact values REVANSA gives a prospect, never rewritten." icon={CreditCard}>
       <div className="field">
         <span className="t-label c-2">Ways people can pay</span>
         <ToggleChips
@@ -34,7 +34,7 @@ export function PaymentProfileEditor({ market, profile, onChange }: { market: st
       {profile.methods.includes("link") ? (
         <VerbatimField label="Online payment link" value={profile.link} onChange={(v) => onChange({ link: v })} placeholder="https://…" previewPrefix="Pay here: " />
       ) : null}
-      <p className="c-3 t-body-sm">{viewer ? "Viewers can look but not edit." : "Only a person at your company can confirm that a payment arrived. REVENSA records what people say, never that they paid."}</p>
+      <p className="c-3 t-body-sm">{viewer ? "Viewers can look but not edit." : "Only a person at your company can confirm that a payment arrived. REVANSA records what people say, never that they paid."}</p>
     </Group>
   );
 }

@@ -8,7 +8,7 @@ export function deriveReadiness(offer: Offer): { completeness: number; missing: 
   if (!offer.summary || offer.summary.trim().length < 8) missing.push("A benefit to lead with");
   if (offer.price === "Not set") missing.push("A price, or 'On request'");
   if (offer.markets.length === 0) missing.push("A market it sells in");
-  if (offer.assets.length === 0) missing.push("A document, photo or testimonial to help REVENSA convince a prospect");
+  if (offer.assets.length === 0) missing.push("A document, photo or testimonial to help REVANSA convince a prospect");
   const total = 4;
   return { completeness: Math.max(0.15, (total - missing.length) / total), missing };
 }

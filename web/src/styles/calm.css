@@ -214,7 +214,7 @@
 .field .segmented { justify-self: start; }
 .cfg-group .disclosure:last-child { border-block-end: 0; }
 
-/* ── Command: "What REVENSA is doing today" stat panel (sections 2, 4) ─ */
+/* ── Command: "What REVANSA is doing today" stat panel (sections 2, 4) ─ */
 .today-panel { padding: 22px 24px; display: grid; gap: 18px; }
 .today-panel__main { display: grid; gap: 6px; }
 .today-panel__breakdown { color: var(--text-2); font-size: 13px; max-width: 60ch; }
@@ -251,7 +251,7 @@
 .results--compact .results__main { display: grid; gap: 6px; }
 .results--compact .results__num { line-height: 1; }
 
-/* Conversation "Why REVENSA does this" panel, inside the Details drawer. */
+/* Conversation "Why REVANSA does this" panel, inside the Details drawer. */
 .why-panel { display: grid; gap: 10px; padding-block-start: 6px; border-block-start: 1px solid var(--line-1); }
 .why-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .why-panel__head h3 { display: flex; align-items: center; gap: 6px; }

@@ -1,6 +1,6 @@
 # Naga client UI: design system and art direction
 
-Status: **design proposal; a visual prototype exists in [../web/](../web/README.md)** (sample data only, no backend). The product is provisionally named **REVENSA** ("Turn conversations into revenue."). Nothing of the real application is implemented yet.
+Status: **design proposal; a visual prototype exists in [../web/](../web/README.md)** (sample data only, no backend). The product is provisionally named **REVANSA** ("Turn conversations into revenue."). Nothing of the real application is implemented yet.
 This document fixes the art direction, the design system and the screen architecture of the first
 client-facing interface (Naga), and the rules that keep it reusable for the future Multi-Client Admin.
 It is the "Web Admin frontend" of step 6 in [web-admin-product-design.md](web-admin-product-design.md)

@@ -53,9 +53,9 @@ interface State {
   handoffEnabled: boolean;
   schedule: { days: string[]; start: string; end: string };
   optOutWords: string[];
-  followUp: { steps: CadenceStep[]; stopConditions: string[] };
+  followUp: { steps: CadenceStep[]; stopConditions: string[]; customStopConditions: string[] };
   ceoReport: { enabled: boolean; time: string; phone: string };
-  /** The WhatsApp Business number REVENSA writes to prospects from. Editable by the client. */
+  /** The WhatsApp Business number REVANSA writes to prospects from. Editable by the client. */
   agentPhone: string;
   /** Target countries this client sells into, managed by the client (business section). */
   markets: string[];
@@ -99,6 +99,7 @@ const initial: State = {
       { days: 4, label: "Last follow-up" },
     ],
     stopConditions: ["asked_to_stop", "not_interested"],
+    customStopConditions: [],
   },
   ceoReport: { enabled: true, time: "20:00", phone: "+216 20 000 000" },
   agentPhone: "+216 20 000 042",
@@ -166,6 +167,7 @@ type Action =
   | { type: "setOptOutWords"; value: string[] }
   | { type: "setFollowUpSteps"; value: CadenceStep[] }
   | { type: "setFollowUpStop"; value: string[] }
+  | { type: "setFollowUpCustomStop"; value: string[] }
   | { type: "setCeoReport"; patch: Partial<State["ceoReport"]> }
   | { type: "setAgentPhone"; value: string };
 
@@ -442,6 +444,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, followUp: { ...state.followUp, steps: action.value }, changes: addChange(state.changes, "Follow-up: cadence changed") };
     case "setFollowUpStop":
       return { ...state, followUp: { ...state.followUp, stopConditions: action.value }, changes: addChange(state.changes, "Follow-up: stop rules changed") };
+    case "setFollowUpCustomStop":
+      return { ...state, followUp: { ...state.followUp, customStopConditions: action.value }, changes: addChange(state.changes, "Follow-up: stop rules changed") };
     case "setCeoReport":
       return { ...state, ceoReport: { ...state.ceoReport, ...action.patch }, changes: addChange(state.changes, "WhatsApp: daily report changed") };
     case "setAgentPhone":
@@ -500,8 +504,8 @@ const Ctx = createContext<Store | null>(null);
 /* ── Persistence: this prototype's only "backend" is this browser's localStorage. Bumping
  *  STORAGE_VERSION invalidates older shapes instead of crashing on them. Toasts and the win
  *  animation are transient and never persisted. ── */
-const STORAGE_KEY = "revensa.mock.state";
-const STORAGE_VERSION = 6;
+const STORAGE_KEY = "revansa.mock.state";
+const STORAGE_VERSION = 7;
 
 function loadPersisted(): State {
   try {

@@ -18,9 +18,9 @@ type SectionId = "business" | "offers" | "followup" | "schedule";
  *  at once, and opening one thing never hides the others. */
 const CARDS: Array<{ id: SectionId; icon: LucideIcon; title: string; blurb: string }> = [
   { id: "business", icon: Building2, title: "Your business", blurb: "Your company, and where your prospects live." },
-  { id: "offers", icon: Package, title: "What REVENSA sells", blurb: "Your catalogue, what convinces a prospect, and how you get paid." },
-  { id: "followup", icon: Repeat, title: "How REVENSA follows up", blurb: "What happens when a prospect goes quiet." },
-  { id: "schedule", icon: CalendarClock, title: "When REVENSA works", blurb: "Hours, daily limit, and the number it writes from." },
+  { id: "offers", icon: Package, title: "What REVANSA sells", blurb: "Your catalogue, what convinces a prospect, and how you get paid." },
+  { id: "followup", icon: Repeat, title: "How REVANSA follows up", blurb: "What happens when a prospect goes quiet." },
+  { id: "schedule", icon: CalendarClock, title: "When REVANSA works", blurb: "Hours, daily limit, and the number it writes from." },
 ];
 
 export function Configure() {
@@ -38,7 +38,7 @@ export function Configure() {
       const incomplete = state.offers.some((o) => o.missing.length > 0);
       return { bold: `${state.offers.length} products`, text: `· ${state.markets.join(", ") || "no market yet"}`, attention: incomplete };
     }
-    if (id === "followup") return { bold: `${state.followUp.steps.length} touches`, text: "· then stops", attention: false };
+    if (id === "followup") return { bold: `${state.followUp.steps.length} reminders`, text: "· then stops", attention: false };
     return { bold: `${state.schedule.days.length} days`, text: `a week · report at ${state.ceoReport.time}`, attention: state.degraded };
   };
 

@@ -1,9 +1,9 @@
 {
-  "name": "revensa-web",
+  "name": "revansa-web",
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "REVENSA client console: visual prototype (mock data only, no backend).",
+  "description": "REVANSA client console: visual prototype (mock data only, no backend).",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

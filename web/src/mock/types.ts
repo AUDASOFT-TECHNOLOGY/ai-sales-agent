@@ -38,7 +38,7 @@ export interface Fact {
 /** Starting register for the agent's first message; it adapts from there (see agent/Strategy.tsx). */
 export type Tone = "formal" | "neutral" | "friendly";
 
-/** One step of the follow-up cadence: how many days after the previous touch, and its label. */
+/** One step of the follow-up cadence: how many days after the previous reminder, and its label. */
 export interface CadenceStep {
   days: number;
   label: string;
@@ -65,7 +65,7 @@ export interface Prospect {
   read: string;
   next: string;
   interest: string;
-  /** What REVENSA recommends doing next, in the client's own words. Empty for prospects with no clear next move yet. */
+  /** What REVANSA recommends doing next, in the client's own words. Empty for prospects with no clear next move yet. */
   recommendation?: string;
   facts: Fact[];
   step: number;
@@ -79,7 +79,7 @@ export interface NeedItem {
   reason: string;
   waiting: string;
   preview?: string;
-  /** Why REVENSA is asking now, short bullets shown in the detail view (section "Why now?"). */
+  /** Why REVANSA is asking now, short bullets shown in the detail view (section "Why now?"). */
   factors?: string[];
 }
 
@@ -147,7 +147,7 @@ export interface Conversation {
 export type OfferAssetKind = "doc" | "image" | "video" | "testimonial" | "link";
 
 /** One piece of sales material a CEO can hand the agent besides the one-line summary —
- *  a spec sheet, a photo, a demo video, a customer testimonial — so REVENSA has more than
+ *  a spec sheet, a photo, a demo video, a customer testimonial — so REVANSA has more than
  *  a sentence to work with when a prospect asks for details. */
 export interface OfferAsset {
   id: string;

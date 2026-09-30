@@ -1,8 +1,8 @@
-# REVENSA web (visual prototype)
+# REVANSA web (visual prototype)
 
 > **Turn conversations into revenue.**
 
-A **visual prototype** of the REVENSA client console, built to judge the art direction ("Nocturne") before the real
+A **visual prototype** of the REVANSA client console, built to judge the art direction ("Nocturne") before the real
 application is developed. It implements the design system in
 [../docs/naga-client-ui-design-system.md](../docs/naga-client-ui-design-system.md).
 

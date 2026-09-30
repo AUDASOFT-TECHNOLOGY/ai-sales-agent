@@ -11,7 +11,7 @@ import { PaymentSection } from "./Payment";
 
 type StatusFilter = "all" | Offer["status"];
 
-/* ── What REVENSA sells: the catalogue, then the editor of the product you picked, then payment ── */
+/* ── What REVANSA sells: the catalogue, then the editor of the product you picked, then payment ── */
 export function OffersSection() {
   const { t } = useI18n();
   const { state, dispatch, toast } = useStore();
@@ -36,7 +36,7 @@ export function OffersSection() {
   return (
     <>
       <p className="c-2 catalogue-note">
-        REVENSA orients each prospect toward the product below that matches what they need — from the conversation, or your Sheet if it hasn't come up yet. When the need isn't clear, it recommends the closest match rather than guessing.
+        REVANSA orients each prospect toward the product below that matches what they need — from the conversation, or your Sheet if it hasn't come up yet. When the need isn't clear, it recommends the closest match rather than guessing.
       </p>
       <div className="row row--wrap catalogue-toolbar">
         <label className="search-field well">

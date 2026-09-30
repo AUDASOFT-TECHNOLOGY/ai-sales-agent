@@ -29,7 +29,7 @@ function Parts({ parts }: { parts: MessagePart[] }) {
   );
 }
 
-const AUTHOR_LABEL: Record<Message["author"], string> = { prospect: "", agent: "REVENSA agent", human: "", system: "" };
+const AUTHOR_LABEL: Record<Message["author"], string> = { prospect: "", agent: "REVANSA agent", human: "", system: "" };
 
 /** Three authors, distinguishable without color alone: position, glyph and a label on the first bubble (doc 18.2). */
 export function MessageBubble({ message, prospectInitials, firstOfRun }: { message: Message; prospectInitials: string; firstOfRun: boolean }) {

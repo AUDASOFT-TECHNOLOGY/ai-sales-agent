@@ -8,7 +8,7 @@ import { Segmented } from "../ui/Controls";
 
 type Range = "7d" | "30d" | "all";
 
-/** Report history: every daily WhatsApp report REVENSA has sent this CEO, kept so a past day can be
+/** Report history: every daily WhatsApp report REVANSA has sent this CEO, kept so a past day can be
  *  reopened rather than lost once the next one arrives. Today's own entry reads the same live state
  *  as Results.tsx did before this section moved here; the days before it are hand-authored sample
  *  data (mock/data.ts REPORT_HISTORY_PAST), like every other figure in this prototype. */
@@ -24,7 +24,7 @@ export function History() {
       <div className="page-head">
         <div>
           <h2 className="t-h1">Report history</h2>
-          <p className="c-2">Every daily report REVENSA has sent you on WhatsApp, kept for you to look back on.</p>
+          <p className="c-2">Every daily report REVANSA has sent you on WhatsApp, kept for you to look back on.</p>
         </div>
         <Segmented
           layoutId="seg-history-range"
@@ -94,7 +94,7 @@ export function History() {
             </p>
             <p className="c-2 t-body-sm">
               <strong>Tomorrow: </strong>
-              REVENSA plans to start with {THREAD.filter((e) => e.future).length} scheduled actions, including a new first message.
+              REVANSA plans to start with {THREAD.filter((e) => e.future).length} scheduled actions, including a new first message.
             </p>
             <p className="c-3 t-body-sm">Sent on WhatsApp to {state.ceoReport.phone}.</p>
           </Glass>

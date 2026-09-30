@@ -7,7 +7,7 @@ import { GuardrailSlider } from "../../agent/Autonomy";
 import { Switch, TextInput, ToggleChips } from "../../ui/Controls";
 import { Group } from "./Group";
 
-/* ── When REVENSA works, and how it connects: days, hours, the daily limit, the WhatsApp
+/* ── When REVANSA works, and how it connects: days, hours, the daily limit, the WhatsApp
  *  Business number it writes from, and your daily report. ── */
 export function ScheduleSection() {
   const { t } = useI18n();
@@ -46,7 +46,7 @@ export function ScheduleSection() {
         {viewer ? <p className="c-attention">Only owners can change limits.</p> : null}
       </Group>
       <hr className="divider" />
-      <Group title={t("configure.optout")} hint="When a prospect writes one of these, REVENSA stops for good. That rule is built in; only the words are yours." icon={Ban}>
+      <Group title={t("configure.optout")} hint="When a prospect writes one of these, REVANSA stops for good. That rule is built in; only the words are yours." icon={Ban}>
         <div className="row row--wrap">
           {state.optOutWords.map((p) => (
             <span key={p} className="phrase">
@@ -70,7 +70,7 @@ export function ScheduleSection() {
         </div>
       </Group>
       <hr className="divider" />
-      <Group title="WhatsApp Business number" hint="The number REVENSA writes to prospects from." icon={MessageCircle}>
+      <Group title="WhatsApp Business number" hint="The number REVANSA writes to prospects from." icon={MessageCircle}>
         <TextInput
           label="Number"
           type="tel"
@@ -88,7 +88,7 @@ export function ScheduleSection() {
         {state.ceoReport.enabled ? (
           <div className="grid-2">
             <TextInput label="Time" type="time" value={state.ceoReport.time} onChange={(e) => dispatch({ type: "setCeoReport", patch: { time: e.target.value } })} disabled={viewer} />
-            <TextInput label="Your WhatsApp number" type="tel" value={state.ceoReport.phone} onChange={(e) => dispatch({ type: "setCeoReport", patch: { phone: e.target.value } })} disabled={viewer} helper="Different from the number REVENSA writes from." />
+            <TextInput label="Your WhatsApp number" type="tel" value={state.ceoReport.phone} onChange={(e) => dispatch({ type: "setCeoReport", patch: { phone: e.target.value } })} disabled={viewer} helper="Different from the number REVANSA writes from." />
           </div>
         ) : null}
       </Group>
