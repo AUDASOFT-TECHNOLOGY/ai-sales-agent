@@ -1,11 +1,13 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AdminAuthProvider } from "./AdminAuthContext";
 import { AdminLoginPage } from "./AdminLoginPage";
 import { AdminRoute } from "./AdminRoute";
-import { AdminHomePage } from "./AdminHomePage";
+import { AdminShell } from "./AdminShell";
+import { AdminDashboardPage } from "./pages/AdminDashboardPage";
+import { AdminPlaceholderPage } from "./pages/AdminPlaceholderPage";
 
 /** A fetch stub that answers `/admin/v1/*` the way the real FastAPI router does (see
  *  src/sales_app/api/admin.py and tests/app/test_admin_api.py), without a network or a backend. */
@@ -45,6 +47,8 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+/** Mirrors the `/admin/*` route tree in App.tsx so these tests exercise the same nesting
+ *  (AdminRoute guarding AdminShell, which lays out the nested section pages). */
 function renderApp(initialPath = "/admin/login") {
   render(
     <MemoryRouter initialEntries={[initialPath]}>
@@ -55,10 +59,17 @@ function renderApp(initialPath = "/admin/login") {
             path="/admin"
             element={
               <AdminRoute>
-                <AdminHomePage />
+                <AdminShell />
               </AdminRoute>
             }
-          />
+          >
+            <Route index element={<AdminDashboardPage />} />
+            <Route path="clients" element={<AdminPlaceholderPage title="Clients" description="Manage client accounts, plans and access." />} />
+            <Route path="agents" element={<AdminPlaceholderPage title="Agents" description="Configure and monitor sales agents across clients." />} />
+            <Route path="billing" element={<AdminPlaceholderPage title="Billing" description="Subscriptions, invoices and payment settings." />} />
+            <Route path="settings" element={<AdminPlaceholderPage title="Settings" description="Platform and LLM configuration." />} />
+            <Route path="users" element={<AdminPlaceholderPage title="Admin Users" description="Manage admin accounts and roles." />} />
+          </Route>
         </Routes>
       </AdminAuthProvider>
     </MemoryRouter>,
@@ -86,8 +97,8 @@ describe("AdminLoginPage", () => {
     await user.type(screen.getByLabelText("Username"), "alice");
     await user.type(screen.getByLabelText("Password"), "correct-horse-battery-staple");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(await screen.findByText(/Signed in as/)).toBeInTheDocument();
-    expect(screen.getByText("alice", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+    expect(screen.getByText("alice")).toBeInTheDocument();
   });
 
   it("shows an error and stays on the form for a wrong password", async () => {
@@ -116,7 +127,7 @@ describe("AdminLoginPage", () => {
   it("skips the form and goes straight to /admin when already signed in", async () => {
     stubFetch({ me: "authenticated" });
     renderApp();
-    expect(await screen.findByText(/Signed in as/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();
   });
 });
@@ -128,10 +139,49 @@ describe("AdminRoute", () => {
     expect(await screen.findByLabelText("Username")).toBeInTheDocument();
   });
 
-  it("renders the protected page when the session is valid", async () => {
+  it("renders the protected dashboard when the session is valid", async () => {
     stubFetch({ me: "authenticated" });
     renderApp("/admin");
-    expect(await screen.findByText(/Signed in as/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+  });
+
+  it("also guards nested section routes, not just /admin itself", async () => {
+    stubFetch({ me: "anonymous" });
+    renderApp("/admin/clients");
+    expect(await screen.findByLabelText("Username")).toBeInTheDocument();
+  });
+});
+
+describe("AdminShell navigation", () => {
+  it("lists every section in the sidebar and links to its route", async () => {
+    stubFetch({ me: "authenticated" });
+    renderApp("/admin");
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+    const nav = screen.getByRole("navigation", { name: "Admin sections" });
+    for (const label of ["Dashboard", "Clients", "Agents", "Billing", "Settings", "Admin Users"]) {
+      expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("navigates to a section placeholder and marks it clearly unimplemented", async () => {
+    stubFetch({ me: "authenticated" });
+    renderApp("/admin");
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("link", { name: "Clients" }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Clients" })).toBeInTheDocument();
+    expect(screen.getByText(/will be implemented in a later step/i)).toBeInTheDocument();
+  });
+
+  it("shows placeholder stats on the dashboard, clearly marked as not live", async () => {
+    stubFetch({ me: "authenticated" });
+    renderApp("/admin");
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+    expect(screen.getByText(/placeholders/i)).toBeInTheDocument();
+    expect(screen.getByText("Total Clients")).toBeInTheDocument();
+    expect(screen.getByText("Active Agents")).toBeInTheDocument();
+    expect(screen.getByText("Monthly Revenue")).toBeInTheDocument();
+    expect(screen.getByText("Conversations Today")).toBeInTheDocument();
   });
 });
 
@@ -140,7 +190,7 @@ describe("Logout", () => {
     stubFetch({ me: "authenticated" });
     renderApp("/admin");
     const user = userEvent.setup();
-    await screen.findByText(/Signed in as/);
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
     await user.click(screen.getByRole("button", { name: "Log out" }));
     expect(await screen.findByLabelText("Username")).toBeInTheDocument();
   });

@@ -1,9 +1,11 @@
 import { lazy } from "react";
 import { HashRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AdminAuthProvider } from "./admin/AdminAuthContext";
-import { AdminHomePage } from "./admin/AdminHomePage";
 import { AdminLoginPage } from "./admin/AdminLoginPage";
 import { AdminRoute } from "./admin/AdminRoute";
+import { AdminShell } from "./admin/AdminShell";
+import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
+import { AdminPlaceholderPage } from "./admin/pages/AdminPlaceholderPage";
 import { I18nProvider } from "./i18n";
 import { StoreProvider, useStore } from "./mock/store";
 import { AppShell } from "./shell/AppShell";
@@ -41,10 +43,18 @@ export function App() {
               path="admin"
               element={
                 <AdminRoute>
-                  <AdminHomePage />
+                  <AdminShell />
                 </AdminRoute>
               }
-            />
+            >
+              <Route index element={<AdminDashboardPage />} />
+              <Route path="clients" element={<AdminPlaceholderPage title="Clients" description="Manage client accounts, plans and access." />} />
+              <Route path="agents" element={<AdminPlaceholderPage title="Agents" description="Configure and monitor sales agents across clients." />} />
+              <Route path="billing" element={<AdminPlaceholderPage title="Billing" description="Subscriptions, invoices and payment settings." />} />
+              <Route path="settings" element={<AdminPlaceholderPage title="Settings" description="Platform and LLM configuration." />} />
+              <Route path="users" element={<AdminPlaceholderPage title="Admin Users" description="Manage admin accounts and roles." />} />
+              <Route path="*" element={<Navigate to="/admin" replace />} />
+            </Route>
           </Route>
 
           <Route
