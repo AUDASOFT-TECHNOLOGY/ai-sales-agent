@@ -140,6 +140,20 @@ export function adminGetClient(clientId: string): Promise<ClientDetail> {
   return request<ClientDetail>(`/clients/${encodeURIComponent(clientId)}`);
 }
 
+export interface UpdateClientLLMRequest {
+  provider: string;
+  model: string;
+}
+
+// PUT /admin/v1/clients/:clientId/llm (see src/sales_app/api/admin_clients.py). Requires owner,
+// operator or editor; a viewer gets 403. Never send an API key here -- there is no field for one.
+export function adminUpdateClientLLM(clientId: string, body: UpdateClientLLMRequest): Promise<ClientLLM> {
+  return request<ClientLLM>(`/clients/${encodeURIComponent(clientId)}/llm`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
 // `agent_id === client_id` today: there is exactly one Brain per client, presented here as "the
 // client's agent" (see src/sales_app/api/admin_agents.py). Both fields are kept on the response
 // so a future move to several agents per client only has to stop treating them as equal.
@@ -194,9 +208,10 @@ export function adminGetAgent(agentId: string): Promise<AgentDetail> {
   return request<AgentDetail>(`/agents/${encodeURIComponent(agentId)}`);
 }
 
-// Platform-level LLM configuration (see src/sales_app/api/admin_settings.py). Read-only: no
-// endpoint exists yet to change a provider/model, here or per-client, and none of this ever
-// carries a secret value -- only provider names and allow-listed model ids.
+// Platform-level LLM configuration (see src/sales_app/api/admin_settings.py). Read-only: this
+// reports which providers are wired and which models each is allowed, but changing a *client's*
+// provider/model is done per client (see `adminUpdateClientLLM`). None of this ever carries a
+// secret value -- only provider names and allow-listed model ids.
 export interface LLMProviderSetting {
   provider: string;
   wired: boolean;

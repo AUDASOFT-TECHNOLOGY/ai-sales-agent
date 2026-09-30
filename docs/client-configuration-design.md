@@ -47,7 +47,7 @@ Engine from it.
 
 | Category | Contains | Owner | Changes through | Never editable by the client |
 |---|---|---|---|---|
-| **1. Infrastructure / deployment** | secrets, credentials, server settings, security, mode ceiling, guardrail bounds; plus the operator-owned *client wiring* (which Brain package, providers, secret references, WhatsApp account ids, enabled flag) | operator | environment / `client.yaml` / operator console | yes |
+| **1. Infrastructure / deployment** | secrets, credentials, server settings, security, mode ceiling, guardrail bounds; plus the operator-owned *client wiring* (which Brain package, sheets/WhatsApp providers, secret references, WhatsApp account ids, enabled flag) | operator | environment / `client.yaml` / operator console | yes |
 | **2. Client configuration** | Sheet, schedule, daily limit, report, CEO number, opt-out words, requested mode, pause | the client | Web Admin (CLI in the MVP) | no, within bounds |
 | **3. Brain configuration** | offers, objectives, strategy, audience, languages, tone, qualification, objections, follow-up and handoff rules | the client, schema owned by the Brain | Web Admin, schema-driven forms | no, within Core guardrails |
 | **4. Core invariants** | safety, idempotency, state transitions, execution guarantees, security | nobody | code and tests only | yes, always |
@@ -62,7 +62,7 @@ Engine from it.
 | Mode ceiling, deployment guardrails (daily cap, minimum gap, max touches, sending window, allowed LLM models) | 1 | operator console only | environment / `Settings` |
 | Host, port, log level, lock file, config store path, admin auth secrets | 1 | no | environment |
 | Poll intervals (dispatch, recover), max attempts, backoff | 1 | no | deployment defaults |
-| Which Brain package, providers, enabled flag, secret references | 1 (wiring) | operator console only | `clients/<id>/client.yaml` |
+| Which Brain package, sheets/WhatsApp providers, enabled flag, secret references (including `llm.api_key_env`) | 1 (wiring) | operator console only | `clients/<id>/client.yaml` |
 | WhatsApp agent number: `phone_number_id`, WABA id, display number | 1 (wiring) | read-only for the client | `client.yaml` |
 | Display name, timezone | 2 | yes | settings document |
 | **Google Sheet URL** (plus tabs, column mapping) | 2 | yes, with a connection test | settings document |
@@ -75,7 +75,7 @@ Engine from it.
 | Products/offers, objectives, strategy, target audience, languages, tone and style | 3 | yes | settings document, `brain.settings` |
 | Qualification rules, objection handling, message and prompt fragments | 3 | yes | settings document, `brain.settings` |
 | Follow-up cadence, no-response rule, stop conditions, human-handoff rules | 3 | yes | settings document, `brain.settings` |
-| LLM model choice | 3 | yes, from an operator-allowed list | settings document |
+| LLM provider and model choice | 3 | yes, provider limited to what's wired, model from an operator-allowed list per provider | settings document |
 | Opt-out and status enforcement, `SENDING` guard, idempotency keys, one outreach per prospect per day, approval gating, `dry_run` cannot send, replies bypass the quota, planner tier order, client isolation, single writer, signature checks | 4 | no | code |
 
 ## 3. Core invariants and guardrails

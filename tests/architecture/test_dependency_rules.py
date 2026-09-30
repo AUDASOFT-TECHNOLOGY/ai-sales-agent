@@ -301,15 +301,17 @@ def test_the_engine_planner_and_integrations_do_not_use_the_config_store():
         ), package
 
 
-def test_only_the_composition_layer_reads_the_store_and_only_the_cli_writes_to_it():
-    """Reading happens in the loader and bootstrap; publishing is an operator command."""
+def test_only_the_composition_layer_reads_the_store_and_only_known_writers_publish_to_it():
+    """Reading happens in the loader and bootstrap. Publishing is either an operator command (the
+    CLI) or an authenticated, permissioned, validated Admin API write (`admin_clients.py`'s LLM
+    update) -- never a raw file write, never anywhere else."""
     writers = {
         py.relative_to(SRC).as_posix()
         for py in (SRC / "sales_app").rglob("*.py")
         if ".publish(" in py.read_text(encoding="utf-8")
         and "config_store" not in py.relative_to(SRC).as_posix()
     }
-    assert writers == {"sales_app/config_cli.py"}
+    assert writers == {"sales_app/config_cli.py", "sales_app/api/admin_clients.py"}
 
 
 # ---- the shared Brain kit (sales_brain_kit) ----------------------------------------------------------

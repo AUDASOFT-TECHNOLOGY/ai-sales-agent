@@ -54,7 +54,7 @@ class TestValidDocuments:
                 "log_tab": "Log",
                 "column_mapping": {},
             },
-            "llm": {"model": "test-model"},
+            "llm": {"provider": "openai", "model": "test-model"},
             "schedule": {"daily_at": "09:00", "days": ["mon", "tue", "wed", "thu", "fri", "sat"]},
             "inbound": {  # a new (schema 2) document that says nothing: the safe defaults
                 "spontaneous_conversations": {
@@ -98,6 +98,14 @@ class TestValidDocuments:
         assert result.document["schedule"] == {"daily_at": "07:30", "days": ["mon", "sun"]}
         assert result.document["sheets"]["prospects_tab"] == "Leads"
 
+    def test_llm_provider_is_a_client_setting_alongside_model(self):
+        result = check(document(llm={"provider": "anthropic", "model": "claude"}))
+        assert result.errors == ()
+        assert result.spec.llm.provider == "anthropic" and result.spec.llm.model == "claude"
+        assert result.document["llm"] == {"provider": "anthropic", "model": "claude"}
+        # llm.api_key_env stays operator wiring: unaffected by the document's provider choice.
+        assert result.spec.llm.api_key_env == "OPENAI_API_KEY"
+
     def test_brain_settings_are_opaque_and_kept_as_they_are(self):
         nested = {"offers": [{"name": "x", "price": 10}], "max_tokens": 300, "tone": "warm"}
         result = check(document(brain={"settings": nested}))
@@ -130,7 +138,6 @@ class TestWhatIsNotASetting:
             ("brain", "factory"),
             ("sheets", "provider"),
             ("sheets", "credentials_env"),
-            ("llm", "provider"),
             ("llm", "api_key_env"),
             ("schedule", "dispatch_every_minutes"),
             ("schedule", "prepare_every_minutes"),

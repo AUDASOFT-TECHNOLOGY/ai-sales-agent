@@ -89,7 +89,7 @@ class TestImportPublishShow:
         assert run("show", "alpha") == 0
         shown = json.loads(capsys.readouterr().out)
         assert shown["version"] == 1 and shown["note"] == "first" and shown["parent"] is None
-        assert shown["document"]["llm"] == {"model": "test-model"}
+        assert shown["document"]["llm"] == {"provider": "openai", "model": "test-model"}
         assert run("show", "alpha", "--version", "1") == 0
 
     def test_show_and_history_when_nothing_is_published(self, environment, clients, capsys):

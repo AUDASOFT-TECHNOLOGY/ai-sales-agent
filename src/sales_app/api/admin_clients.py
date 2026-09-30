@@ -1,4 +1,5 @@
-"""Admin API: read-only client configuration (list and detail).
+"""Admin API: client configuration -- read-only list/detail, plus the one writable field so far:
+a client's LLM provider and model.
 
 Not a second source of truth. Active clients are read straight from the already-validated
 `ClientRegistry` built at startup (`Application.registry`) -- the same object `/health/clients`
@@ -10,18 +11,35 @@ re-validated.
 No endpoint here can return a secret: `client.yaml` only ever names the environment variable that
 holds one (the `*_env` fields), never a value, and `ClientConfig.secrets` / `phone_number_id` are
 never touched by this module.
+
+The LLM update below writes through `ConfigStore.publish` (the same versioned store the CLI's
+`sales-agent config publish` uses), never a raw file write, and is gated by the same guardrails
+`resolve_client_config` enforces at load time: `provider` must be wired (`Application.llm_providers`)
+and `provider`/`model` must be allowed by the deployment's `LLMRegistry`. Like any other stored
+settings change (see `sales_app.config.resolution`), it takes effect on the client's next runtime
+rebuild, not instantly.
 """
 
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from sales_app.admin_auth import AdminUser
-from sales_app.api.admin import ensure_client_access, make_current_admin_dependency
+from sales_app.admin_auth import AdminRole, AdminUser
+from sales_app.api.admin import ensure_client_access, make_current_admin_dependency, require_role
 from sales_app.bootstrap import Application
-from sales_app.config import ClientConfig, read_wiring
+from sales_app.config import (
+    ClientConfig,
+    build_llm_registry,
+    extract_document,
+    import_document,
+    read_wiring,
+    validate_settings_document,
+)
+from sales_app.config_store import ConfigConflictError
 from sales_app.config_store.models import CLIENT_ID_PATTERN
+
+WRITE_ROLES = (AdminRole.OWNER, AdminRole.OPERATOR, AdminRole.EDITOR)
 
 ClientStatus = Literal["active", "disabled"]
 
@@ -56,6 +74,11 @@ class ClientLLMResponse(BaseModel):
     provider: str | None = None
     model: str | None = None
     api_key_env: str | None = None  # the env var NAME, never its value
+
+
+class UpdateClientLLMRequest(BaseModel):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
 
 
 class ClientWhatsAppResponse(BaseModel):
@@ -254,8 +277,35 @@ def _find_detail(application: Application, client_id: str) -> ClientDetailRespon
     return _detail_from_raw(client_id, raw)
 
 
+def _wiring_and_base_document(
+    application: Application, client_id: str
+) -> tuple[dict, dict] | None:
+    """The raw `client.yaml` plus the current settings document to build a new version on top of
+    (so every other setting survives), for any client the Admin API can see (same existence rules
+    as `_find_detail`). None if there is no such client."""
+    runtime = application.registry.get(client_id)
+    if runtime is not None:
+        raw, _problem = read_wiring(runtime.config.directory)
+        if raw is None:
+            return None
+        return raw, extract_document(runtime.config.spec)
+    if not CLIENT_ID_PATTERN.match(client_id):
+        return None
+    directory = application.settings.clients_dir / client_id
+    if not directory.is_dir():
+        return None
+    raw, _problem = read_wiring(directory)
+    if raw is None or raw.get("enabled", True) is not False:
+        return None
+    seeded = import_document(client_id, raw)
+    if seeded.errors or seeded.document is None:
+        return None  # a disabled client whose client.yaml is itself invalid
+    return raw, seeded.document
+
+
 def create_admin_clients_router(application: Application) -> APIRouter:
     get_current_admin = make_current_admin_dependency(application.admin_auth)
+    require_write_admin = require_role(get_current_admin, *WRITE_ROLES)
     router = APIRouter(prefix="/admin/v1", tags=["admin"])
 
     @router.get("/clients", response_model=list[ClientSummaryResponse])
@@ -271,5 +321,49 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         if detail is None:
             raise HTTPException(404, "no such client")
         return detail
+
+    @router.put("/clients/{client_id}/llm", response_model=ClientLLMResponse)
+    def update_client_llm(
+        client_id: str,
+        body: UpdateClientLLMRequest,
+        admin: AdminUser = Depends(require_write_admin),
+    ) -> ClientLLMResponse:
+        ensure_client_access(admin, client_id)  # 404 before existence is even checked
+        provider, model = body.provider.strip(), body.model.strip()
+
+        if provider not in application.llm_providers:
+            raise HTTPException(400, f"llm.provider {provider!r} is not wired in this deployment")
+        registry = build_llm_registry(application.settings.allowed_llm_models)
+        reason = registry.check(provider, model)
+        if reason is not None:
+            raise HTTPException(400, reason)
+
+        found = _wiring_and_base_document(application, client_id)
+        if found is None:
+            raise HTTPException(404, "no such client")
+        raw, base_document = found
+        document = {**base_document, "llm": {"provider": provider, "model": model}}
+
+        check = validate_settings_document(client_id, raw, document)
+        if check.errors or check.document is None or check.spec is None:
+            raise HTTPException(400, "; ".join(check.errors) or "invalid configuration")
+
+        current = application.config_store.current(client_id)
+        try:
+            application.config_store.publish(
+                client_id,
+                check.document,
+                author=f"admin:{admin.username}",
+                note="update LLM provider/model",
+                expected_parent=current.version if current is not None else None,
+            )
+        except ConfigConflictError as error:
+            raise HTTPException(409, str(error)) from error
+
+        return ClientLLMResponse(
+            provider=check.spec.llm.provider,
+            model=check.spec.llm.model,
+            api_key_env=check.spec.llm.api_key_env,
+        )
 
     return router

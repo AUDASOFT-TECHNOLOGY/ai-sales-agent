@@ -1,16 +1,19 @@
 """Combining operator wiring (client.yaml) with a stored settings document into one client spec.
 
 `ClientFile` stays the single schema and the single place where values are validated. A stored
-document holds only the client-editable keys; everything else in `client.yaml` (providers, secret
-variable names, WhatsApp accounts, the Brain package, poll intervals) is operator wiring that a
-document may never set. Nothing here touches the filesystem except reading `client.yaml`, and
-nothing is cached: callers get fresh, immutable results.
+document holds only the client-editable keys; everything else in `client.yaml` (sheets/WhatsApp
+providers, secret variable names, WhatsApp accounts, the Brain package, poll intervals) is operator
+wiring that a document may never set. `llm.provider` is the one exception: it is client-editable
+alongside `llm.model`, gated the same way (`LLMRegistry` and `Application.llm_providers` -- see
+`sales_app.api.admin_clients`), because the two are chosen together. `llm.api_key_env` stays
+operator wiring regardless of which provider is selected. Nothing here touches the filesystem
+except reading `client.yaml`, and nothing is cached: callers get fresh, immutable results.
 
 Document schema versions:
 
-- **1**: client settings and opaque Brain settings.
+- **1**: client settings and opaque Brain settings. `llm` holds only `model`.
 - **2** (current): adds the `inbound` policy and `brain.settings_version`, and the Brain's settings
-  are validated by the Brain's own `SETTINGS_SPEC` when it has one.
+  are validated by the Brain's own `SETTINGS_SPEC` when it has one. `llm` also holds `provider`.
 
 A version-1 document keeps loading: it is upgraded in memory, and, because it predates the inbound
 policy, it keeps today's behaviour (replies handled, unknown senders ignored). A version-2
@@ -53,6 +56,7 @@ _SECTIONS_V1: Mapping[str, tuple[str, ...]] = {
 }
 SETTINGS_SECTION_KEYS: Mapping[str, tuple[str, ...]] = {
     **_SECTIONS_V1,
+    "llm": ("provider", "model"),
     "brain": ("settings", "settings_version"),
     "inbound": ("spontaneous_conversations", "unknown_contacts", "limits"),
 }
@@ -161,7 +165,7 @@ def extract_document(spec: ClientFile) -> dict[str, Any]:
             "log_tab": spec.sheets.log_tab,
             "column_mapping": dict(spec.sheets.column_mapping),
         },
-        "llm": {"model": spec.llm.model},
+        "llm": {"provider": spec.llm.provider, "model": spec.llm.model},
         "schedule": {"daily_at": spec.schedule.daily_at, "days": list(spec.schedule.days)},
         "inbound": spec.inbound.model_dump(mode="json"),
         "brain": {
