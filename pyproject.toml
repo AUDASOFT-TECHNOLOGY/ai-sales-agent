@@ -15,6 +15,7 @@ dependencies = [
     "google-api-python-client>=2.130",
     "google-auth>=2.30",
     "tzdata>=2024.1",
+    "bcrypt>=4.1",
 ]
 
 [dependency-groups]
@@ -49,3 +50,8 @@ testpaths = ["tests", "brains"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection markers are meant to be evaluated once per default argument;
+# this is the standard, documented way to tell B008 they are not a mutable-default bug.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Cookie", "fastapi.Query", "fastapi.Header"]

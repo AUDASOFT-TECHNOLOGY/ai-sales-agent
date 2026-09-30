@@ -4,8 +4,16 @@ import os
 from collections.abc import Mapping
 from concurrent.futures import Executor
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
+from sales_app.admin_auth import (
+    AdminAuthService,
+    AdminSessionStore,
+    AdminUserStore,
+    FileAdminSessionStore,
+    FileAdminUserStore,
+)
 from sales_app.config import clamp_mode, load_client_configs
 from sales_app.config_store import ConfigStore, FileConfigStore
 from sales_app.errors import ConfigurationError
@@ -23,6 +31,7 @@ class Application:
     settings: Settings
     registry: ClientRegistry
     config_store: ConfigStore  # kept for the CLI and, later, runtime refresh and the Admin API
+    admin_auth: AdminAuthService  # Admin Revansa login and session verification
     scheduler: Scheduler
     parsers: Mapping[str, WebhookParser]  # channel provider name -> webhook parser
     clock: Clock
@@ -41,6 +50,8 @@ def build_application(
     mode_ceiling: ApprovalMode | None = None,
     require_clients: bool = True,
     config_store: ConfigStore | None = None,
+    admin_user_store: AdminUserStore | None = None,
+    admin_session_store: AdminSessionStore | None = None,
 ) -> Application:
     """Load, validate and wire everything, or raise a ConfigurationError listing every problem.
 
@@ -58,6 +69,22 @@ def build_application(
     )
 
     store = config_store if config_store is not None else FileConfigStore(settings.config_dir)
+    admin_users = (
+        admin_user_store
+        if admin_user_store is not None
+        else FileAdminUserStore(settings.admin_dir / "users.json")
+    )
+    admin_sessions = (
+        admin_session_store
+        if admin_session_store is not None
+        else FileAdminSessionStore(settings.admin_dir / "sessions")
+    )
+    admin_auth = AdminAuthService(
+        admin_users,
+        admin_sessions,
+        clock,
+        session_ttl=timedelta(hours=settings.admin_session_ttl_hours),
+    )
     loaded = load_client_configs(
         settings.clients_dir, env=environment, mode_ceiling=ceiling, store=store
     )
@@ -89,6 +116,7 @@ def build_application(
         settings=settings,
         registry=registry,
         config_store=store,
+        admin_auth=admin_auth,
         scheduler=Scheduler(registry, clock, executor=executor),
         parsers=parsers,
         clock=clock,

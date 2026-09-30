@@ -124,6 +124,21 @@ class TestRun:
             assert exit_info.value.code == 2
 
 
+def _route_paths(app) -> set[str]:
+    """Every route path, flattening `include_router` mounts (FastAPI represents one in
+    `app.routes` as a single wrapper without its own `.path`, not as individual routes)."""
+    paths: set[str] = set()
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        if path is not None:
+            paths.add(path)
+            continue
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            paths.update(sub.path for sub in included.routes)
+    return paths
+
+
 class TestServe:
     def test_starts_exactly_one_worker_with_the_configured_address(
         self, environment, fakes, monkeypatch
@@ -137,10 +152,13 @@ class TestServe:
         assert cli.main(["serve"]) == cli.EXIT_OK
         assert started["workers"] == 1  # the single-writer guarantee is in-process
         assert started["port"] == 9123 and started["host"] == "127.0.0.1"
-        assert {r.path for r in started["app"].routes} >= {
+        assert _route_paths(started["app"]) >= {
             "/health",
             "/health/clients",
             "/webhooks/{provider}",
+            "/admin/v1/auth/login",
+            "/admin/v1/auth/logout",
+            "/admin/v1/auth/me",
         }
 
     def test_invalid_configuration_prevents_startup(self, environment, fakes, monkeypatch, capsys):

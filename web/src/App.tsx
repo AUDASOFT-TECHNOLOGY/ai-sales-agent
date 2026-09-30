@@ -1,5 +1,9 @@
 import { lazy } from "react";
-import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
+import { HashRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { AdminAuthProvider } from "./admin/AdminAuthContext";
+import { AdminHomePage } from "./admin/AdminHomePage";
+import { AdminLoginPage } from "./admin/AdminLoginPage";
+import { AdminRoute } from "./admin/AdminRoute";
 import { I18nProvider } from "./i18n";
 import { StoreProvider, useStore } from "./mock/store";
 import { AppShell } from "./shell/AppShell";
@@ -22,9 +26,34 @@ function Home() {
 export function App() {
   return (
     <I18nProvider>
-      <StoreProvider>
-        <HashRouter>
-          <Routes>
+      <HashRouter>
+        <Routes>
+          {/* Admin: its own session (AdminAuthContext), never the client console's mock store. */}
+          <Route
+            element={
+              <AdminAuthProvider>
+                <Outlet />
+              </AdminAuthProvider>
+            }
+          >
+            <Route path="admin/login" element={<AdminLoginPage />} />
+            <Route
+              path="admin"
+              element={
+                <AdminRoute>
+                  <AdminHomePage />
+                </AdminRoute>
+              }
+            />
+          </Route>
+
+          <Route
+            element={
+              <StoreProvider>
+                <Outlet />
+              </StoreProvider>
+            }
+          >
             <Route element={<AppShell />}>
               <Route index element={<Home />} />
               <Route path="setup" element={<Runway />} />
@@ -39,9 +68,9 @@ export function App() {
               <Route path="notifications" element={<Notifications />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
-          </Routes>
-        </HashRouter>
-      </StoreProvider>
+          </Route>
+        </Routes>
+      </HashRouter>
     </I18nProvider>
   );
 }

@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     # Versioned client settings (see sales_app.config_store). Holds client business data and
     # changes at runtime, so it lives outside git and belongs in server backups.
     config_dir: Path = Path("config")
+    # Admin Revansa accounts and sessions (see sales_app.admin_auth). Same reasoning as
+    # config_dir: outside git, included in backups.
+    admin_dir: Path = Path("admin")
+    admin_session_ttl_hours: float = Field(default=24.0, gt=0)
+    # False only for local http development; a production deployment must keep this true so the
+    # session cookie is never sent over a plain connection.
+    admin_cookie_secure: bool = True
     log_level: str = "INFO"
     # Highest mode any client may run in, whatever its client.yaml says. Autonomy needs an
     # explicit deployment decision: SALES_AGENT_MODE_CEILING=autonomous.

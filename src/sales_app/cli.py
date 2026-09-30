@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 from dotenv import load_dotenv
 
+from sales_app.admin_cli import add_admin_parser, run_admin
 from sales_app.bootstrap import Application, build_application, describe_modes
 from sales_app.config_cli import add_config_parser, run_config
 from sales_app.errors import ConfigurationError
@@ -38,6 +39,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _serve(settings)
         if args.command == "config":
             return run_config(settings, args)
+        if args.command == "admin":
+            return run_admin(settings, args)
         return _run(settings, args)
     except ConfigurationError as error:
         _print_errors(error)
@@ -50,6 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("validate", help="check every client's configuration, start nothing")
     commands.add_parser("serve", help="run the scheduler and the webhook server")
     add_config_parser(commands)
+    add_admin_parser(commands)
     run = commands.add_parser("run", help="run one job for one client, once")
     run.add_argument("--client", required=True)
     run.add_argument("--job", required=True, choices=[j.value for j in Job])

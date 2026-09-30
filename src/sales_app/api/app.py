@@ -13,6 +13,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 
+from sales_app.api.admin import create_admin_router
 from sales_app.bootstrap import Application
 from sales_app.logs import client_logger
 from sales_app.wiring import ClientRuntime
@@ -46,6 +47,7 @@ def create_app(application: Application, *, run_scheduler: bool = True) -> FastA
                 log.warning("jobs still running after %ss; exiting anyway", SHUTDOWN_GRACE_SECONDS)
 
     app = FastAPI(title="AI Sales Agent Core", lifespan=lifespan)
+    app.include_router(create_admin_router(application))
 
     @app.get("/health")
     def health() -> dict[str, str]:
