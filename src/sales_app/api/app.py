@@ -16,6 +16,7 @@ from fastapi.responses import PlainTextResponse
 from sales_app.api.admin import create_admin_router
 from sales_app.api.admin_agents import create_admin_agents_router
 from sales_app.api.admin_clients import create_admin_clients_router
+from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.bootstrap import Application
 from sales_app.logs import client_logger
 from sales_app.wiring import ClientRuntime
@@ -52,6 +53,7 @@ def create_app(application: Application, *, run_scheduler: bool = True) -> FastA
     app.include_router(create_admin_router(application))
     app.include_router(create_admin_clients_router(application))
     app.include_router(create_admin_agents_router(application))
+    app.include_router(create_admin_settings_router(application))
 
     @app.get("/health")
     def health() -> dict[str, str]:

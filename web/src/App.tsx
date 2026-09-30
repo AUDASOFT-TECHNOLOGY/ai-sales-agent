@@ -10,6 +10,7 @@ import { AdminClientDetailPage } from "./admin/pages/AdminClientDetailPage";
 import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
 import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
 import { AdminPlaceholderPage } from "./admin/pages/AdminPlaceholderPage";
+import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
 import { I18nProvider } from "./i18n";
 import { StoreProvider, useStore } from "./mock/store";
 import { AppShell } from "./shell/AppShell";
@@ -57,7 +58,7 @@ export function App() {
               <Route path="agents" element={<AdminAgentsPage />} />
               <Route path="agents/:agentId" element={<AdminAgentDetailPage />} />
               <Route path="billing" element={<AdminPlaceholderPage title="Billing" description="Subscriptions, invoices and payment settings." />} />
-              <Route path="settings" element={<AdminPlaceholderPage title="Settings" description="Platform and LLM configuration." />} />
+              <Route path="settings" element={<AdminSettingsPage />} />
               <Route path="users" element={<AdminPlaceholderPage title="Admin Users" description="Manage admin accounts and roles." />} />
               <Route path="*" element={<Navigate to="/admin" replace />} />
             </Route>

@@ -193,3 +193,24 @@ export function adminListAgents(): Promise<AgentSummary[]> {
 export function adminGetAgent(agentId: string): Promise<AgentDetail> {
   return request<AgentDetail>(`/agents/${encodeURIComponent(agentId)}`);
 }
+
+// Platform-level LLM configuration (see src/sales_app/api/admin_settings.py). Read-only: no
+// endpoint exists yet to change a provider/model, here or per-client, and none of this ever
+// carries a secret value -- only provider names and allow-listed model ids.
+export interface LLMProviderSetting {
+  provider: string;
+  wired: boolean;
+  // null: no allow-list is configured, so any model is accepted for this provider. An array:
+  // only these model ids are allowed (empty means this provider is wired but not allow-listed).
+  allowed_models: string[] | null;
+}
+
+export interface LLMSettings {
+  read_only: boolean;
+  restricted: boolean;
+  providers: LLMProviderSetting[];
+}
+
+export function adminGetLLMSettings(): Promise<LLMSettings> {
+  return request<LLMSettings>("/settings/llm");
+}
