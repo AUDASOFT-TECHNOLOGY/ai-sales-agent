@@ -4,6 +4,8 @@ import { AdminAuthProvider } from "./admin/AdminAuthContext";
 import { AdminLoginPage } from "./admin/AdminLoginPage";
 import { AdminRoute } from "./admin/AdminRoute";
 import { AdminShell } from "./admin/AdminShell";
+import { AdminClientDetailPage } from "./admin/pages/AdminClientDetailPage";
+import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
 import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
 import { AdminPlaceholderPage } from "./admin/pages/AdminPlaceholderPage";
 import { I18nProvider } from "./i18n";
@@ -48,7 +50,8 @@ export function App() {
               }
             >
               <Route index element={<AdminDashboardPage />} />
-              <Route path="clients" element={<AdminPlaceholderPage title="Clients" description="Manage client accounts, plans and access." />} />
+              <Route path="clients" element={<AdminClientsPage />} />
+              <Route path="clients/:clientId" element={<AdminClientDetailPage />} />
               <Route path="agents" element={<AdminPlaceholderPage title="Agents" description="Configure and monitor sales agents across clients." />} />
               <Route path="billing" element={<AdminPlaceholderPage title="Billing" description="Subscriptions, invoices and payment settings." />} />
               <Route path="settings" element={<AdminPlaceholderPage title="Settings" description="Platform and LLM configuration." />} />

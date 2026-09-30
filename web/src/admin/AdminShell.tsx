@@ -19,14 +19,12 @@ const NAV: Array<{ to: string; label: string; icon: typeof LayoutDashboard; end?
   { to: "/admin/users", label: "Admin Users", icon: ShieldCheck },
 ];
 
-const TITLES: Record<string, string> = {
-  "/admin": "Dashboard",
-  "/admin/clients": "Clients",
-  "/admin/agents": "Agents",
-  "/admin/billing": "Billing",
-  "/admin/settings": "Settings",
-  "/admin/users": "Admin Users",
-};
+function titleFor(pathname: string): string {
+  // Longest-prefix match against NAV so a nested route (e.g. /admin/clients/:id) inherits its
+  // section's title without a separate entry per sub-route.
+  const match = [...NAV].sort((a, b) => b.to.length - a.to.length).find((item) => pathname === item.to || (item.to !== "/admin" && pathname.startsWith(`${item.to}/`)));
+  return match?.label ?? "Dashboard";
+}
 
 function initials(username: string): string {
   return username.slice(0, 2).toUpperCase();
@@ -37,7 +35,7 @@ export function AdminShell() {
   const { pathname } = useLocation();
   if (!admin) return null; // AdminRoute only renders this while authenticated
 
-  const title = TITLES[pathname] ?? "Dashboard";
+  const title = titleFor(pathname);
 
   return (
     <div className="admin-shell">

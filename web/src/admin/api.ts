@@ -66,3 +66,76 @@ export function adminLogin(username: string, password: string): Promise<AdminSes
 export function adminLogout(): Promise<void> {
   return request<void>("/auth/logout", { method: "POST" });
 }
+
+export type ClientStatus = "active" | "disabled";
+
+export interface ClientProviders {
+  sheets: string | null;
+  llm: string | null;
+  whatsapp: string | null;
+}
+
+export interface ClientSummary {
+  client_id: string;
+  display_name: string;
+  status: ClientStatus;
+  mode: string | null;
+  timezone: string | null;
+  daily_action_limit: number | null;
+  providers: ClientProviders;
+}
+
+export interface ClientSheets {
+  provider: string | null;
+  spreadsheet_id: string | null;
+  prospects_tab: string | null;
+  actions_tab: string | null;
+  messages_tab: string | null;
+  log_tab: string | null;
+  credentials_env: string | null;
+}
+
+export interface ClientLLM {
+  provider: string | null;
+  model: string | null;
+  api_key_env: string | null;
+}
+
+export interface ClientWhatsApp {
+  provider: string | null;
+  api_version: string | null;
+  token_env: string | null;
+  phone_number_id_env: string | null;
+  app_secret_env: string | null;
+}
+
+export interface ClientBrain {
+  factory: string | null;
+  settings_version: number | null;
+}
+
+export interface ClientSchedule {
+  daily_at: string | null;
+  days: string[];
+  prepare_every_minutes: number | null;
+  dispatch_every_minutes: number | null;
+  recover_every_minutes: number | null;
+}
+
+export interface ClientDetail extends ClientSummary {
+  max_attempts: number | null;
+  opt_out_keywords: string[];
+  sheets: ClientSheets;
+  llm: ClientLLM;
+  whatsapp: ClientWhatsApp;
+  brain: ClientBrain;
+  schedule: ClientSchedule;
+}
+
+export function adminListClients(): Promise<ClientSummary[]> {
+  return request<ClientSummary[]>("/clients");
+}
+
+export function adminGetClient(clientId: string): Promise<ClientDetail> {
+  return request<ClientDetail>(`/clients/${encodeURIComponent(clientId)}`);
+}
