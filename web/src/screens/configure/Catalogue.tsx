@@ -30,30 +30,30 @@ export function OffersSection() {
   const handleDelete = (offer: Offer) => {
     dispatch({ type: "removeOffer", id: offer.id });
     if (selectedId === offer.id) setSelectedId(state.offers.find((o) => o.id !== offer.id)?.id ?? "");
-    toast({ tone: "info", title: `${offer.name} removed`, undo: () => dispatch({ type: "addOffer", offer }) });
+    toast({ tone: "info", title: t("catalogue.toast.removed", { name: offer.name }), undo: () => dispatch({ type: "addOffer", offer }) });
   };
 
   return (
     <>
       <p className="c-2 catalogue-note">
-        REVANSA orients each prospect toward the product below that matches what they need — from the conversation, or your Sheet if it hasn't come up yet. When the need isn't clear, it recommends the closest match rather than guessing.
+        {t("catalogue.note", { brand: t("brand.name") })}
       </p>
       <div className="row row--wrap catalogue-toolbar">
         <label className="search-field well">
           <Search size={18} aria-hidden className="c-3" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products" aria-label="Search products" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("catalogue.searchProducts")} aria-label={t("catalogue.searchProducts")} />
         </label>
         <Segmented
           layoutId="seg-offer-status"
-          label="Filter by status"
+          label={t("catalogue.filterByStatus")}
           size="sm"
           value={statusFilter}
           onChange={setStatusFilter}
           options={[
-            { value: "all", label: "All" },
-            { value: "active", label: "Active" },
-            { value: "coming_soon", label: "Coming soon" },
-            { value: "inactive", label: "Inactive" },
+            { value: "all", label: t("prospects.filter.all") },
+            { value: "active", label: t("offers.status.active") },
+            { value: "coming_soon", label: t("offers.status.comingSoon") },
+            { value: "inactive", label: t("offers.status.inactive") },
           ]}
         />
       </div>
@@ -80,10 +80,10 @@ export function OffersSection() {
             type="button"
             className="offer-add"
             onClick={() => {
-              const offer = createOffer({ name: `New product ${state.offers.length + 1}` });
+              const offer = createOffer({ name: t("catalogue.newProduct", { n: state.offers.length + 1 }) });
               dispatch({ type: "addOffer", offer });
               setSelectedId(offer.id);
-              toast({ tone: "info", title: "Product added" });
+              toast({ tone: "info", title: t("catalogue.toast.productAdded") });
             }}
           >
             <Plus size={24} aria-hidden />

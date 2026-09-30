@@ -16,19 +16,19 @@ export function ScheduleSection() {
   const [draft, setDraft] = useState("");
   return (
     <>
-      <Group title={t("configure.days")} hint={`Times are in ${TENANT.timezone}.`} icon={CalendarClock}>
+      <Group title={t("configure.days")} hint={t("schedule.timesInZone", { tz: TENANT.timezone })} icon={CalendarClock}>
         <ToggleChips
           label={t("configure.days")}
           value={state.schedule.days}
           onChange={(v) => dispatch({ type: "setScheduleDays", value: v })}
           options={[
-            { value: "mon", label: "Mon" }, { value: "tue", label: "Tue" }, { value: "wed", label: "Wed" }, { value: "thu", label: "Thu" },
-            { value: "fri", label: "Fri" }, { value: "sat", label: "Sat" }, { value: "sun", label: "Sun" },
+            { value: "mon", label: t("schedule.day.mon") }, { value: "tue", label: t("schedule.day.tue") }, { value: "wed", label: t("schedule.day.wed") }, { value: "thu", label: t("schedule.day.thu") },
+            { value: "fri", label: t("schedule.day.fri") }, { value: "sat", label: t("schedule.day.sat") }, { value: "sun", label: t("schedule.day.sun") },
           ]}
         />
         <div className="grid-2">
-          <TextInput label="Start" type="time" value={state.schedule.start} onChange={(e) => dispatch({ type: "setScheduleHours", start: e.target.value, end: state.schedule.end })} disabled={viewer} />
-          <TextInput label="End" type="time" value={state.schedule.end} onChange={(e) => dispatch({ type: "setScheduleHours", start: state.schedule.start, end: e.target.value })} disabled={viewer} />
+          <TextInput label={t("field.start")} type="time" value={state.schedule.start} onChange={(e) => dispatch({ type: "setScheduleHours", start: e.target.value, end: state.schedule.end })} disabled={viewer} />
+          <TextInput label={t("field.end")} type="time" value={state.schedule.end} onChange={(e) => dispatch({ type: "setScheduleHours", start: state.schedule.start, end: e.target.value })} disabled={viewer} />
         </div>
       </Group>
       <hr className="divider" />
@@ -43,15 +43,15 @@ export function ScheduleSection() {
           onChange={(v) => dispatch({ type: "limit", value: v })}
           lockedText={t("configure.platformLimit", { n: 40 })}
         />
-        {viewer ? <p className="c-attention">Only owners can change limits.</p> : null}
+        {viewer ? <p className="c-attention">{t("schedule.viewersLimit")}</p> : null}
       </Group>
       <hr className="divider" />
-      <Group title={t("configure.optout")} hint="When a prospect writes one of these, REVANSA stops for good. That rule is built in; only the words are yours." icon={Ban}>
+      <Group title={t("configure.optout")} hint={t("schedule.optoutHint", { brand: t("brand.name") })} icon={Ban}>
         <div className="row row--wrap">
           {state.optOutWords.map((p) => (
             <span key={p} className="phrase">
               {p}
-              <button type="button" aria-label={`Remove ${p}`} onClick={() => dispatch({ type: "setOptOutWords", value: state.optOutWords.filter((x) => x !== p) })} disabled={viewer}>
+              <button type="button" aria-label={t("schedule.removeWord", { word: p })} onClick={() => dispatch({ type: "setOptOutWords", value: state.optOutWords.filter((x) => x !== p) })} disabled={viewer}>
                 <X size={16} aria-hidden />
               </button>
             </span>
@@ -65,14 +65,14 @@ export function ScheduleSection() {
               setDraft("");
             }}
           >
-            <input className="input well" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a word" aria-label="Add an opt-out word" disabled={viewer} />
+            <input className="input well" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={t("schedule.addWordPlaceholder")} aria-label={t("schedule.addOptOutWord")} disabled={viewer} />
           </form>
         </div>
       </Group>
       <hr className="divider" />
-      <Group title="WhatsApp Business number" hint="The number REVANSA writes to prospects from." icon={MessageCircle}>
+      <Group title={t("schedule.whatsappNumber")} hint={t("schedule.whatsappNumberHint", { brand: t("brand.name") })} icon={MessageCircle}>
         <TextInput
-          label="Number"
+          label={t("field.number")}
           type="tel"
           value={state.agentPhone}
           onChange={(e) => dispatch({ type: "setAgentPhone", value: e.target.value })}
@@ -80,15 +80,22 @@ export function ScheduleSection() {
         />
       </Group>
       <hr className="divider" />
-      <Group title="Your daily report" hint="A WhatsApp summary sent to you, every working day." icon={Send}>
+      <Group title={t("schedule.dailyReport")} hint={t("schedule.dailyReportHint")} icon={Send}>
         <div className="row switch-row">
-          <Switch label="Daily report" checked={state.ceoReport.enabled} onChange={(v) => dispatch({ type: "setCeoReport", patch: { enabled: v } })} disabled={viewer} />
-          <span>Send me a daily summary on WhatsApp</span>
+          <Switch label={t("schedule.dailyReportLabel")} checked={state.ceoReport.enabled} onChange={(v) => dispatch({ type: "setCeoReport", patch: { enabled: v } })} disabled={viewer} />
+          <span>{t("schedule.sendMeDailySummary")}</span>
         </div>
         {state.ceoReport.enabled ? (
           <div className="grid-2">
-            <TextInput label="Time" type="time" value={state.ceoReport.time} onChange={(e) => dispatch({ type: "setCeoReport", patch: { time: e.target.value } })} disabled={viewer} />
-            <TextInput label="Your WhatsApp number" type="tel" value={state.ceoReport.phone} onChange={(e) => dispatch({ type: "setCeoReport", patch: { phone: e.target.value } })} disabled={viewer} helper="Different from the number REVANSA writes from." />
+            <TextInput label={t("field.time")} type="time" value={state.ceoReport.time} onChange={(e) => dispatch({ type: "setCeoReport", patch: { time: e.target.value } })} disabled={viewer} />
+            <TextInput
+              label={t("field.yourWhatsappNumber")}
+              type="tel"
+              value={state.ceoReport.phone}
+              onChange={(e) => dispatch({ type: "setCeoReport", patch: { phone: e.target.value } })}
+              disabled={viewer}
+              helper={t("schedule.differentNumberHelper", { brand: t("brand.name") })}
+            />
           </div>
         ) : null}
       </Group>

@@ -12,13 +12,13 @@ const SOURCE_ICON: Record<FactSource, typeof User> = {
   brain_inference: Sparkles,
 };
 
-const SOURCE_LABEL: Record<FactSource, string> = {
-  prospect: "They said so",
-  conversation: "Read from the conversation",
-  client_data: "From your data",
-  human: "Entered by a person",
-  system: "Computed by the platform",
-  brain_inference: "My own inference",
+const SOURCE_LABEL_KEY: Record<FactSource, MessageKey> = {
+  prospect: "certainty.source.prospect",
+  conversation: "certainty.source.conversation",
+  client_data: "certainty.source.clientData",
+  human: "certainty.source.human",
+  system: "certainty.source.system",
+  brain_inference: "certainty.source.brainInference",
 };
 
 /** Tint follows the class of the source: prospect and conversation ice, people and data emerald, system neutral, inference aether. */
@@ -104,9 +104,9 @@ export function FactChip({ fact }: { fact: Fact }) {
           </p>
         </div>
         <p className="c-2 t-body-sm">
-          {t(`certainty.${fact.status}` as MessageKey)} · {SOURCE_LABEL[fact.source]}
+          {t(`certainty.${fact.status}` as MessageKey)} · {t(SOURCE_LABEL_KEY[fact.source])}
         </p>
-        {fact.excerpt ? <blockquote className="evidence__quote">“{fact.excerpt}”</blockquote> : <p className="c-3 t-body-sm">No message is attached to this.</p>}
+        {fact.excerpt ? <blockquote className="evidence__quote">“{fact.excerpt}”</blockquote> : <p className="c-3 t-body-sm">{t("certainty.noMessage")}</p>}
         {fact.when ? <p className="c-3 t-body-sm">{fact.when}</p> : null}
       </div>
     </PopoverCard>
@@ -124,7 +124,7 @@ export function CertaintyPanel({ facts, hideTitle }: { facts: Fact[]; hideTitle?
         <span className="spacer" />
         <CertaintyLegend />
       </div>
-      {facts.length === 0 ? <p className="c-3 t-body-sm">Nothing known yet.</p> : null}
+      {facts.length === 0 ? <p className="c-3 t-body-sm">{t("certainty.nothingKnown")}</p> : null}
       {groups.map((g) => {
         const items = facts.filter((f) => f.status === g);
         if (items.length === 0) return null;

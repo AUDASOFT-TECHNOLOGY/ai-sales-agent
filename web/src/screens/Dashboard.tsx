@@ -28,10 +28,10 @@ const LIVE_EVENTS: ThreadEvent[] = [
 
 type Period = "7d" | "30d" | "3m" | "all";
 type FunnelPeriod = "today" | "7d" | "30d";
-const TREND_UNIT_NOUN: Record<DashboardPeriodStat["trendUnit"], { current: string; previous: string }> = {
-  day: { current: "today", previous: "yesterday" },
-  week: { current: "this week", previous: "last week" },
-  month: { current: "this month", previous: "last month" },
+const TREND_UNIT_NOUN: Record<DashboardPeriodStat["trendUnit"], { current: MessageKey; previous: MessageKey }> = {
+  day: { current: "dashboard.trend.day.current", previous: "dashboard.trend.day.previous" },
+  week: { current: "dashboard.trend.week.current", previous: "dashboard.trend.week.previous" },
+  month: { current: "dashboard.trend.month.current", previous: "dashboard.trend.month.previous" },
 };
 
 /** The Dashboard: the single screen a CEO checks on the business. A compact status bar (not a big
@@ -90,14 +90,16 @@ export function Dashboard() {
   const stageTotal = STAGE_BREAKDOWN.reduce((sum, s) => sum + s.count, 0);
 
   const heroSentence = !state.live
-    ? "I'm not live yet. Finish the setup and I'll start working."
+    ? t("dashboard.hero.notLive")
     : agentState === "paused"
-      ? "You paused me. I'll wait until you resume."
+      ? t("dashboard.hero.paused")
       : agentState === "observing"
-        ? "I'm preparing messages today, and sending nothing."
+        ? t("dashboard.hero.observing")
         : needs > 0
-          ? `${needs === 1 ? "1 decision is" : `${n(needs)} decisions are`} waiting for you.`
-          : "Nothing needs you right now.";
+          ? needs === 1
+            ? t("dashboard.hero.decisionsWaiting.one")
+            : t("dashboard.hero.decisionsWaiting.many", { n: n(needs) })
+          : t("dashboard.hero.nothingNeeds");
 
   return (
     <div className="page page--focus dashboard">
@@ -124,7 +126,7 @@ export function Dashboard() {
           </LinkButton>
         ) : needs > 0 ? (
           <Button variant="primary" leading={<ArrowDown size={16} aria-hidden />} onClick={() => document.getElementById("needs")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-            {needs === 1 ? "Review 1 decision" : `Review ${n(needs)} decisions`}
+            {needs === 1 ? t("dashboard.reviewDecisions.one") : t("dashboard.reviewDecisions.many", { n: n(needs) })}
           </Button>
         ) : null}
       </Glass>
@@ -132,10 +134,15 @@ export function Dashboard() {
       <Glass className="panel dash-quota">
         <DailyBudget used={state.dailyUsed} limit={state.dailyLimit} label={t("command.budget")} caption={t("command.budget.of", { used: state.dailyUsed, limit: state.dailyLimit })} />
         <p className="c-2 t-body-sm dash-quota__note">
-          {n(ACTIONS_TODAY.newProspects)} new prospects · {n(ACTIONS_TODAY.followUps)} follow-ups · {n(ACTIONS_TODAY.reminders)} reminders · {n(ACTIONS_TODAY.registrationChecks)} registration check
+          {t("dashboard.quota.note", {
+            new: n(ACTIONS_TODAY.newProspects),
+            followUps: n(ACTIONS_TODAY.followUps),
+            reminders: n(ACTIONS_TODAY.reminders),
+            checks: n(ACTIONS_TODAY.registrationChecks),
+          })}
         </p>
         <button type="button" className="link-btn dash-quota__link" onClick={() => setDayOpen(true)}>
-          See the full day <ArrowRight size={16} className="mirror" aria-hidden />
+          {t("dashboard.seeFullDay")} <ArrowRight size={16} className="mirror" aria-hidden />
         </button>
       </Glass>
       </div>
@@ -144,86 +151,86 @@ export function Dashboard() {
         <div className="section__head dash-filters">
           <div>
             <h2 className="t-h2" id="perf-h">
-              Commercial activity since {SINCE_START.startDate}
+              {t("dashboard.activitySince", { date: SINCE_START.startDate })}
             </h2>
-            <p className="c-3 t-body-sm">{SINCE_START.months} months of collaboration.</p>
+            <p className="c-3 t-body-sm">{t("dashboard.monthsCollaboration", { n: SINCE_START.months })}</p>
           </div>
           <div className="row row--wrap dash-filters__controls">
             <Segmented
               layoutId="seg-dash-period"
-              label="Period"
+              label={t("common.period")}
               size="sm"
               value={period}
               onChange={setPeriod}
               options={[
-                { value: "7d", label: "7 days" },
-                { value: "30d", label: "30 days" },
-                { value: "3m", label: "3 months" },
-                { value: "all", label: "Since the start" },
+                { value: "7d", label: t("dashboard.period.7d") },
+                { value: "30d", label: t("dashboard.period.30d") },
+                { value: "3m", label: t("dashboard.period.3m") },
+                { value: "all", label: t("dashboard.period.all") },
               ]}
             />
             <Segmented
               layoutId="seg-dash-product"
-              label="Product"
+              label={t("prospects.col.product")}
               size="sm"
               value={product}
               onChange={setProduct}
-              options={[{ value: "all", label: "All products" }, ...OFFERS.map((o) => ({ value: o.id, label: o.name }))]}
+              options={[{ value: "all", label: t("prospects.allProducts") }, ...OFFERS.map((o) => ({ value: o.id, label: o.name }))]}
             />
           </div>
         </div>
 
         <div className="dash-kpi-grid">
           <Glass level={2} tint="action" className="dash-kpi">
-            <span className="c-2 t-body-sm">New prospects contacted</span>
+            <span className="c-2 t-body-sm">{t("dashboard.kpi.contacted")}</span>
             <span className="t-numeral-l tabular">
               <AnimatedNumber value={stat.contacted} />
             </span>
             <div className="dash-kpi__trend c-action">
-              <MiniTrend series={stat.trend} label={`New prospects contacted, by ${stat.trendUnit}: ${stat.trend.join(", ")}`} />
+              <MiniTrend series={stat.trend} label={t("dashboard.kpi.contactedTrend", { unit: stat.trendUnit, values: stat.trend.join(", ") })} />
             </div>
             <span className="c-3 t-body-sm">
-              {n(lastBucket)} {trendNoun.current}
-              {trendDelta !== null ? ` · ${trendDelta >= 0 ? "+" : ""}${trendDelta}% vs ${trendNoun.previous}` : ""}
+              {n(lastBucket)} {t(trendNoun.current)}
+              {trendDelta !== null ? ` · ${trendDelta >= 0 ? "+" : ""}${trendDelta}% ${t("dashboard.trend.vs")} ${t(trendNoun.previous)}` : ""}
             </span>
           </Glass>
           <Glass level={2} tint="agent" className="dash-kpi">
-            <span className="c-2 t-body-sm">Responded</span>
+            <span className="c-2 t-body-sm">{t("dashboard.kpi.responded")}</span>
             <span className="t-numeral-l tabular">
               <AnimatedNumber value={responded} />
             </span>
             <div className="dash-kpi__bar"><div className="dash-kpi__bar-fill" style={{ width: `${stat.responseRate}%`, background: "var(--agent)" }} /></div>
-            <Chip tint="agent" outline>{stat.responseRate}% response rate</Chip>
+            <Chip tint="agent" outline>{t("dashboard.responseRateChip", { rate: stat.responseRate })}</Chip>
           </Glass>
           <Glass level={2} tint="seal" className="dash-kpi">
-            <span className="c-2 t-body-sm">Converted</span>
+            <span className="c-2 t-body-sm">{t("dashboard.kpi.converted")}</span>
             <span className="t-numeral-l tabular">
               <AnimatedNumber value={converted} />
             </span>
             <div className="dash-kpi__bar"><div className="dash-kpi__bar-fill" style={{ width: `${stat.conversionRate}%`, background: "var(--seal)" }} /></div>
-            <Chip tint="seal" outline>{stat.conversionRate}% conversion rate</Chip>
+            <Chip tint="seal" outline>{t("dashboard.conversionRateChip", { rate: stat.conversionRate })}</Chip>
           </Glass>
           <Glass level={2} tint="success" className="dash-kpi">
-            <span className="c-2 t-body-sm">Revenue generated</span>
+            <span className="c-2 t-body-sm">{t("dashboard.kpi.revenue")}</span>
             <span className="t-numeral-l tabular c-success">{stat.revenue}</span>
-            <span className="c-3 t-body-sm">First-time outreach only, {stat.label.toLowerCase()}</span>
+            <span className="c-3 t-body-sm">{t("dashboard.firstTimeOutreach", { label: stat.label.toLowerCase() })}</span>
           </Glass>
         </div>
 
         <div className="dash-charts">
           <Glass className="panel dash-chart-panel funnel-panel">
             <div className="dash-chart-panel__head">
-              <h3 className="t-h3">From first message to revenue</h3>
+              <h3 className="t-h3">{t("funnel.title")}</h3>
               <Segmented
                 layoutId="seg-dash-funnel"
-                label="Funnel period"
+                label={t("dashboard.funnelPeriod")}
                 size="sm"
                 value={funnelPeriod}
                 onChange={setFunnelPeriod}
                 options={[
-                  { value: "today", label: "Today" },
-                  { value: "7d", label: "7 days" },
-                  { value: "30d", label: "30 days" },
+                  { value: "today", label: t("dashboard.period.today") },
+                  { value: "7d", label: t("dashboard.period.7d") },
+                  { value: "30d", label: t("dashboard.period.30d") },
                 ]}
               />
             </div>
@@ -240,7 +247,7 @@ export function Dashboard() {
                 <h2 className="t-h2" id="needs-h">
                   {t("command.needsYou")}
                 </h2>
-                <Chip tint="attention">{needs === 1 ? "1 decision" : `${n(needs)} decisions`}</Chip>
+                <Chip tint="attention">{needs === 1 ? t("dashboard.decisionsChip.one") : t("dashboard.decisionsChip.many", { n: n(needs) })}</Chip>
               </div>
               <ul className="need-list">
                 <AnimatePresence mode="popLayout">
@@ -257,12 +264,14 @@ export function Dashboard() {
             <section aria-labelledby="opps-h" className="dash-action-col">
               <div className="dash-action-col__head">
                 <h2 className="t-h2" id="opps-h">
-                  Closest to paying
+                  {t("dashboard.closestToPaying")}
                 </h2>
-                <Chip tint="neutral">no action needed</Chip>
+                <Chip tint="neutral">{t("dashboard.noActionNeeded")}</Chip>
               </div>
               <p className="c-3 t-body-sm dash-action-col__note">
-                The {n(opportunities.length)} prospect{opportunities.length === 1 ? "" : "s"} nearest to paying, out of {n(stageTotal)} open. The agent handles these on its own.
+                {opportunities.length === 1
+                  ? t("dashboard.opportunities.note.one", { total: n(stageTotal) })
+                  : t("dashboard.opportunities.note.many", { n: n(opportunities.length), total: n(stageTotal) })}
               </p>
               <ul className="opp-list">
                 {opportunities.map((p) => (
@@ -275,7 +284,7 @@ export function Dashboard() {
                           <MilestoneChip label={STAGES.find((s) => s.id === p.stage)?.label ?? p.stage} />
                         </span>
                         <span className="voice voice-s">{p.read}</span>
-                        <span className="opp-row__next c-3 t-body-sm">Next automatic step: {p.next}</span>
+                        <span className="opp-row__next c-3 t-body-sm">{t("dashboard.nextAutomaticStep", { next: p.next })}</span>
                       </span>
                     </Link>
                   </li>
@@ -288,7 +297,7 @@ export function Dashboard() {
 
       <section aria-labelledby="product-h" className="section">
         <h2 className="t-h2 section__title" id="product-h">
-          Performance by catalogue product
+          {t("dashboard.performanceByProduct")}
         </h2>
         <div className="dash-product-grid">
           {productPerf.map((p) => {
@@ -298,14 +307,14 @@ export function Dashboard() {
               <Glass key={p.offerId} className="panel dash-product-card">
                 <h3 className="t-body-l">{offer.name}</h3>
                 <BarMeter
-                  label="Revenue in discussion"
+                  label={t("dashboard.revenueInDiscussion")}
                   valueLabel={p.revenueLabel ?? t("kpi.notTracked")}
                   fraction={(p.revenueValue ?? 0) / maxRevenue}
                   dashed={p.revenueValue === null}
                   tint={offerTint}
                 />
                 <BarMeter
-                  label="Conversion rate"
+                  label={t("dashboard.conversionRate")}
                   valueLabel={p.conversionRate !== null ? `${p.conversionRate}%` : t("kpi.notTracked")}
                   fraction={(p.conversionRate ?? 0) / 100}
                   dashed={p.conversionRate === null}
@@ -319,7 +328,7 @@ export function Dashboard() {
 
       <div className="dash-footlinks">
         <Link to="/history" className="link-btn">
-          <HistoryIcon size={16} aria-hidden /> See report history <ArrowRight size={16} className="mirror" aria-hidden />
+          <HistoryIcon size={16} aria-hidden /> {t("dashboard.seeReportHistory")} <ArrowRight size={16} className="mirror" aria-hidden />
         </Link>
       </div>
 
@@ -330,13 +339,13 @@ export function Dashboard() {
         onApprove={() => {
           if (!detailItem || !detailProspect) return;
           dispatch({ type: "approveDraft", prospectId: detailItem.prospectId, text: detailItem.preview ?? "" });
-          toast({ tone: "agent", title: `Sent to ${detailProspect.name.split(" ")[0]}`, body: "Approved by you." });
+          toast({ tone: "agent", title: t("dashboard.toast.sentTo", { name: detailProspect.name.split(" ")[0] }), body: t("dashboard.toast.approvedByYou") });
           setDetailId(null);
         }}
         onDecline={() => {
           if (!detailItem) return;
           dispatch({ type: "declineDraft", prospectId: detailItem.prospectId });
-          toast({ tone: "info", title: "Draft declined", undo: () => toast({ tone: "info", title: "Draft restored (prototype)" }) });
+          toast({ tone: "info", title: t("dashboard.toast.draftDeclined"), undo: () => toast({ tone: "info", title: t("dashboard.toast.draftRestored") }) });
           setDetailId(null);
         }}
         onEdit={() => detailItem && navigate(`/conversations/${detailItem.prospectId}`)}
@@ -362,7 +371,7 @@ export function Dashboard() {
         onConfirm={() => {
           if (!confirmFor) return;
           dispatch({ type: "confirmPayment", prospectId: confirmFor });
-          toast({ tone: "success", title: "Payment confirmed", body: `Recorded with your name, ${USER.name}.` });
+          toast({ tone: "success", title: t("dashboard.toast.paymentConfirmed"), body: t("dashboard.toast.recordedWithName", { name: USER.name }) });
           setConfirmFor(null);
         }}
       />

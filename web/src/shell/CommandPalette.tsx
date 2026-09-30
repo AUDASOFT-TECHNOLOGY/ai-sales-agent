@@ -34,13 +34,13 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         ["/configure", "nav.configure"],
         ...(state.live ? [] : [["/setup", "nav.setup"]]),
       ] as Array<[string, MessageKey]>
-    ).map(([to, key]) => ({ id: to, group: "Go to", label: t(key), run: go(to) }));
+    ).map(([to, key]) => ({ id: to, group: t("palette.group.goTo"), label: t(key), run: go(to) }));
     const actions: Item[] = [
       state.paused
-        ? { id: "resume", group: "Actions", label: "Resume the agent", icon: Play, run: () => { dispatch({ type: "pause", value: false }); toast({ tone: "info", title: "Agent resumed" }); } }
-        : { id: "pause", group: "Actions", label: "Pause the agent", icon: Pause, run: () => { dispatch({ type: "pause", value: true }); toast({ tone: "attention", title: "Agent paused", body: "Nothing will be sent until you resume." }); } },
+        ? { id: "resume", group: t("palette.group.actions"), label: t("palette.resumeAgent"), icon: Play, run: () => { dispatch({ type: "pause", value: false }); toast({ tone: "info", title: t("palette.toast.agentResumed") }); } }
+        : { id: "pause", group: t("palette.group.actions"), label: t("palette.pauseAgent"), icon: Pause, run: () => { dispatch({ type: "pause", value: true }); toast({ tone: "attention", title: t("palette.toast.agentPaused.title"), body: t("palette.toast.agentPaused.body") }); } },
     ];
-    const people: Item[] = state.prospects.map((p) => ({ id: `p-${p.id}`, group: "Prospects", label: p.name, hint: p.place, run: go(`/prospects?open=${p.id}`) }));
+    const people: Item[] = state.prospects.map((p) => ({ id: `p-${p.id}`, group: t("nav.prospects"), label: p.name, hint: p.place, run: go(`/prospects?open=${p.id}`) }));
     return [...nav, ...actions, ...people];
   }, [state.paused, state.live, state.prospects, navigate, dispatch, toast, t]);
 
@@ -99,7 +99,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         <kbd className="kbd">Esc</kbd>
       </div>
       <ul id="palette-list" role="listbox" className="palette__list">
-        {results.length === 0 ? <li className="palette__empty c-3">No matches.</li> : null}
+        {results.length === 0 ? <li className="palette__empty c-3">{t("palette.noMatches")}</li> : null}
         {results.map((r, i) => {
           const showGroup = i === 0 || results[i - 1]!.group !== r.group;
           const Icon = r.icon;

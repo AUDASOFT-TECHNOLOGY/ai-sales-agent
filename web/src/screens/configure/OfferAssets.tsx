@@ -1,24 +1,26 @@
 import { useState } from "react";
 import { FileText, Image, Link2, Quote, Trash2, Video } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useI18n, type MessageKey } from "../../i18n";
 import type { Offer, OfferAssetKind } from "../../mock/types";
 import { useStore } from "../../mock/store";
 import type { Tint } from "../../ui/Glass";
 import { Button } from "../../ui/Button";
 import { Segmented, TextInput } from "../../ui/Controls";
 
-const KIND_META: Record<OfferAssetKind, { label: string; icon: LucideIcon; tint: Tint }> = {
-  doc: { label: "Document", icon: FileText, tint: "action" },
-  image: { label: "Photo", icon: Image, tint: "agent" },
-  video: { label: "Video", icon: Video, tint: "attention" },
-  testimonial: { label: "Testimonial", icon: Quote, tint: "success" },
-  link: { label: "Link", icon: Link2, tint: "neutral" },
+const KIND_META: Record<OfferAssetKind, { labelKey: MessageKey; icon: LucideIcon; tint: Tint }> = {
+  doc: { labelKey: "assets.kind.doc", icon: FileText, tint: "action" },
+  image: { labelKey: "assets.kind.image", icon: Image, tint: "agent" },
+  video: { labelKey: "assets.kind.video", icon: Video, tint: "attention" },
+  testimonial: { labelKey: "assets.kind.testimonial", icon: Quote, tint: "success" },
+  link: { labelKey: "assets.kind.link", icon: Link2, tint: "neutral" },
 };
 
 /** Everything besides the one-sentence summary that helps REVANSA convince a prospect: spec
  *  sheets, photos, demo videos, customer testimonials. A summary alone isn't enough material for
  *  an agent to answer a prospect's real questions — this is where a CEO adds more. */
 export function OfferAssetEditor({ offer }: { offer: Offer }) {
+  const { t } = useI18n();
   const { dispatch } = useStore();
   const [kind, setKind] = useState<OfferAssetKind>("doc");
   const [label, setLabel] = useState("");
@@ -35,11 +37,11 @@ export function OfferAssetEditor({ offer }: { offer: Offer }) {
       <hr className="divider" />
       <div className="cfg-group">
         <div>
-          <h3 className="t-h3">Sales material</h3>
-          <p className="c-2">Documents, photos, videos and testimonials REVANSA can point to when a prospect asks for more.</p>
+          <h3 className="t-h3">{t("assets.salesMaterial")}</h3>
+          <p className="c-2">{t("assets.salesMaterialDesc", { brand: t("brand.name") })}</p>
         </div>
         {offer.assets.length === 0 ? (
-          <p className="c-attention t-body-sm">No supporting material yet. Add a document, photo, video or testimonial to help REVANSA convince this prospect.</p>
+          <p className="c-attention t-body-sm">{t("assets.noneYet", { brand: t("brand.name") })}</p>
         ) : (
           <ul className="asset-list">
             {offer.assets.map((a) => {
@@ -53,7 +55,7 @@ export function OfferAssetEditor({ offer }: { offer: Offer }) {
                   <a href={a.url} target="_blank" rel="noopener noreferrer" className="asset-row__label t-body-sm">
                     {a.label}
                   </a>
-                  <button type="button" className="icon-btn" aria-label={`Remove ${a.label}`} onClick={() => dispatch({ type: "removeOfferAsset", offerId: offer.id, assetId: a.id })}>
+                  <button type="button" className="icon-btn" aria-label={t("assets.removeLabel", { label: a.label })} onClick={() => dispatch({ type: "removeOfferAsset", offerId: offer.id, assetId: a.id })}>
                     <Trash2 size={16} />
                   </button>
                 </li>
@@ -64,18 +66,18 @@ export function OfferAssetEditor({ offer }: { offer: Offer }) {
         <div className="asset-add">
           <Segmented
             layoutId={`seg-asset-kind-${offer.id}`}
-            label="What kind of material?"
+            label={t("assets.whatKind")}
             size="sm"
             value={kind}
             onChange={setKind}
-            options={(Object.keys(KIND_META) as OfferAssetKind[]).map((k) => ({ value: k, label: KIND_META[k].label }))}
+            options={(Object.keys(KIND_META) as OfferAssetKind[]).map((k) => ({ value: k, label: t(KIND_META[k].labelKey) }))}
           />
           <div className="grid-2">
-            <TextInput label="What is it?" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Foundation one-pager" />
-            <TextInput label="Link" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
+            <TextInput label={t("assets.whatIsIt")} value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("assets.whatIsIt.placeholder")} />
+            <TextInput label={t("assets.kind.link")} type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t("assets.link.placeholder")} />
           </div>
-          <Button variant="secondary" onClick={add} disabledReason={label.trim() && url.trim() ? undefined : "Add a name and a link first"}>
-            Add material
+          <Button variant="secondary" onClick={add} disabledReason={label.trim() && url.trim() ? undefined : t("assets.addFirst")}>
+            {t("assets.addMaterial")}
           </Button>
         </div>
       </div>

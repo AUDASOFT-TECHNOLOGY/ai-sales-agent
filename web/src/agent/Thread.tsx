@@ -20,6 +20,7 @@ const KIND: Record<ThreadKind, { tint: Tint; icon: typeof Send }> = {
 };
 
 function ThreadNode({ event, compact }: { event: ThreadEvent; compact?: boolean }) {
+  const { t } = useI18n();
   const cfg = KIND[event.kind];
   const Icon = event.future ? CalendarClock : cfg.icon;
   return (
@@ -41,12 +42,12 @@ function ThreadNode({ event, compact }: { event: ThreadEvent; compact?: boolean 
       <div className="thread__body">
         <p className="voice voice-s">{event.voice}</p>
         {compact ? (
-          event.needsYou ? <p className="thread__flag t-body-sm">Needs you</p> : null
+          event.needsYou ? <p className="thread__flag t-body-sm">{t("convo.needsYou")}</p> : null
         ) : (
           <p className="c-3 t-body-sm">
             {event.detail}
-            {event.future ? " · Planned" : null}
-            {event.needsYou ? <span className="thread__flag"> · Needs you</span> : null}
+            {event.future ? <> · {t("thread.planned")}</> : null}
+            {event.needsYou ? <span className="thread__flag"> · {t("convo.needsYou")}</span> : null}
           </p>
         )}
       </div>
@@ -66,13 +67,13 @@ export function DayThread({ events, nowTime, agentState, compact }: { events: Th
           <ThreadNode key={e.id} event={e} compact={compact} />
         ))}
       </AnimatePresence>
-      <li className="thread__now" aria-label={`Now, ${nowTime}`}>
+      <li className="thread__now" aria-label={t("thread.nowAt", { time: nowTime })}>
         <span className="thread__now-time tabular t-label">{nowTime}</span>
         <span className="thread__now-pulse">
           <Pulse state={agentState === "not_live" ? "idle" : agentState} size={22} />
         </span>
         <span className="thread__now-line">
-          <span className="t-label c-agent">Now</span>
+          <span className="t-label c-agent">{t("thread.now")}</span>
           <span className="c-3 t-body-sm">{TENANT.timezoneLabel}</span>
         </span>
       </li>

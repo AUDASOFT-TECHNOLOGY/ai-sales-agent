@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Ban, Repeat, X } from "lucide-react";
+import { useI18n } from "../../i18n";
 import { useStore } from "../../mock/store";
 import { CadenceEditor } from "../../agent/Offers";
 import { ToggleChips } from "../../ui/Controls";
@@ -7,24 +8,25 @@ import { Group } from "./Group";
 
 /* ── How REVANSA follows up: a fully editable cadence, then when it should stop ── */
 export function FollowUpSection() {
+  const { t } = useI18n();
   const { state, dispatch } = useStore();
   const { steps, stopConditions, customStopConditions } = state.followUp;
   const [draft, setDraft] = useState("");
   return (
     <>
-      <Group title="The follow-up timeline" hint="Add, remove or move a reminder — REVANSA stops on its own after the last one." icon={Repeat}>
+      <Group title={t("followup.timeline.title")} hint={t("followup.timeline.hint", { brand: t("brand.name") })} icon={Repeat}>
         <CadenceEditor steps={steps} onChange={(v) => dispatch({ type: "setFollowUpSteps", value: v })} />
       </Group>
       <hr className="divider" />
-      <Group title="Stop following up when" hint="REVANSA reads each reply and recognises these on its own — describe the situation in your own words." icon={Ban}>
+      <Group title={t("followup.stopWhen.title")} hint={t("followup.stopWhen.hint", { brand: t("brand.name") })} icon={Ban}>
         <ToggleChips
-          label="Stop conditions"
+          label={t("followup.stopConditions")}
           value={stopConditions}
           onChange={(v) => dispatch({ type: "setFollowUpStop", value: v })}
           options={[
-            { value: "asked_to_stop", label: "They ask me to stop" },
-            { value: "not_interested", label: "They say they're not interested" },
-            { value: "bought_elsewhere", label: "They bought elsewhere" },
+            { value: "asked_to_stop", label: t("followup.stop.askedToStop") },
+            { value: "not_interested", label: t("followup.stop.notInterested") },
+            { value: "bought_elsewhere", label: t("followup.stop.boughtElsewhere") },
           ]}
         />
         <div className="row row--wrap">
@@ -33,7 +35,7 @@ export function FollowUpSection() {
               {c}
               <button
                 type="button"
-                aria-label={`Remove ${c}`}
+                aria-label={t("followup.removeReason", { reason: c })}
                 onClick={() => dispatch({ type: "setFollowUpCustomStop", value: customStopConditions.filter((x) => x !== c) })}
               >
                 <X size={16} aria-hidden />
@@ -53,8 +55,8 @@ export function FollowUpSection() {
               className="input well"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder='Add a reason, e.g. "They mention a competitor"'
-              aria-label="Add a stop condition"
+              placeholder={t("followup.addReasonPlaceholder")}
+              aria-label={t("followup.addStopCondition")}
             />
           </form>
         </div>

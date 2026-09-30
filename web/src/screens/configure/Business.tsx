@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Building2, Check, Copy, Loader2, Table2 } from "lucide-react";
+import { useI18n } from "../../i18n";
 import { TENANT } from "../../mock/data";
 import { useStore } from "../../mock/store";
 import { Button } from "../../ui/Button";
@@ -9,10 +10,11 @@ import { Group } from "./Group";
 
 /* ── Your business: identity and the Google Sheet (real, wired to state.sheet) ── */
 export function BusinessSection() {
+  const { t } = useI18n();
   const { state, dispatch } = useStore();
   const [step, setStep] = useState(state.sheet.verified ? 3 : 0);
   const [running, setRunning] = useState(false);
-  const steps = ["We can open your Sheet", "It has the columns REVANSA needs", "The information lines up"];
+  const steps = [t("runway.sheetTest.open"), t("runway.sheetTest.columns", { brand: t("brand.name") }), t("runway.sheetTest.linesUp")];
   const run = () => {
     setRunning(true);
     setStep(0);
@@ -28,28 +30,28 @@ export function BusinessSection() {
   };
   return (
     <>
-      <Group title="Your company" icon={Building2}>
+      <Group title={t("business.yourCompany")} icon={Building2}>
         <div className="grid-2">
-          <LockedField label="Business name" value={TENANT.name} helper="Set with your platform administrator." />
-          <LockedField label="Time zone" value={TENANT.timezone} helper="All times follow this zone." />
+          <LockedField label={t("field.businessName")} value={TENANT.name} helper={t("business.setByAdmin")} />
+          <LockedField label={t("field.timezone")} value={TENANT.timezone} helper={t("business.allTimesFollowZone")} />
         </div>
       </Group>
       <hr className="divider" />
-      <Group title="Google Sheet" hint="REVANSA reads your prospects from here, and only from here." icon={Table2}>
+      <Group title={t("business.googleSheet")} hint={t("business.sheetHint", { brand: t("brand.name") })} icon={Table2}>
         <TextInput
-          label="Sheet link"
+          label={t("field.sheetLink")}
           value={state.sheet.url}
           onChange={(e) => dispatch({ type: "setSheetUrl", url: e.target.value })}
-          helper={state.sheet.verified ? undefined : "Test the connection after changing the link."}
+          helper={state.sheet.verified ? undefined : t("business.testAfterChange")}
         />
-        <Disclosure title="What should my Sheet look like?" hint="One row per prospect">
+        <Disclosure title={t("business.sheetLookLike.title")} hint={t("business.sheetLookLike.hint")}>
           <p className="c-2 t-body-sm">
-            One row per prospect, with a column for their name, one for their phone number, and one for their country. Extra columns are fine — REVANSA only reads the ones it needs.
+            {t("business.sheetLookLike.body", { brand: t("brand.name") })}
           </p>
         </Disclosure>
         <div className="row row--wrap">
           <Button variant="secondary" onClick={run} loading={running}>
-            Test connection
+            {t("action.testConnection")}
           </Button>
           <ol className="test-steps" aria-live="polite">
             {steps.map((s, i) => (
@@ -62,11 +64,11 @@ export function BusinessSection() {
         </div>
         <div className="callout callout--sm">
           <p className="c-2">
-            Share the Sheet with this address so REVANSA can read it. This is a safe, read-only address REVANSA uses — sharing your Sheet with it gives it access to nothing else.
+            {t("business.shareAddress", { brand: t("brand.name") })}
           </p>
           <p className="row">
             <code className="t-mono">agent@revansa-sample.iam.example</code>
-            <button type="button" className="icon-btn" aria-label="Copy address" onClick={() => void navigator.clipboard?.writeText("agent@revansa-sample.iam.example")}>
+            <button type="button" className="icon-btn" aria-label={t("business.copyAddress")} onClick={() => void navigator.clipboard?.writeText("agent@revansa-sample.iam.example")}>
               <Copy size={18} />
             </button>
           </p>

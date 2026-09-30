@@ -29,10 +29,9 @@ function Parts({ parts }: { parts: MessagePart[] }) {
   );
 }
 
-const AUTHOR_LABEL: Record<Message["author"], string> = { prospect: "", agent: "REVANSA agent", human: "", system: "" };
-
 /** Three authors, distinguishable without color alone: position, glyph and a label on the first bubble (doc 18.2). */
 export function MessageBubble({ message, prospectInitials, firstOfRun }: { message: Message; prospectInitials: string; firstOfRun: boolean }) {
+  const { t } = useI18n();
   if (message.author === "system") {
     return (
       <li className="msg-system">
@@ -51,7 +50,7 @@ export function MessageBubble({ message, prospectInitials, firstOfRun }: { messa
           <p className="msg__who t-label c-3">
             {message.author === "agent" ? (
               <>
-                <Sparkles size={12} aria-hidden className="c-agent" /> {AUTHOR_LABEL.agent}
+                <Sparkles size={12} aria-hidden className="c-agent" /> {t("convo.agentAuthor", { brand: t("brand.name") })}
               </>
             ) : (
               <>{message.who}</>
@@ -69,7 +68,7 @@ export function MessageBubble({ message, prospectInitials, firstOfRun }: { messa
               </span>
               {message.media.possibleProof ? (
                 <span className="chip" data-tint="attention" data-dashed>
-                  Possible proof
+                  {t("payment.possibleProof")}
                 </span>
               ) : null}
             </span>

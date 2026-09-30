@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence } from "motion/react";
 import { ChevronLeft, PanelRight, ShieldCheck, Sparkles } from "lucide-react";
-import { useI18n } from "../i18n";
+import { useI18n, type MessageKey } from "../i18n";
 import { USER } from "../mock/data";
 import { useStore } from "../mock/store";
 import { AgentNotes, Composer, DraftBubble, HandoffBanner, MessageBubble } from "../agent/Conversation";
@@ -83,27 +83,27 @@ export function Conversations() {
           <div className="thread-view__who">
             <h2 className="t-h3">{prospect.name}</h2>
             <p className="c-3 t-body-sm">
-              {prospect.place} · Oriented to {prospect.interest}
+              {t("convo.orientedTo", { place: prospect.place, interest: prospect.interest })}
             </p>
           </div>
           <span className="spacer" />
           <ProspectStatusChip status={prospect.status} stage={prospect.stage} />
           <Button variant="secondary" size="sm" leading={<PanelRight size={16} aria-hidden />} onClick={() => setDetailsOpen(true)}>
-            Details
+            {t("action.details")}
           </Button>
         </header>
 
         {convo.payment === "claimed" || convo.payment === "proof_received" ? (
           <div className="pay-notice">
             <p className="c-attention">
-              {prospect.name.split(" ")[0]} says they paid. Not verified yet.
+              {t("convo.saysPaidUnverified", { name: prospect.name.split(" ")[0] })}
             </p>
             <Button variant="success" size="sm" leading={<ShieldCheck size={16} aria-hidden />} onClick={() => setConfirming(true)} disabledReason={canConfirmPayments ? undefined : t("payment.waitingPermission")}>
               {t("payment.review")}
             </Button>
           </div>
         ) : convo.payment === "paid" ? (
-          <p className="pay-notice pay-notice--done c-success">Payment confirmed by {USER.name} K.</p>
+          <p className="pay-notice pay-notice--done c-success">{t("convo.paymentConfirmedBy", { name: `${USER.name} K.` })}</p>
         ) : null}
 
         <AnimatePresence>
@@ -112,13 +112,13 @@ export function Conversations() {
               reason={convo.notes.handoff}
               onTakeOver={() => {
                 dispatch({ type: "takeOver", prospectId: convo.prospectId });
-                toast({ tone: "info", title: "You're handling this conversation", body: "The agent is paused here." });
+                toast({ tone: "info", title: t("convo.toast.handling.title"), body: t("convo.toast.handling.body") });
               }}
             />
           ) : null}
         </AnimatePresence>
 
-        <ol className="msgs" aria-label="Messages">
+        <ol className="msgs" aria-label={t("convo.messagesLabel")}>
           {convo.messages.map((m, i) => {
             const prev = convo.messages[i - 1];
             return <MessageBubble key={m.id} message={m} prospectInitials={prospect.initials} firstOfRun={!prev || prev.author !== m.author} />;
@@ -130,11 +130,11 @@ export function Conversations() {
                 parts={convo.draft}
                 onApprove={(text) => {
                   dispatch({ type: "approveDraft", prospectId: convo.prospectId, text });
-                  toast({ tone: "agent", title: `Sent to ${prospect.name.split(" ")[0]}`, body: "Approved by you." });
+                  toast({ tone: "agent", title: t("dashboard.toast.sentTo", { name: prospect.name.split(" ")[0] }), body: t("dashboard.toast.approvedByYou") });
                 }}
                 onDecline={() => {
                   dispatch({ type: "declineDraft", prospectId: convo.prospectId });
-                  toast({ tone: "info", title: "Draft declined" });
+                  toast({ tone: "info", title: t("dashboard.toast.draftDeclined") });
                 }}
               />
             ) : null}
@@ -148,7 +148,7 @@ export function Conversations() {
             onSend={(text) => dispatch({ type: "sendHuman", prospectId: convo.prospectId, text })}
             onGiveBack={() => {
               dispatch({ type: "giveBack", prospectId: convo.prospectId });
-              toast({ tone: "agent", title: "Back with the agent", body: "I'll follow up tomorrow at 10:00." });
+              toast({ tone: "agent", title: t("convo.toast.backWithAgent.title"), body: t("convo.toast.backWithAgent.body") });
             }}
           />
         ) : null}
@@ -157,13 +157,13 @@ export function Conversations() {
       <Drawer open={detailsOpen} onOpenChange={setDetailsOpen} title={prospect.name}>
         <PaymentSeal progress={convo.payment} confirmedBy={USER.name + " K."} canConfirm={canConfirmPayments} onReview={() => { setDetailsOpen(false); setConfirming(true); }} />
         {convo.reasoning ? (
-          <section className="why-panel" aria-label="Why REVANSA does this">
+          <section className="why-panel" aria-label={t("convo.whyPanel.title", { brand: t("brand.name") })}>
             <div className="why-panel__head">
               <h3 className="t-label c-2">
-                <Sparkles size={16} aria-hidden className="c-agent" /> Why REVANSA does this
+                <Sparkles size={16} aria-hidden className="c-agent" /> {t("convo.whyPanel.title", { brand: t("brand.name") })}
               </h3>
               <span className={`chip why-panel__conf`} data-tint={convo.reasoning.confidence === "high" ? "success" : convo.reasoning.confidence === "medium" ? "attention" : "neutral"}>
-                Confidence: {convo.reasoning.confidence}
+                {t("convo.whyPanel.confidence", { level: t(`convo.confidence.${convo.reasoning.confidence}` as MessageKey) })}
               </span>
             </div>
             <ul className="why-list">
@@ -185,7 +185,7 @@ export function Conversations() {
         canConfirm={canConfirmPayments}
         onConfirm={() => {
           dispatch({ type: "confirmPayment", prospectId: convo.prospectId });
-          toast({ tone: "success", title: "Payment confirmed", body: `Recorded with your name, ${USER.name}.` });
+          toast({ tone: "success", title: t("dashboard.toast.paymentConfirmed"), body: t("dashboard.toast.recordedWithName", { name: USER.name }) });
           setConfirming(false);
         }}
       />

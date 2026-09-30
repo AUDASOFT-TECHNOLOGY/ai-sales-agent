@@ -1,50 +1,46 @@
 import { HandHelping, Sparkles, UserCheck } from "lucide-react";
 import type { Tone } from "../mock/types";
+import { useI18n, type MessageKey } from "../i18n";
 import { Disclosure } from "../ui/Disclosure";
 import { Segmented, ToggleChips } from "../ui/Controls";
 
 export type { Tone };
 
 /* ── The sales path: five plain steps, the last one is yours ── */
-const PATH: Array<{ title: string; text: string; you?: boolean }> = [
-  { title: "Understand", text: "I ask a few questions to learn what they need." },
-  { title: "Recommend", text: "I suggest the offer that fits them." },
-  { title: "Register", text: "I help them sign up." },
-  { title: "Payment", text: "I share how to pay." },
-  { title: "Your confirmation", text: "You check the payment and confirm it.", you: true },
+const PATH_KEYS: Array<{ titleKey: MessageKey; textKey: MessageKey; you?: boolean }> = [
+  { titleKey: "strategy.path.understand.title", textKey: "strategy.path.understand.text" },
+  { titleKey: "strategy.path.recommend.title", textKey: "strategy.path.recommend.text" },
+  { titleKey: "strategy.path.register.title", textKey: "strategy.path.register.text" },
+  { titleKey: "strategy.path.payment.title", textKey: "strategy.path.payment.text" },
+  { titleKey: "strategy.path.confirm.title", textKey: "strategy.path.confirm.text", you: true },
 ];
 
 export function SalesPath() {
+  const { t } = useI18n();
   return (
     <div className="spath-wrap">
       <ol className="spath">
-        {PATH.map((step, i) => (
-          <li key={step.title} className="spath__step" data-you={step.you || undefined}>
+        {PATH_KEYS.map((step, i) => (
+          <li key={step.titleKey} className="spath__step" data-you={step.you || undefined}>
             <span className="spath__node" aria-hidden>
               {step.you ? <UserCheck size={20} /> : <span className="tabular">{i + 1}</span>}
             </span>
             <div className="spath__text">
-              <p className="t-h3">{step.title}</p>
-              <p className="c-2">{step.text}</p>
+              <p className="t-h3">{t(step.titleKey)}</p>
+              <p className="c-2">{t(step.textKey)}</p>
             </div>
           </li>
         ))}
       </ol>
       <p className="spath__note">
         <HandHelping size={22} aria-hidden />
-        <span>You can take over a conversation at any time.</span>
+        <span>{t("strategy.path.note")}</span>
       </p>
     </div>
   );
 }
 
 /* ── Language and style: what you allow, and how the agent adapts ── */
-const LANGUAGES = [
-  { value: "fr", label: "French" },
-  { value: "ar", label: "Arabic" },
-  { value: "en", label: "English" },
-];
-
 interface LanguageStyleProps {
   langs: string[];
   onLangs: (v: string[]) => void;
@@ -55,52 +51,57 @@ interface LanguageStyleProps {
   idSuffix?: string;
 }
 
-const SIGNALS = [
-  "What the prospect asks for",
-  "The language of the conversation",
-  "What we know from their profile",
-  "Their market or country, when it is known",
-  "Your default language",
-];
-
 export function LanguageStyle({ langs, onLangs, defaultLang, onDefaultLang, tone, onTone, idSuffix = "" }: LanguageStyleProps) {
+  const { t } = useI18n();
+  const LANGUAGES = [
+    { value: "fr", label: t("lang.fr") },
+    { value: "ar", label: t("lang.ar") },
+    { value: "en", label: t("lang.en") },
+  ];
+  const SIGNALS = [
+    t("strategy.lang.signal.asks"),
+    t("strategy.lang.signal.convo"),
+    t("strategy.lang.signal.profile"),
+    t("strategy.lang.signal.market"),
+    t("strategy.lang.signal.default"),
+  ];
   const allowed = LANGUAGES.filter((l) => langs.includes(l.value));
   const effectiveDefault = allowed.some((l) => l.value === defaultLang) ? defaultLang : (allowed[0]?.value ?? "");
   return (
     <div className="lstyle">
       <p className="callout">
         <Sparkles size={22} aria-hidden />
-        <span>Your agent adapts its language and communication style to each prospect and conversation.</span>
+        <span>{t("strategy.lang.callout")}</span>
       </p>
       <div className="field">
-        <span className="t-label c-2">Languages it may use</span>
-        <ToggleChips label="Languages it may use" value={langs} onChange={onLangs} options={LANGUAGES} />
+        <span className="t-label c-2">{t("strategy.lang.languages")}</span>
+        <ToggleChips label={t("strategy.lang.languages")} value={langs} onChange={onLangs} options={LANGUAGES} />
       </div>
       {allowed.length > 0 ? (
         <div className="field">
-          <span className="t-label c-2">Default language</span>
-          <Segmented layoutId={`seg-deflang${idSuffix}`} label="Default language" value={effectiveDefault} onChange={onDefaultLang} options={allowed} />
-          <p className="c-3 t-body-sm">Used for the first message, until the agent learns more about the prospect.</p>
+          <span className="t-label c-2">{t("strategy.lang.default")}</span>
+          <Segmented layoutId={`seg-deflang${idSuffix}`} label={t("strategy.lang.default")} value={effectiveDefault} onChange={onDefaultLang} options={allowed} />
+          <p className="c-3 t-body-sm">{t("strategy.lang.default.help")}</p>
         </div>
       ) : (
-        <p className="c-attention">Choose at least one language.</p>
+        <p className="c-attention">{t("strategy.lang.chooseOne")}</p>
       )}
       <div className="field">
-        <span className="t-label c-2">Starting style</span>
+        <span className="t-label c-2">{t("strategy.lang.style")}</span>
         <Segmented
           layoutId={`seg-tone${idSuffix}`}
-          label="Starting style"
+          label={t("strategy.lang.style")}
           value={tone}
           onChange={onTone}
           options={[
-            { value: "formal", label: "Formal" },
-            { value: "neutral", label: "Neutral" },
-            { value: "friendly", label: "Friendly" },
+            { value: "formal", label: t("strategy.lang.style.formal") },
+            { value: "neutral", label: t("strategy.lang.style.neutral") },
+            { value: "friendly", label: t("strategy.lang.style.friendly") },
           ]}
         />
-        <p className="c-3 t-body-sm">Where the agent starts. It adjusts to each prospect from there.</p>
+        <p className="c-3 t-body-sm">{t("strategy.lang.style.help")}</p>
       </div>
-      <Disclosure title="How your agent chooses the language">
+      <Disclosure title={t("strategy.lang.disclosure.title")}>
         <ol className="signals">
           {SIGNALS.map((s, i) => (
             <li key={s}>
@@ -109,8 +110,8 @@ export function LanguageStyle({ langs, onLangs, defaultLang, onDefaultLang, tone
             </li>
           ))}
         </ol>
-        <p className="c-2">The first message uses your default language and style. The agent adapts as soon as it has new signals.</p>
-        <p className="c-2">The country code of a WhatsApp number can hint at context. It is not proof of nationality, and it never outweighs the steps above.</p>
+        <p className="c-2">{t("strategy.lang.disclosure.p1")}</p>
+        <p className="c-2">{t("strategy.lang.disclosure.p2")}</p>
       </Disclosure>
     </div>
   );

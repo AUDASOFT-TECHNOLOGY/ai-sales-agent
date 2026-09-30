@@ -56,7 +56,7 @@ export function PaymentSeal({
           ) : (
             <span className="seal__dot seal__dot--empty" />
           )}
-          <span className="t-label">{paid ? t("payment.paid", { name: confirmedBy }) : "Confirmed by a person"}</span>
+          <span className="t-label">{paid ? t("payment.paid", { name: confirmedBy }) : t("payment.confirmedByPerson")}</span>
         </li>
       </ol>
       {!paid ? (
@@ -73,7 +73,7 @@ export function PaymentSeal({
           </Button>
         </div>
       ) : (
-        <p className="c-3 t-body-sm">Recorded with a name and a time. It cannot be edited.</p>
+        <p className="c-3 t-body-sm">{t("payment.recorded")}</p>
       )}
     </section>
   );
@@ -148,7 +148,7 @@ export function ConfirmPaymentDialog({
           <Button
             variant="success"
             leading={<ShieldCheck size={18} aria-hidden />}
-            disabledReason={!canConfirm ? t("payment.waitingPermission") : checked ? undefined : "Tick the box to confirm you checked the payment."}
+            disabledReason={!canConfirm ? t("payment.waitingPermission") : checked ? undefined : t("payment.tickBox")}
             onClick={() => {
               onConfirm();
               setChecked(false);
@@ -160,26 +160,26 @@ export function ConfirmPaymentDialog({
       }
     >
       <div className="evidence-block">
-        <p className="t-label c-3">What {name.split(" ")[0]} said</p>
+        <p className="t-label c-3">{t("payment.whatSaid", { name: name.split(" ")[0] })}</p>
         <blockquote className="evidence__quote">“{claimExcerpt}”</blockquote>
         {proofName ? (
           <p className="row c-2 t-body-sm">
             <Paperclip size={14} aria-hidden /> {proofName}
             <span className="chip" data-tint="attention" data-dashed>
-              Possible proof
+              {t("payment.possibleProof")}
             </span>
           </p>
         ) : null}
       </div>
       <div className="grid-2">
-        <TextInput label="Amount" optional="optional" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount received" inputMode="decimal" />
-        <TextInput label="Reference" optional="optional" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Bank reference" />
+        <TextInput label={t("payment.amount")} optional="optional" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t("payment.amount.placeholder")} inputMode="decimal" />
+        <TextInput label={t("payment.reference")} optional="optional" value={reference} onChange={(e) => setReference(e.target.value)} placeholder={t("payment.reference.placeholder")} />
       </div>
       <div className="row well attest">
         <span className="avatar-sm">SK</span>
         <div>
-          <p className="t-label">Confirming as Sami K.</p>
-          <p className="c-3 t-body-sm">Owner · you</p>
+          <p className="t-label">{t("payment.confirmingAs", { name: "Sami K." })}</p>
+          <p className="c-3 t-body-sm">{t("payment.ownerYou")}</p>
         </div>
       </div>
       <label htmlFor={boxId} className="check">

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CreditCard } from "lucide-react";
+import { useI18n } from "../../i18n";
 import type { PaymentProfile } from "../../mock/types";
 import { useStore } from "../../mock/store";
 import { Button } from "../../ui/Button";
@@ -13,34 +14,36 @@ const EMPTY_PROFILE = (market: string): PaymentProfile => ({ market, methods: []
  *  different bank details, a different link), so this editor is scoped to a single market —
  *  reused as-is by Runway's onboarding "payment" gate. */
 export function PaymentProfileEditor({ market, profile, onChange }: { market: string; profile: PaymentProfile; onChange: (patch: Partial<Omit<PaymentProfile, "market">>) => void }) {
+  const { t } = useI18n();
   const { state } = useStore();
   const viewer = state.role === "viewer";
   return (
-    <Group title={`How you get paid — ${market}`} hint="Exact values REVANSA gives a prospect, never rewritten." icon={CreditCard}>
+    <Group title={t("payment.howYouGetPaidFor", { market })} hint={t("payment.exactValuesHint", { brand: t("brand.name") })} icon={CreditCard}>
       <div className="field">
-        <span className="t-label c-2">Ways people can pay</span>
+        <span className="t-label c-2">{t("payment.waysToPay")}</span>
         <ToggleChips
-          label="Payment methods"
+          label={t("payment.methods")}
           value={profile.methods}
           onChange={(v) => onChange({ methods: v })}
           options={[
-            { value: "bank", label: "Bank transfer" },
-            { value: "link", label: "Online payment link" },
-            { value: "cash", label: "In person" },
+            { value: "bank", label: t("payment.method.bank") },
+            { value: "link", label: t("payment.method.link") },
+            { value: "cash", label: t("payment.method.cash") },
           ]}
         />
       </div>
-      <VerbatimField label="Exact payment details" multiline value={profile.instructions} onChange={(v) => onChange({ instructions: v })} previewPrefix="To pay: " />
+      <VerbatimField label={t("payment.exactDetails")} multiline value={profile.instructions} onChange={(v) => onChange({ instructions: v })} previewPrefix={t("payment.toPayPrefix")} />
       {profile.methods.includes("link") ? (
-        <VerbatimField label="Online payment link" value={profile.link} onChange={(v) => onChange({ link: v })} placeholder="https://…" previewPrefix="Pay here: " />
+        <VerbatimField label={t("payment.method.link")} value={profile.link} onChange={(v) => onChange({ link: v })} placeholder={t("assets.link.placeholder")} previewPrefix={t("payment.payHerePrefix")} />
       ) : null}
-      <p className="c-3 t-body-sm">{viewer ? "Viewers can look but not edit." : "Only a person at your company can confirm that a payment arrived. REVANSA records what people say, never that they paid."}</p>
+      <p className="c-3 t-body-sm">{viewer ? t("payment.viewersLookOnly") : t("payment.onlyPersonCanConfirm", { brand: t("brand.name") })}</p>
     </Group>
   );
 }
 
 /* ── Payment, scoped per target country: pick a market, edit its profile ── */
 export function PaymentSection() {
+  const { t } = useI18n();
   const { state, dispatch } = useStore();
   const [marketsOpen, setMarketsOpen] = useState(false);
   const [activeMarket, setActiveMarket] = useState(state.markets[0] ?? "");
@@ -49,9 +52,9 @@ export function PaymentSection() {
 
   if (state.markets.length === 0) {
     return (
-      <Group title="How you get paid" hint="Add a target country first, then set how you get paid there." icon={CreditCard}>
+      <Group title={t("payment.howYouGetPaid")} hint={t("payment.addCountryFirst")} icon={CreditCard}>
         <Button variant="secondary" onClick={() => setMarketsOpen(true)}>
-          Manage target countries
+          {t("offerEditor.manageCountries")}
         </Button>
         <MarketsDrawer open={marketsOpen} onOpenChange={setMarketsOpen} />
       </Group>
@@ -61,9 +64,9 @@ export function PaymentSection() {
   return (
     <>
       <div className="row row--wrap payment-market-picker">
-        <Segmented layoutId="seg-payment-market" label="Market" value={market} onChange={setActiveMarket} options={state.markets.map((m) => ({ value: m, label: m }))} />
+        <Segmented layoutId="seg-payment-market" label={t("common.market")} value={market} onChange={setActiveMarket} options={state.markets.map((m) => ({ value: m, label: m }))} />
         <Button size="sm" variant="ghost" onClick={() => setMarketsOpen(true)}>
-          Manage target countries
+          {t("offerEditor.manageCountries")}
         </Button>
       </div>
       <PaymentProfileEditor market={market} profile={profile} onChange={(patch) => dispatch({ type: "setPaymentProfile", market, patch })} />

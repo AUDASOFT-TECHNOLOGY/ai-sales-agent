@@ -33,27 +33,28 @@ export function OfferCard({
   canMoveUp: boolean;
   canMoveDown: boolean;
 }) {
+  const { t } = useI18n();
   const C = 2 * Math.PI * 22;
   const statusTint = offer.status === "active" ? "success" : offer.status === "coming_soon" ? "attention" : "neutral";
-  const statusLabel = offer.status === "active" ? "Active" : offer.status === "coming_soon" ? "Coming soon" : "Inactive";
+  const statusLabel = offer.status === "active" ? t("offers.status.active") : offer.status === "coming_soon" ? t("offers.status.comingSoon") : t("offers.status.inactive");
   const priced = offer.price !== "Not set" && offer.price !== "On request";
   return (
     <motion.li layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: index * 0.05, ease: [0.16, 1, 0.3, 1] }}>
       <Glass level={selected ? 3 : 1} tint="action" className="offer" data-selected={selected || undefined}>
         <div className="offer__actions">
-          <IconButton label="Move earlier" onClick={onMoveUp} disabled={!canMoveUp}>
+          <IconButton label={t("offers.move.earlier")} onClick={onMoveUp} disabled={!canMoveUp}>
             <ArrowUp size={16} />
           </IconButton>
-          <IconButton label="Move later" onClick={onMoveDown} disabled={!canMoveDown}>
+          <IconButton label={t("offers.move.later")} onClick={onMoveDown} disabled={!canMoveDown}>
             <ArrowDown size={16} />
           </IconButton>
-          <IconButton label={`Delete ${offer.name}`} onClick={onDelete}>
+          <IconButton label={t("offers.delete", { name: offer.name })} onClick={onDelete}>
             <Trash2 size={16} />
           </IconButton>
         </div>
         <button type="button" className="offer-btn offer-btn--inline" onClick={onSelect} aria-pressed={selected}>
           <div className="offer__top">
-            <span className="offer__ring" aria-label={`${Math.round(offer.completeness * 100)}% complete`} role="img">
+            <span className="offer__ring" aria-label={t("offers.completeness", { pct: Math.round(offer.completeness * 100) })} role="img">
               <svg viewBox="0 0 52 52" width={52} height={52} aria-hidden>
                 <circle cx="26" cy="26" r="22" fill="none" stroke="rgb(255 255 255 / 0.1)" strokeWidth="3" />
                 <motion.circle
@@ -96,7 +97,13 @@ export function OfferCard({
               ))}
             </div>
           ) : null}
-          {offer.missing.length > 0 ? <p className="c-attention t-body-sm">Still missing: {offer.missing.slice(0, 2).join(", ")}{offer.missing.length > 2 ? "…" : ""}</p> : null}
+          {offer.missing.length > 0 ? (
+            <p className="c-attention t-body-sm">
+              {t("offers.missing", {
+                list: offer.missing.slice(0, 2).map((k) => t(k, { brand: t("brand.name") })).join(", ") + (offer.missing.length > 2 ? "…" : ""),
+              })}
+            </p>
+          ) : null}
         </button>
       </Glass>
     </motion.li>
@@ -115,7 +122,7 @@ export function CadenceEditor({ steps, onChange }: { steps: CadenceStep[]; onCha
   return (
     <div className="cadence">
       <div className="cadence__rail" aria-hidden>
-        <div className="cadence__gap" title="Minimum gap between contacts, set by your platform">
+        <div className="cadence__gap" title={t("offers.cadence.gapHint")}>
           <Lock size={12} />
         </div>
         <span className="cadence__line" />
@@ -131,18 +138,30 @@ export function CadenceEditor({ steps, onChange }: { steps: CadenceStep[]; onCha
       </div>
       <ul className="cadence__steps">
         <li className="cadence__step">
-          <span className="t-label c-2">First message</span>
-          <span className="c-3 t-body-sm">Day 0</span>
+          <span className="t-label c-2">{t("offers.cadence.firstMessage")}</span>
+          <span className="c-3 t-body-sm">{t("offers.cadence.day0")}</span>
         </li>
         {steps.map((s, i) => (
           <li key={i} className="cadence__step">
             <span className="t-label c-2">{s.label}</span>
             <span className="row">
-              <button type="button" className="icon-btn cadence__btn" aria-label={`Fewer days before ${s.label}`} disabled={s.days <= 1} onClick={() => onChange(steps.map((x, j) => (j === i ? { ...x, days: x.days - 1 } : x)))}>
+              <button
+                type="button"
+                className="icon-btn cadence__btn"
+                aria-label={t("offers.cadence.fewerDays", { label: s.label })}
+                disabled={s.days <= 1}
+                onClick={() => onChange(steps.map((x, j) => (j === i ? { ...x, days: x.days - 1 } : x)))}
+              >
                 <Minus size={16} />
               </button>
-              <span className="tabular t-body-sm cadence__val">{s.days} days after</span>
-              <button type="button" className="icon-btn cadence__btn" aria-label={`More days before ${s.label}`} disabled={cumulative[i]! >= SCALE * 0.78} onClick={() => onChange(steps.map((x, j) => (j === i ? { ...x, days: x.days + 1 } : x)))}>
+              <span className="tabular t-body-sm cadence__val">{t("offers.cadence.daysAfter", { n: s.days })}</span>
+              <button
+                type="button"
+                className="icon-btn cadence__btn"
+                aria-label={t("offers.cadence.moreDays", { label: s.label })}
+                disabled={cumulative[i]! >= SCALE * 0.78}
+                onClick={() => onChange(steps.map((x, j) => (j === i ? { ...x, days: x.days + 1 } : x)))}
+              >
                 <Plus size={16} />
               </button>
             </span>
@@ -154,13 +173,13 @@ export function CadenceEditor({ steps, onChange }: { steps: CadenceStep[]; onCha
           size="sm"
           variant="secondary"
           leading={<Plus size={16} aria-hidden />}
-          disabledReason={atCap ? `Up to ${MAX_REMINDERS} reminders, set by your platform` : undefined}
-          onClick={() => onChange([...steps, { days: 3, label: `Reminder ${steps.length + 1}` }])}
+          disabledReason={atCap ? t("offers.cadence.capReason", { n: MAX_REMINDERS }) : undefined}
+          onClick={() => onChange([...steps, { days: 3, label: t("offers.cadence.reminderLabel", { n: steps.length + 1 }) }])}
         >
-          Add a reminder
+          {t("offers.cadence.add")}
         </Button>
         <span className="c-3 t-body-sm">
-          {t("configure.tab.followup")}: at least 1 hour apart · up to {MAX_REMINDERS} reminders · set by your platform
+          {t("offers.cadence.summary", { followup: t("configure.tab.followup"), n: MAX_REMINDERS })}
         </span>
       </div>
     </div>

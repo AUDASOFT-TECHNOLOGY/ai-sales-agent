@@ -13,33 +13,38 @@ import { FollowUpSection } from "./FollowUp";
 
 type SectionId = "business" | "offers" | "followup" | "schedule";
 
-/** Four business intentions, each a card. Clicking one opens its editor full-width right below
- *  the grid — never a separate screen, never a menu to learn first: the whole setup is visible
- *  at once, and opening one thing never hides the others. */
-const CARDS: Array<{ id: SectionId; icon: LucideIcon; title: string; blurb: string }> = [
-  { id: "business", icon: Building2, title: "Your business", blurb: "Your company, and where your prospects live." },
-  { id: "offers", icon: Package, title: "What REVANSA sells", blurb: "Your catalogue, what convinces a prospect, and how you get paid." },
-  { id: "followup", icon: Repeat, title: "How REVANSA follows up", blurb: "What happens when a prospect goes quiet." },
-  { id: "schedule", icon: CalendarClock, title: "When REVANSA works", blurb: "Hours, daily limit, and the number it writes from." },
-];
-
 export function Configure() {
   const { t } = useI18n();
   const { section } = useParams();
   const navigate = useNavigate();
   const { state } = useStore();
+
+  /** Four business intentions, each a card. Clicking one opens its editor full-width right below
+   *  the grid — never a separate screen, never a menu to learn first: the whole setup is visible
+   *  at once, and opening one thing never hides the others. */
+  const CARDS: Array<{ id: SectionId; icon: LucideIcon; title: string; blurb: string }> = [
+    { id: "business", icon: Building2, title: t("configure.cards.business.title"), blurb: t("configure.cards.business.blurb") },
+    { id: "offers", icon: Package, title: t("configure.cards.offers.title", { brand: t("brand.name") }), blurb: t("configure.cards.offers.blurb") },
+    { id: "followup", icon: Repeat, title: t("configure.cards.followup.title", { brand: t("brand.name") }), blurb: t("configure.cards.followup.blurb") },
+    { id: "schedule", icon: CalendarClock, title: t("configure.cards.schedule.title", { brand: t("brand.name") }), blurb: t("configure.cards.schedule.blurb") },
+  ];
+
   const current = CARDS.find((c) => c.id === section) ?? null;
 
   const open = (id: SectionId) => navigate(current?.id === id ? "/configure" : `/configure/${id}`);
 
   const stat = (id: SectionId): { text: string; bold: string; attention: boolean } => {
-    if (id === "business") return { bold: TENANT.name, text: `· Sheet ${state.sheet.verified ? "connected" : "not verified"}`, attention: !state.sheet.verified };
+    if (id === "business") return { bold: TENANT.name, text: state.sheet.verified ? t("configure.stat.sheetConnected") : t("configure.stat.sheetNotVerified"), attention: !state.sheet.verified };
     if (id === "offers") {
       const incomplete = state.offers.some((o) => o.missing.length > 0);
-      return { bold: `${state.offers.length} products`, text: `· ${state.markets.join(", ") || "no market yet"}`, attention: incomplete };
+      return {
+        bold: t("configure.stat.productsCount", { n: state.offers.length }),
+        text: state.markets.length > 0 ? t("configure.stat.marketsList", { markets: state.markets.join(", ") }) : t("configure.stat.noMarketYet"),
+        attention: incomplete,
+      };
     }
-    if (id === "followup") return { bold: `${state.followUp.steps.length} reminders`, text: "· then stops", attention: false };
-    return { bold: `${state.schedule.days.length} days`, text: `a week · report at ${state.ceoReport.time}`, attention: state.degraded };
+    if (id === "followup") return { bold: t("configure.stat.remindersCount", { n: state.followUp.steps.length }), text: t("configure.stat.thenStops"), attention: false };
+    return { bold: t("configure.stat.daysCount", { n: state.schedule.days.length }), text: t("configure.stat.aWeekReportAt", { time: state.ceoReport.time }), attention: state.degraded };
   };
 
   return (
@@ -47,7 +52,7 @@ export function Configure() {
       <div className="page-head">
         <div>
           <h2 className="t-h1">{t("configure.title")}</h2>
-          <p className="c-2">Changes are saved as you type. Publish makes them official.</p>
+          <p className="c-2">{t("configure.savedAsYouType")}</p>
         </div>
       </div>
 
@@ -97,7 +102,7 @@ export function Configure() {
                   </h2>
                   <p className="c-2 t-body-sm">{current.blurb}</p>
                 </div>
-                <IconButton label="Close" onClick={() => navigate("/configure")}>
+                <IconButton label={t("common.close")} onClick={() => navigate("/configure")}>
                   <X size={20} aria-hidden />
                 </IconButton>
               </header>

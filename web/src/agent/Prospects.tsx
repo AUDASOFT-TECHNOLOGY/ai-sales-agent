@@ -70,7 +70,7 @@ export function ProspectLedger({ prospects, selectedId, onSelect }: { prospects:
           <tr>
             <th scope="col">{t("prospects.col.name")}</th>
             <th scope="col">{t("prospects.col.status")}</th>
-            <th scope="col">Product</th>
+            <th scope="col">{t("prospects.col.product")}</th>
             <th scope="col">{t("prospects.col.next")}</th>
           </tr>
         </thead>
@@ -95,7 +95,7 @@ export function ProspectLedger({ prospects, selectedId, onSelect }: { prospects:
                 ) : null}
               </td>
               <td className="plist__product">
-                <span className="c-3 t-body-sm">Product</span>
+                <span className="c-3 t-body-sm">{t("prospects.col.product")}</span>
                 <span>{p.interest}</span>
               </td>
               <td className="plist__next">
@@ -112,8 +112,9 @@ export function ProspectLedger({ prospects, selectedId, onSelect }: { prospects:
 
 /** Where the prospect stands on the sales path: done solid, current lit, next ghosted. */
 export function PathTrack({ step }: { step: number }) {
+  const { t } = useI18n();
   return (
-    <ol className="path-track" aria-label="Sales path">
+    <ol className="path-track" aria-label={t("prospects.path")}>
       {PATH_STEPS.map((label, i) => (
         <li key={label} data-state={i < step ? "done" : i === step ? "current" : "next"} aria-current={i === step ? "step" : undefined}>
           <span className="path-track__dot">{i < step ? <Check size={11} strokeWidth={3} aria-hidden /> : null}</span>
@@ -163,13 +164,13 @@ function DossierBody({ prospect, onClose }: { prospect: Prospect; onClose?: () =
         <p className="recommend-box">
           <Sparkles size={20} aria-hidden />
           <span>
-            <strong>REVANSA recommends: </strong>
+            <strong>{t("prospects.recommends", { brand: t("brand.name") })}</strong>
             {prospect.recommendation}
           </span>
         </p>
       ) : null}
       <LinkButton variant="primary" size="lg" leading={<MessageSquareText size={18} aria-hidden />} to={`/conversations/${prospect.id}`}>
-        {t("action.open")} conversation
+        {t("prospects.openConversation")}
       </LinkButton>
       <div className="disclosure-group">
         <Disclosure title={t("prospects.knows")} defaultOpen>
@@ -185,7 +186,7 @@ function DossierBody({ prospect, onClose }: { prospect: Prospect; onClose?: () =
                 variant="secondary"
                 onClick={() => {
                   dispatch({ type: "reopenProspect", id: prospect.id });
-                  toast({ tone: "info", title: `${prospect.name.split(" ")[0]} reopened`, body: "Recorded as a manual change with your name." });
+                  toast({ tone: "info", title: t("prospects.toast.reopened", { name: prospect.name.split(" ")[0] }), body: t("prospects.toast.manualChange") });
                 }}
               >
                 {t("prospects.reopen")}
@@ -200,7 +201,7 @@ function DossierBody({ prospect, onClose }: { prospect: Prospect; onClose?: () =
                   value={prospect.stage}
                   onChange={(e) => {
                     dispatch({ type: "setProspectStage", id: prospect.id, stage: e.target.value });
-                    toast({ tone: "info", title: `${prospect.name.split(" ")[0]} moved`, body: "Recorded as a manual change with your name." });
+                    toast({ tone: "info", title: t("prospects.toast.moved", { name: prospect.name.split(" ")[0] }), body: t("prospects.toast.manualChange") });
                   }}
                 >
                   {STAGES.map((s) => (
@@ -221,7 +222,7 @@ function DossierBody({ prospect, onClose }: { prospect: Prospect; onClose?: () =
                   variant="secondary"
                   onClick={() => {
                     dispatch({ type: "markProspectLost", id: prospect.id, reason: pickedReason });
-                    toast({ tone: "attention", title: `${prospect.name.split(" ")[0]} marked as lost`, body: "Recorded as a manual change with your name." });
+                    toast({ tone: "attention", title: t("prospects.toast.markedLost", { name: prospect.name.split(" ")[0] }), body: t("prospects.toast.manualChange") });
                   }}
                 >
                   {t("prospects.markLost")}

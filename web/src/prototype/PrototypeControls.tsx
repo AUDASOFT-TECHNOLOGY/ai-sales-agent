@@ -18,24 +18,24 @@ export function PrototypeControls() {
     <div className="proto">
       <PopoverCard
         side="bottom"
-        label="Prototype controls"
+        label={t("proto.controls")}
         trigger={
-          <button type="button" className="proto__btn glass" data-level="2" aria-label="Prototype controls">
+          <button type="button" className="proto__btn glass" data-level="2" aria-label={t("proto.controls")}>
             <FlaskConical size={18} aria-hidden />
-            <span className="proto__label">Prototype</span>
+            <span className="proto__label">{t("proto.label")}</span>
           </button>
         }
       >
         <div className="stack">
-          <p className="t-label">Prototype controls</p>
+          <p className="t-label">{t("proto.controls")}</p>
           <p className="c-3 t-body-sm">{t("notice.sample.long")}</p>
           <label className="t-label c-2" htmlFor="proto-state">
-            Agent state
+            {t("proto.agentState")}
           </label>
           <select id="proto-state" className="input well proto__select" value={state.demoAgentState} onChange={(e) => dispatch({ type: "demoState", value: e.target.value as AgentStateKey | "auto" })}>
             {STATES.map((s) => (
               <option key={s} value={s}>
-                {s === "auto" ? "Automatic (from the data)" : s}
+                {s === "auto" ? t("proto.automatic") : s}
               </option>
             ))}
           </select>
@@ -53,15 +53,15 @@ export function PrototypeControls() {
           />
           <div className="row row--wrap">
             <Button size="sm" variant="secondary" onClick={() => { dispatch({ type: "skipToLive" }); navigate("/dashboard"); }}>
-              Jump to the live demo
+              {t("proto.jumpToLiveDemo")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => { dispatch({ type: "restart" }); navigate("/setup"); }}>
-              Restart onboarding
+              {t("proto.restartOnboarding")}
             </Button>
           </div>
           <div className="row">
-            <Switch label="Simulate a failing connection" checked={state.degraded} onChange={(v) => dispatch({ type: "degraded", value: v })} />
-            <span className="t-body-sm">Simulate a failing connection</span>
+            <Switch label={t("proto.simulateFailingConnection")} checked={state.degraded} onChange={(v) => dispatch({ type: "degraded", value: v })} />
+            <span className="t-body-sm">{t("proto.simulateFailingConnection")}</span>
           </div>
         </div>
       </PopoverCard>

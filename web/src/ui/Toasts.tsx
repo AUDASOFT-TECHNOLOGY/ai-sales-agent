@@ -67,8 +67,9 @@ function ToastItem({ toast }: { toast: Toast }) {
 
 export function ToastViewport() {
   const { state } = useStore();
+  const { t } = useI18n();
   return (
-    <ul className="toast-viewport" aria-label="Notifications">
+    <ul className="toast-viewport" aria-label={t("toasts.notifications")}>
       <AnimatePresence initial={false}>
         {state.toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} />

@@ -47,10 +47,13 @@ export function Prospects() {
   // the Dashboard's period-filtered KPIs), so say so plainly when no filter narrows it.
   const total = state.prospects.length;
   const filterBits: string[] = [];
-  if (filter === "needs") filterBits.push("need you");
-  if (product !== "all") filterBits.push(`are interested in ${product}`);
-  if (q.trim()) filterBits.push(`match "${q.trim()}"`);
-  const countLabel = filterBits.length > 0 ? `${n(prospects.length)} of ${n(total)} ${filterBits.join(" and ")}` : t("prospects.count", { n: n(total) });
+  if (filter === "needs") filterBits.push(t("prospects.filter.needYou"));
+  if (product !== "all") filterBits.push(t("prospects.filter.interestedIn", { product }));
+  if (q.trim()) filterBits.push(t("prospects.filter.matchQuery", { q: q.trim() }));
+  const countLabel =
+    filterBits.length > 0
+      ? t("prospects.countWithFilters", { shown: n(prospects.length), total: n(total), filters: filterBits.join(t("prospects.and")) })
+      : t("prospects.count", { n: n(total) });
 
   return (
     <div className="page page--focus prospects">
@@ -66,7 +69,7 @@ export function Prospects() {
           </label>
           <Segmented
             layoutId="seg-filter"
-            label="Filter"
+            label={t("common.filter")}
             size="sm"
             value={filter}
             onChange={(v) => update({ filter: v })}
@@ -76,10 +79,10 @@ export function Prospects() {
             ]}
           />
           <label className="sr-only" htmlFor="prospects-product">
-            Catalogue product
+            {t("prospects.catalogueProduct")}
           </label>
           <select id="prospects-product" className="input well prospects__product-select" value={product} onChange={(e) => update({ product: e.target.value })}>
-            <option value="all">All products</option>
+            <option value="all">{t("prospects.allProducts")}</option>
             {products.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -88,7 +91,7 @@ export function Prospects() {
           </select>
           <Segmented
             layoutId="seg-view"
-            label="View"
+            label={t("common.view")}
             size="sm"
             value={view}
             onChange={(v) => update({ view: v })}
@@ -108,9 +111,9 @@ export function Prospects() {
           )}
           {prospects.length === 0 ? (
             <div className="empty">
-              <h3 className="t-h3">No prospects match these filters.</h3>
+              <h3 className="t-h3">{t("prospects.empty.title")}</h3>
               <button type="button" className="link-btn" onClick={() => update({ q: null, filter: null, product: null })}>
-                Clear filters
+                {t("prospects.empty.clear")}
               </button>
             </div>
           ) : null}

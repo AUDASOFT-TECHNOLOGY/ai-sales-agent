@@ -15,13 +15,13 @@ import { PaymentProfileEditor } from "./configure/Payment";
 import { Glass } from "../ui/Glass";
 import { Wordmark } from "../ui/Brand";
 
-const GATE_INTRO: Record<GateId, { voice: string; missing?: string }> = {
-  sheet: { voice: "Show me where your prospects live. I only read it, and I never write anywhere you didn't agree to." },
-  offer: { voice: "Teach me what you sell. Start with a name and one sentence." },
-  payment: { voice: "Tell me how people pay you. I'll give these details exactly as you write them, and never rewrite a digit." },
-  voice: { voice: "Tell me which languages I may use and where to start. I adapt to each prospect." },
-  path: { voice: "This is how I guide each prospect. You can take over a conversation at any time." },
-  live: { voice: "Everything I need is here. One last step: ask your administrator to switch me on." },
+const GATE_INTRO_KEY: Record<GateId, MessageKey> = {
+  sheet: "runway.intro.sheet",
+  offer: "runway.intro.offer",
+  payment: "runway.intro.payment",
+  voice: "runway.intro.voice",
+  path: "runway.intro.path",
+  live: "runway.intro.live",
 };
 
 export function Runway() {
@@ -55,11 +55,11 @@ export function Runway() {
               <h3 className="t-h2">{t(`runway.gate.${current}` as MessageKey)}</h3>
               {state.gates[current] ? (
                 <span className="chip" data-tint="success">
-                  <Check size={14} aria-hidden /> Done
+                  <Check size={14} aria-hidden /> {t("runway.chipDone")}
                 </span>
               ) : null}
             </div>
-            <p className="voice voice-m voice-block">{GATE_INTRO[current].voice}</p>
+            <p className="voice voice-m voice-block">{t(GATE_INTRO_KEY[current])}</p>
             <GateForm gate={current} onDone={() => finish(current)} />
           </Glass>
         </motion.div>
@@ -82,7 +82,7 @@ export function Runway() {
             navigate("/dashboard");
           }}
         >
-          Skip to the live demo
+          {t("runway.skipDemo")}
         </button>
       </div>
       <span className="sr-only" aria-live="polite">
@@ -124,13 +124,17 @@ function GateForm({ gate, onDone }: { gate: GateId; onDone: () => void }) {
   if (gate === "sheet")
     return (
       <Row>
-        <TextInput label="Sheet link" value={state.sheet.url} onChange={(e) => dispatch({ type: "setSheetUrl", url: e.target.value })} />
+        <TextInput label={t("field.sheetLink")} value={state.sheet.url} onChange={(e) => dispatch({ type: "setSheetUrl", url: e.target.value })} />
         <div className="row row--wrap">
           <Button variant="secondary" onClick={test} loading={running}>
-            Test connection
+            {t("action.testConnection")}
           </Button>
           <ol className="test-steps" aria-live="polite">
-            {["We can open your Sheet", "It has the columns REVANSA needs", "The information lines up"].map((s, i) => (
+            {([
+              t("runway.sheetTest.open"),
+              t("runway.sheetTest.columns", { brand: t("brand.name") }),
+              t("runway.sheetTest.linesUp"),
+            ]).map((s, i) => (
               <li key={s} data-state={tested > i ? "ok" : running && tested === i ? "run" : "idle"}>
                 {tested > i ? <Check size={15} aria-hidden /> : running && tested === i ? <Loader2 size={15} className="btn__spin" aria-hidden /> : <span className="test-steps__dot" aria-hidden />}
                 <span className="t-body-sm">{s}</span>
@@ -149,9 +153,9 @@ function GateForm({ gate, onDone }: { gate: GateId; onDone: () => void }) {
   if (gate === "offer")
     return (
       <Row>
-        <TextInput label="Offer name" value={name} onChange={(e) => setName(e.target.value)} />
-        <TextInput label="One sentence that says who it is for" value={summary} onChange={(e) => setSummary(e.target.value)} />
-        <VerbatimField label="Price" value={price} onChange={setPrice} previewPrefix={`${name || "This offer"} costs `} previewSuffix="." />
+        <TextInput label={t("field.offerName")} value={name} onChange={(e) => setName(e.target.value)} />
+        <TextInput label={t("field.offerSummary")} value={summary} onChange={(e) => setSummary(e.target.value)} />
+        <VerbatimField label={t("field.price")} value={price} onChange={setPrice} previewPrefix={t("runway.offerCosts", { name: name || t("runway.thisOffer") })} previewSuffix="." />
         <div className="gate-form__foot">
           <Button
             variant="primary"
@@ -159,7 +163,7 @@ function GateForm({ gate, onDone }: { gate: GateId; onDone: () => void }) {
             onClick={() => {
               const offer = createOffer({ name, summary, price, status: "active", markets: state.markets.slice(0, 1) });
               dispatch({ type: "addOffer", offer });
-              toast({ tone: "success", title: `${name} added`, body: "It stays in your draft until you publish." });
+              toast({ tone: "success", title: t("runway.toast.offerAdded", { name }), body: t("runway.toast.draftUntilPublish") });
               onDone();
             }}
           >
@@ -209,8 +213,8 @@ function GateForm({ gate, onDone }: { gate: GateId; onDone: () => void }) {
       <Row>
         <SalesPath />
         <div className="row switch-row">
-          <Switch label="Hand the conversation to me when a prospect asks for a person" checked={state.handoffEnabled} onChange={(v) => dispatch({ type: "setHandoff", value: v })} />
-          <span>Pass the conversation to me when a prospect asks for a person</span>
+          <Switch label={t("runway.handoffLabel")} checked={state.handoffEnabled} onChange={(v) => dispatch({ type: "setHandoff", value: v })} />
+          <span>{t("runway.handoffLabel")}</span>
         </div>
         <div className="gate-form__foot">
           <Button variant="primary" onClick={onDone}>
@@ -231,21 +235,29 @@ function GateForm({ gate, onDone }: { gate: GateId; onDone: () => void }) {
             leading={<Rocket size={18} aria-hidden />}
             onClick={() => {
               dispatch({ type: "requestActivation" });
-              toast({ tone: "info", title: "Activation requested", body: "Your administrator will switch the agent on." });
+              toast({ tone: "info", title: t("runway.toast.activationRequested.title"), body: t("runway.toast.activationRequested.body") });
             }}
           >
-            Request activation
+            {t("runway.requestActivation")}
           </Button>
         </div>
       ) : !state.live ? (
         <div className="gate-form__foot">
-          <p className="c-attention t-body-sm">Waiting for activation.</p>
-          <Button variant="agent" onClick={() => { dispatch({ type: "goLive" }); toast({ tone: "success", title: "REVANSA is live", body: `Running in "${t(`mode.${mode}` as MessageKey)}" mode.` }); }}>
-            Prototype: simulate the administrator's approval
+          <p className="c-attention t-body-sm">{t("runway.waitingActivation")}</p>
+          <Button
+            variant="agent"
+            onClick={() => {
+              dispatch({ type: "goLive" });
+              toast({ tone: "success", title: t("runway.toast.live", { brand: t("brand.name") }), body: t("runway.toast.runningInMode", { mode: t(`mode.${mode}` as MessageKey) }) });
+            }}
+          >
+            {t("runway.simulateApproval")}
           </Button>
         </div>
       ) : (
-        <p className="c-success t-body-sm">{t("runway.done")}. The agent is live.</p>
+        <p className="c-success t-body-sm">
+          {t("runway.done")}. {t("runway.agentLive")}
+        </p>
       )}
     </Row>
   );

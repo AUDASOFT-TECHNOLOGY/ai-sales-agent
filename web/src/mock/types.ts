@@ -1,6 +1,8 @@
 /** View-model types for the prototype. These are NOT the API contract and NOT the Core contracts:
  *  they exist so the visual components have something to render. Real adapters replace `src/mock/`. */
 
+import type { MessageKey } from "../i18n";
+
 export type AgentStateKey =
   | "idle"
   | "working"
@@ -165,7 +167,7 @@ export interface Offer {
   markets: string[];
   assets: OfferAsset[];
   completeness: number;
-  missing: string[];
+  missing: MessageKey[];
 }
 
 /** How a client gets paid in one target market. Payment varies by country (different bank

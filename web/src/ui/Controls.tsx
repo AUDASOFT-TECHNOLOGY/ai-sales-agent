@@ -162,6 +162,7 @@ export function Textarea({ label, helper, error, className, ...rest }: TextareaP
  *  display rather than a fake-editable input — no cursor, no focus ring, no typing affordance. */
 export function LockedField({ label, value, helper }: { label: string; value: string; helper?: string }) {
   const id = useId();
+  const { t } = useI18n();
   return (
     <FieldShell
       id={id}
@@ -170,7 +171,7 @@ export function LockedField({ label, value, helper }: { label: string; value: st
       badge={
         <span className="locked-badge">
           <Lock size={12} aria-hidden />
-          Locked
+          {t("controls.locked")}
         </span>
       }
     >

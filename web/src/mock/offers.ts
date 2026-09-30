@@ -1,14 +1,15 @@
+import type { MessageKey } from "../i18n";
 import type { Offer } from "./types";
 
 /** What still keeps an offer from being ready to sell, recomputed every time it changes (never
  *  left stale). A 4th check (sales material) exists because a benefit, a price and a market are
  *  not enough for the agent to convince anyone — it also needs something to point to. */
-export function deriveReadiness(offer: Offer): { completeness: number; missing: string[] } {
-  const missing: string[] = [];
-  if (!offer.summary || offer.summary.trim().length < 8) missing.push("A benefit to lead with");
-  if (offer.price === "Not set") missing.push("A price, or 'On request'");
-  if (offer.markets.length === 0) missing.push("A market it sells in");
-  if (offer.assets.length === 0) missing.push("A document, photo or testimonial to help REVANSA convince a prospect");
+export function deriveReadiness(offer: Offer): { completeness: number; missing: MessageKey[] } {
+  const missing: MessageKey[] = [];
+  if (!offer.summary || offer.summary.trim().length < 8) missing.push("offers.missing.benefit");
+  if (offer.price === "Not set") missing.push("offers.missing.price");
+  if (offer.markets.length === 0) missing.push("offers.missing.market");
+  if (offer.assets.length === 0) missing.push("offers.missing.material");
   const total = 4;
   return { completeness: Math.max(0.15, (total - missing.length) / total), missing };
 }

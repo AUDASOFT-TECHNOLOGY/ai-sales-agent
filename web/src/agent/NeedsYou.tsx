@@ -1,22 +1,23 @@
 import { motion } from "motion/react";
 import { ArrowRight, Check, CreditCard, HandHelping, Pencil, PenLine, RotateCcw, X } from "lucide-react";
-import { useI18n } from "../i18n";
+import { useI18n, type MessageKey } from "../i18n";
 import type { NeedItem, Prospect } from "../mock/types";
 import { Bead } from "../ui/Bead";
 import { Button } from "../ui/Button";
 import type { Tint } from "../ui/Glass";
 import { Modal } from "../ui/Overlays";
 
-export const NEED_KIND: Record<NeedItem["kind"], { tint: Tint; icon: typeof PenLine; label: string; cta: string }> = {
-  draft: { tint: "attention", icon: PenLine, label: "Message to approve", cta: "Review" },
-  handoff: { tint: "attention", icon: HandHelping, label: "Conversation for you", cta: "Review" },
-  payment: { tint: "attention", icon: CreditCard, label: "Payment to confirm", cta: "Review" },
-  failed: { tint: "danger", icon: RotateCcw, label: "Failed action", cta: "Review" },
+export const NEED_KIND: Record<NeedItem["kind"], { tint: Tint; icon: typeof PenLine; labelKey: MessageKey; ctaKey: MessageKey }> = {
+  draft: { tint: "attention", icon: PenLine, labelKey: "needs.kind.draft", ctaKey: "action.review" },
+  handoff: { tint: "attention", icon: HandHelping, labelKey: "needs.kind.handoff", ctaKey: "action.review" },
+  payment: { tint: "attention", icon: CreditCard, labelKey: "needs.kind.payment", ctaKey: "action.review" },
+  failed: { tint: "danger", icon: RotateCcw, labelKey: "needs.kind.failed", ctaKey: "action.review" },
 };
 
 /** One decision that belongs to a person, as a calm row: who, why, one action (doc 19.5).
  *  Everything else (the draft, the secondary actions) opens on demand in NeedDetailDialog. */
 export function NeedRow({ item, prospect, onOpen }: { item: NeedItem; prospect: Prospect; onOpen: () => void }) {
+  const { t } = useI18n();
   const cfg = NEED_KIND[item.kind];
   const Icon = cfg.icon;
   return (
@@ -32,7 +33,7 @@ export function NeedRow({ item, prospect, onOpen }: { item: NeedItem; prospect: 
       <Bead initials={prospect.initials} attention="waiting" size={48} />
       <div className="need-row__text">
         <p className="need-row__kind t-label">
-          <Icon size={14} aria-hidden /> {cfg.label}
+          <Icon size={14} aria-hidden /> {t(cfg.labelKey)}
         </p>
         <p className="t-h3">{prospect.name}</p>
         <p className="voice voice-s">{item.reason}</p>
@@ -42,7 +43,7 @@ export function NeedRow({ item, prospect, onOpen }: { item: NeedItem; prospect: 
         </p>
       </div>
       <Button variant="primary" onClick={onOpen} trailing={<ArrowRight size={16} className="mirror" aria-hidden />}>
-        {cfg.cta}
+        {t(cfg.ctaKey)}
       </Button>
     </motion.li>
   );
@@ -67,7 +68,7 @@ export function NeedDetailDialog({ item, prospect, onClose, onApprove, onDecline
       open={item !== null && prospect !== undefined}
       onOpenChange={(o) => !o && onClose()}
       title={prospect?.name ?? ""}
-      description={cfg ? `${cfg.label} · ${item?.waiting}` : undefined}
+      description={cfg ? `${t(cfg.labelKey)} · ${item?.waiting}` : undefined}
       tint="attention"
       footer={
         item?.kind === "draft" ? (
@@ -101,7 +102,7 @@ export function NeedDetailDialog({ item, prospect, onClose, onApprove, onDecline
           <p className="voice voice-m voice-block">{item.reason}</p>
           {item.factors && item.factors.length > 0 ? (
             <div className="stack">
-              <p className="t-label c-3">Why now</p>
+              <p className="t-label c-3">{t("needs.whyNow")}</p>
               <ul className="why-list">
                 {item.factors.map((f) => (
                   <li key={f}>{f}</li>
@@ -111,11 +112,11 @@ export function NeedDetailDialog({ item, prospect, onClose, onApprove, onDecline
           ) : null}
           {item.preview ? (
             <div className="stack">
-              <p className="t-label c-3">Message I wrote</p>
+              <p className="t-label c-3">{t("needs.messageIWrote")}</p>
               <p className="need-preview">{item.preview}</p>
             </div>
           ) : null}
-          {prospect ? <p className="c-2">{prospect.place} · last message {prospect.last}</p> : null}
+          {prospect ? <p className="c-2">{prospect.place} · {t("needs.lastMessage", { last: prospect.last })}</p> : null}
         </>
       ) : null}
     </Modal>
