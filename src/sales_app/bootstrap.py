@@ -14,7 +14,7 @@ from sales_app.admin_auth import (
     FileAdminSessionStore,
     FileAdminUserStore,
 )
-from sales_app.config import clamp_mode, load_client_configs
+from sales_app.config import build_llm_registry, clamp_mode, load_client_configs
 from sales_app.config_store import ConfigStore, FileConfigStore
 from sales_app.errors import ConfigurationError
 from sales_app.registry import ClientRegistry
@@ -35,6 +35,10 @@ class Application:
     scheduler: Scheduler
     parsers: Mapping[str, WebhookParser]  # channel provider name -> webhook parser
     clock: Clock
+    # Non-sensitive projection of `IntegrationBuilders.llms`: provider names only (no callables, no
+    # secrets), so a future Admin can list what is actually wired without holding the builders
+    # table itself. See sales_app.wiring.integrations.IntegrationBuilders.
+    llm_providers: tuple[str, ...] = ()
 
     def close(self) -> None:
         self.scheduler.shutdown()
@@ -86,7 +90,11 @@ def build_application(
         session_ttl=timedelta(hours=settings.admin_session_ttl_hours),
     )
     loaded = load_client_configs(
-        settings.clients_dir, env=environment, mode_ceiling=ceiling, store=store
+        settings.clients_dir,
+        env=environment,
+        mode_ceiling=ceiling,
+        store=store,
+        llm_registry=build_llm_registry(settings.allowed_llm_models),
     )
     errors = list(loaded.errors)
     if require_clients and not loaded.clients and not errors:
@@ -120,6 +128,7 @@ def build_application(
         scheduler=Scheduler(registry, clock, executor=executor),
         parsers=parsers,
         clock=clock,
+        llm_providers=tuple(sorted(builders.llms)),
     )
 
 

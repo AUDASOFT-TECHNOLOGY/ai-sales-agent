@@ -243,6 +243,7 @@ class TestSettings:
         )  # autonomy needs a deployment decision
         assert settings.host == "127.0.0.1" and settings.tick_seconds == 30
         assert settings.whatsapp_verify_token is None
+        assert settings.allowed_llm_models == {}  # unset: no restriction (see llm_registry)
 
     def test_read_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("SALES_AGENT_MODE_CEILING", "autonomous")
@@ -256,6 +257,13 @@ class TestSettings:
         monkeypatch.setenv("SALES_AGENT_MODE_CEILING", "yolo")
         with pytest.raises(ValidationError):
             Settings()
+
+    def test_allowed_llm_models_is_read_as_json_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv(
+            "SALES_AGENT_ALLOWED_LLM_MODELS", '{"openai": ["gpt-4o", "gpt-4o-mini"]}'
+        )
+        settings = Settings()
+        assert settings.allowed_llm_models == {"openai": ("gpt-4o", "gpt-4o-mini")}
 
 
 class TestLogging:

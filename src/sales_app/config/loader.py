@@ -11,6 +11,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from sales_app.config.brain_settings import prepare_brain_settings
+from sales_app.config.llm_registry import EMPTY_LLM_REGISTRY, LLMRegistry
 from sales_app.config.resolution import (
     CONFIG_FILENAME,
     check_document,
@@ -81,6 +82,7 @@ def load_client_configs(
     env: Mapping[str, str],
     mode_ceiling: ApprovalMode,
     store: ConfigStore | None = None,
+    llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
 ) -> LoadedConfig:
     if not clients_dir.is_dir():
         return LoadedConfig((), (), (f"clients directory not found: {clients_dir}",))
@@ -93,7 +95,7 @@ def load_client_configs(
     )
     for directory in directories:
         resolution = resolve_client_config(
-            directory, env=env, mode_ceiling=mode_ceiling, store=store
+            directory, env=env, mode_ceiling=mode_ceiling, store=store, llm_registry=llm_registry
         )
         errors.extend(resolution.errors)
         if resolution.disabled:
@@ -110,6 +112,7 @@ def resolve_client_config(
     env: Mapping[str, str],
     mode_ceiling: ApprovalMode,
     store: ConfigStore | None = None,
+    llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
 ) -> Resolution:
     """Build one client's immutable config from its `client.yaml` and, if a version was published,
     its stored settings. Pure and side-effect free: it never raises for bad configuration and never
@@ -172,6 +175,9 @@ def resolve_client_config(
     effective = clamp_mode(spec.mode, mode_ceiling)
     secrets, missing = _resolve_secrets(spec, effective, env)
     problems.extend(f"{name}: {message}" for message in missing)
+    llm_reason = llm_registry.check(spec.llm.provider, spec.llm.model)
+    if llm_reason is not None:
+        problems.append(f"{name}: {llm_reason}")
     if problems:
         return Resolution(errors=tuple(problems))
     config = ClientConfig(

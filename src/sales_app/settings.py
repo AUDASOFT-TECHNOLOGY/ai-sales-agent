@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # Highest mode any client may run in, whatever its client.yaml says. Autonomy needs an
     # explicit deployment decision: SALES_AGENT_MODE_CEILING=autonomous.
     mode_ceiling: ApprovalMode = ApprovalMode.APPROVAL
+    # Deployment allow-list for `llm.provider` / `llm.model` (see sales_app.config.llm_registry).
+    # Empty (default): no restriction, so today's clients and tests keep working unchanged.
+    # Set as JSON, e.g. SALES_AGENT_ALLOWED_LLM_MODELS='{"openai": ["gpt-4o"]}'.
+    allowed_llm_models: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     lock_file: Path = Path(".sales-agent.lock")
     host: str = "127.0.0.1"
     port: int = 8000

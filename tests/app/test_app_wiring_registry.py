@@ -234,6 +234,22 @@ class TestBootstrap:
             == "42"
         )
 
+    def test_exposes_the_registered_llm_providers(self, tmp_path):
+        """E.2: a non-sensitive projection of the builders table -- provider names only, no
+        callables, no secrets -- so a future Admin can read what is actually wired."""
+        application, _made, _ = build_test_application(tmp_path, "alpha")
+        assert application.llm_providers == ("openai",)  # from fake_builders()'s llms table
+
+    def test_the_deployment_llm_allow_list_is_enforced_at_startup(self, tmp_path):
+        """E.1 end to end: Settings.allowed_llm_models reaches resolve_client_config through
+        build_application, exactly like the mode ceiling does."""
+        write_client(tmp_path, "alpha")  # llm.model defaults to "test-model" (app_support)
+        builders, _ = fake_builders()
+        settings = make_settings(tmp_path, allowed_llm_models={"openai": ("some-other-model",)})
+        with pytest.raises(ConfigurationError) as raised:
+            build_application(settings, env=env_for("alpha"), builders=builders)
+        assert any("test-model" in e and "not allowed" in e for e in raised.value.errors)
+
     def test_describe_modes_reports_clamping(self, tmp_path):
         application, _, _ = build_test_application(
             tmp_path, "alpha", mode="autonomous", ceiling=ApprovalMode.APPROVAL

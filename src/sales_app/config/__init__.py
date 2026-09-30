@@ -1,5 +1,6 @@
 """Client configuration: schema, secrets, resolution and loading. Core objects are built elsewhere."""
 
+from sales_app.config.llm_registry import EMPTY_LLM_REGISTRY, LLMRegistry, build_llm_registry
 from sales_app.config.loader import (
     ClientConfig,
     LoadedConfig,
@@ -19,12 +20,15 @@ from sales_app.config.schema import ClientFile
 from sales_app.config.secrets import Secrets
 
 __all__ = [
+    "EMPTY_LLM_REGISTRY",
     "ClientConfig",
     "ClientFile",
+    "LLMRegistry",
     "LoadedConfig",
     "Resolution",
     "Secrets",
     "SettingsCheck",
+    "build_llm_registry",
     "clamp_mode",
     "extract_document",
     "import_document",

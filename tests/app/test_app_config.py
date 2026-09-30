@@ -6,7 +6,14 @@ import pytest
 import yaml
 from app_support import client_yaml, env_for, write_client
 
-from sales_app.config import ClientConfig, Secrets, clamp_mode, load_client_configs
+from sales_app.config import (
+    EMPTY_LLM_REGISTRY,
+    ClientConfig,
+    Secrets,
+    build_llm_registry,
+    clamp_mode,
+    load_client_configs,
+)
 from sales_core.approval import ApprovalMode
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -15,9 +22,12 @@ DRY = ApprovalMode.DRY_RUN
 AUTO = ApprovalMode.AUTONOMOUS
 
 
-def load(root, *client_ids, ceiling=AUTO, env=None):
+def load(root, *client_ids, ceiling=AUTO, env=None, llm_registry=EMPTY_LLM_REGISTRY):
     return load_client_configs(
-        root, env=env if env is not None else env_for(*client_ids), mode_ceiling=ceiling
+        root,
+        env=env if env is not None else env_for(*client_ids),
+        mode_ceiling=ceiling,
+        llm_registry=llm_registry,
     )
 
 
@@ -254,6 +264,51 @@ class TestModeCeiling:
         write_client(tmp_path, "alpha", mode="autonomous")
         (config,) = load(tmp_path, "alpha", ceiling=AUTO).clients
         assert config.effective_mode is AUTO and not config.mode_clamped
+
+
+class TestLLMAllowList:
+    """The deployment's `llm.provider`/`llm.model` allow-list, enforced here exactly like the
+    mode ceiling above: in `resolve_client_config`, never in `ClientFile` itself."""
+
+    def test_with_no_registry_configured_any_provider_and_model_load_as_before(self, tmp_path):
+        write_client(tmp_path, "alpha", llm={"model": "whatever-model"})
+        loaded = load(tmp_path, "alpha")  # default llm_registry: EMPTY_LLM_REGISTRY
+        assert loaded.errors == ()
+        assert loaded.clients[0].spec.llm.model == "whatever-model"
+
+    def test_an_allowed_provider_and_model_loads_normally(self, tmp_path):
+        write_client(tmp_path, "alpha", llm={"model": "gpt-4o"})
+        registry = build_llm_registry({"openai": ["gpt-4o"]})
+        loaded = load(tmp_path, "alpha", llm_registry=registry)
+        assert loaded.errors == ()
+        assert loaded.clients[0].spec.llm.model == "gpt-4o"
+
+    def test_a_provider_outside_the_allow_list_is_refused_explicitly(self, tmp_path):
+        write_client(tmp_path, "alpha", llm={"provider": "meta", "model": "muse-spark"})
+        registry = build_llm_registry({"openai": ["gpt-4o"]})
+        loaded = load(tmp_path, "alpha", llm_registry=registry)
+        assert loaded.clients == ()
+        assert any(
+            "meta" in e and "not on the deployment's allowed list" in e for e in loaded.errors
+        )
+
+    def test_a_model_not_allowed_for_its_provider_is_refused_explicitly(self, tmp_path):
+        write_client(tmp_path, "alpha", llm={"model": "gpt-3.5-turbo"})
+        registry = build_llm_registry({"openai": ["gpt-4o"]})
+        loaded = load(tmp_path, "alpha", llm_registry=registry)
+        assert loaded.clients == ()
+        assert any("gpt-3.5-turbo" in e and "openai" in e for e in loaded.errors)
+
+    def test_the_error_is_collected_alongside_every_other_problem(self, tmp_path):
+        """Like every other post-schema check in resolve_client_config (missing secrets, the
+        brain's own settings): nothing raises, everything is collected, so one run reports every
+        problem for this client at once -- here, together with a missing secret."""
+        write_client(tmp_path, "alpha", llm={"model": "gpt-3.5-turbo"})
+        registry = build_llm_registry({"openai": ["gpt-4o"]})
+        loaded = load(tmp_path, "alpha", llm_registry=registry, env={})
+        assert loaded.clients == ()
+        joined = "\n".join(loaded.errors)
+        assert "gpt-3.5-turbo" in joined and "environment variable" in joined
 
 
 class TestCrossClientIsolation:
