@@ -71,14 +71,18 @@ class TestCreate:
     def test_duplicate_username_is_rejected(self, tmp_path, monkeypatch, capsys):
         fake_getpass(monkeypatch, [GOOD_PASSWORD, GOOD_PASSWORD])
         s = settings(tmp_path, clients=["alpha"])
-        run_admin(s, parse("create", "--username", "alice", "--role", "editor", "--client", "alpha"))
+        run_admin(
+            s, parse("create", "--username", "alice", "--role", "editor", "--client", "alpha")
+        )
         code = run_admin(
             s, parse("create", "--username", "Alice", "--role", "viewer", "--client", "alpha")
         )
         assert code == EXIT_INVALID
         assert "already exists" in capsys.readouterr().err
 
-    def test_scoping_to_an_unknown_client_warns_but_does_not_fail(self, tmp_path, monkeypatch, capsys):
+    def test_scoping_to_an_unknown_client_warns_but_does_not_fail(
+        self, tmp_path, monkeypatch, capsys
+    ):
         fake_getpass(monkeypatch, [GOOD_PASSWORD, GOOD_PASSWORD])
         s = settings(tmp_path)  # no clients on disk at all
         code = run_admin(
@@ -166,15 +170,24 @@ class TestSetRole:
         token = new_token()
         session_store.create(
             AdminSession(
-                token_hash=hash_token(token), admin_id=user.id, created_at=NOW,
+                token_hash=hash_token(token),
+                admin_id=user.id,
+                created_at=NOW,
                 expires_at=NOW + timedelta(hours=1),
             )
         )
         code = run_admin(
             s,
             parse(
-                "set-role", "--username", "alice", "--role", "editor",
-                "--client", "alpha", "--client", "beta",
+                "set-role",
+                "--username",
+                "alice",
+                "--role",
+                "editor",
+                "--client",
+                "alpha",
+                "--client",
+                "beta",
             ),
         )
         assert code == EXIT_OK
@@ -196,7 +209,9 @@ class TestResetPassword:
         token = new_token()
         session_store.create(
             AdminSession(
-                token_hash=hash_token(token), admin_id=old_user.id, created_at=NOW,
+                token_hash=hash_token(token),
+                admin_id=old_user.id,
+                created_at=NOW,
                 expires_at=NOW + timedelta(hours=1),
             )
         )

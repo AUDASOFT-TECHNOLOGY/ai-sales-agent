@@ -126,15 +126,16 @@ class TestSources:
         assert config.spec.mode is AUTO
         assert config.effective_mode is APPROVAL and config.mode_clamped
 
-    def test_secrets_still_come_from_the_environment_only(self, tmp_path):
+    def test_missing_credentials_leave_the_client_not_ready_not_invalid(self, tmp_path):
         write_wiring_only(tmp_path)
         store = InMemoryConfigStore()
         publish(store)
         missing = dict(env_for("alpha"))
         del missing["OPENAI_API_KEY"]
         result = resolve(tmp_path, store=store, env=missing)
-        assert result.config is None
-        assert any("OPENAI_API_KEY" in e for e in result.errors)
+        assert result.errors == ()
+        assert result.config is not None and not result.config.ready
+        assert result.config.missing_credentials == ("OpenAI API key is not configured",)
 
 
 class TestARunningConfigurationIsNeverDisturbed:

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from sales_core.approval import ApprovalMode
@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     # Admin Revansa accounts and sessions (see sales_app.admin_auth). Same reasoning as
     # config_dir: outside git, included in backups.
     admin_dir: Path = Path("admin")
+    # Client account profiles (see sales_app.client_profiles): login, hashed temporary password,
+    # logo. Outside git like admin_dir, and included in backups.
+    profiles_dir: Path = Path("profiles")
+    # Credentials kept server-side and encrypted (see sales_app.secret_store). Outside git, like
+    # admin_dir, and included in backups -- useless without the master key, which is kept apart.
+    secrets_dir: Path = Path("secrets")
+    # The master key that opens secrets_dir: SALES_AGENT_SECRETS_KEY, 32 random bytes in base64
+    # (`sales-agent secrets generate-key`). Never logged: SecretStr hides it from repr.
+    secrets_key: SecretStr | None = None
     admin_session_ttl_hours: float = Field(default=24.0, gt=0)
     # False only for local http development; a production deployment must keep this true so the
     # session cookie is never sent over a plain connection.

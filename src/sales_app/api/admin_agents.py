@@ -114,7 +114,9 @@ def _summary_from_raw(client_id: str, raw: dict) -> AgentSummaryResponse:
             factory=_str_or_none(brain.get("factory")),
             settings_version=_int_or_none(brain.get("settings_version")),
         ),
-        llm=AgentLLMResponse(provider=_str_or_none(llm.get("provider")), model=_str_or_none(llm.get("model"))),
+        llm=AgentLLMResponse(
+            provider=_str_or_none(llm.get("provider")), model=_str_or_none(llm.get("model"))
+        ),
     )
 
 
@@ -125,7 +127,9 @@ def _detail_from_config(config: ClientConfig) -> AgentDetailResponse:
         timezone=spec.timezone,
         daily_action_limit=spec.daily_action_limit,
         max_attempts=spec.max_attempts,
-        channels=AgentChannelsResponse(sheets=spec.sheets.provider, whatsapp=spec.whatsapp.provider),
+        channels=AgentChannelsResponse(
+            sheets=spec.sheets.provider, whatsapp=spec.whatsapp.provider
+        ),
         schedule=AgentScheduleResponse(
             daily_at=spec.schedule.daily_at,
             days=list(spec.schedule.days),
@@ -137,14 +141,19 @@ def _detail_from_config(config: ClientConfig) -> AgentDetailResponse:
 
 
 def _detail_from_raw(client_id: str, raw: dict) -> AgentDetailResponse:
-    sheets, whatsapp, schedule = _section(raw, "sheets"), _section(raw, "whatsapp"), _section(raw, "schedule")
+    sheets, whatsapp, schedule = (
+        _section(raw, "sheets"),
+        _section(raw, "whatsapp"),
+        _section(raw, "schedule"),
+    )
     return AgentDetailResponse(
         **_summary_from_raw(client_id, raw).model_dump(),
         timezone=_str_or_none(raw.get("timezone")),
         daily_action_limit=_int_or_none(raw.get("daily_action_limit")),
         max_attempts=_int_or_none(raw.get("max_attempts")),
         channels=AgentChannelsResponse(
-            sheets=_str_or_none(sheets.get("provider")), whatsapp=_str_or_none(whatsapp.get("provider"))
+            sheets=_str_or_none(sheets.get("provider")),
+            whatsapp=_str_or_none(whatsapp.get("provider")),
         ),
         schedule=AgentScheduleResponse(
             daily_at=_str_or_none(schedule.get("daily_at")),
@@ -165,9 +174,7 @@ def _disabled_client_ids(application: Application) -> list[str]:
 
 
 def _all_summaries(application: Application) -> list[AgentSummaryResponse]:
-    summaries = [
-        _summary_from_config(runtime.config) for runtime in application.registry.runtimes()
-    ]
+    summaries = [_summary_from_config(config) for config in application.registry.configs()]
     for client_id in _disabled_client_ids(application):
         raw, _problem = read_wiring(application.settings.clients_dir / client_id)
         summaries.append(_summary_from_raw(client_id, raw or {}))
@@ -176,9 +183,9 @@ def _all_summaries(application: Application) -> list[AgentSummaryResponse]:
 
 def _find_detail(application: Application, agent_id: str) -> AgentDetailResponse | None:
     # agent_id == client_id today (see module docstring).
-    runtime = application.registry.get(agent_id)
-    if runtime is not None:
-        return _detail_from_config(runtime.config)
+    config = application.registry.get_config(agent_id)
+    if config is not None:
+        return _detail_from_config(config)
     if not CLIENT_ID_PATTERN.match(agent_id):
         return None
     directory = application.settings.clients_dir / agent_id
@@ -196,7 +203,9 @@ def create_admin_agents_router(application: Application) -> APIRouter:
 
     @router.get("/agents", response_model=list[AgentSummaryResponse])
     def list_agents(admin: AdminUser = Depends(get_current_admin)) -> list[AgentSummaryResponse]:
-        return [summary for summary in _all_summaries(application) if admin.can_reach(summary.client_id)]
+        return [
+            summary for summary in _all_summaries(application) if admin.can_reach(summary.client_id)
+        ]
 
     @router.get("/agents/{agent_id}", response_model=AgentDetailResponse)
     def get_agent(

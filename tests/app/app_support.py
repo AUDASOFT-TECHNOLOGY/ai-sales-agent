@@ -133,9 +133,7 @@ def fake_builders(clock: FakeClock | None = None) -> tuple[IntegrationBuilders, 
         kind=Channel.WHATSAPP,
         build=channel,
         routing_key=lambda config: config.phone_number_id,
-        webhook_secret=lambda config: config.secrets.get_optional(
-            config.spec.whatsapp.app_secret_env
-        ),
+        webhook_secret=lambda config: config.secrets.get_optional("whatsapp.app_secret"),
         build_parser=lambda secrets: WhatsAppWebhookParser(
             app_secrets=secrets, verify_token=VERIFY_TOKEN
         ),

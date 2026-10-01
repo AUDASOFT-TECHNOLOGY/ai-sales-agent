@@ -23,9 +23,21 @@ from sales_app.config.resolution import (
     with_legacy_inbound,
 )
 from sales_app.config.schema import ClientFile
-from sales_app.config.secrets import Secrets
+from sales_app.config.secrets import (
+    OPENAI_API_KEY,
+    OPENAI_BASE_URL,
+    OPENAI_ORGANIZATION,
+    OPENAI_PROJECT,
+    SHEETS_CREDENTIALS_FILE,
+    WHATSAPP_ACCESS_TOKEN,
+    WHATSAPP_API_VERSION,
+    WHATSAPP_APP_SECRET,
+    WHATSAPP_PHONE_NUMBER_ID,
+    Secrets,
+)
 from sales_app.config_store import ConfigStore, ConfigStoreError
 from sales_app.config_store.models import CLIENT_ID_PATTERN
+from sales_app.secret_store import GLOBAL_SCOPE, SecretStore, SecretStoreError, client_scope
 from sales_core.approval import ApprovalMode
 
 # Safest first: a client's effective mode is the safer of its own and the deployment ceiling.
@@ -34,7 +46,11 @@ MODE_ORDER = (ApprovalMode.DRY_RUN, ApprovalMode.APPROVAL, ApprovalMode.AUTONOMO
 
 @dataclass(frozen=True, slots=True)
 class ClientConfig:
-    """A validated client: its file, the mode it will really run in, and its secrets."""
+    """A validated client: its file, the mode it will really run in, and its secrets.
+
+    `missing_credentials` lists what this client still needs before it can run (empty: ready). A
+    client with something missing is valid, just not ready: it is never built or run.
+    """
 
     spec: ClientFile
     directory: Path
@@ -42,6 +58,11 @@ class ClientConfig:
     secrets: Secrets
     config_version: int | None = None  # the stored version in force; None: settings from the file
     config_source: str = "file"  # "store" or "file"
+    missing_credentials: tuple[str, ...] = ()
+
+    @property
+    def ready(self) -> bool:
+        return not self.missing_credentials
 
     @property
     def client_id(self) -> str:
@@ -53,7 +74,7 @@ class ClientConfig:
 
     @property
     def phone_number_id(self) -> str | None:
-        return self.secrets.get_optional(self.spec.whatsapp.phone_number_id_env)
+        return self.secrets.get_optional(WHATSAPP_PHONE_NUMBER_ID)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +104,7 @@ def load_client_configs(
     mode_ceiling: ApprovalMode,
     store: ConfigStore | None = None,
     llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
+    secret_store: SecretStore | None = None,
 ) -> LoadedConfig:
     if not clients_dir.is_dir():
         return LoadedConfig((), (), (f"clients directory not found: {clients_dir}",))
@@ -95,7 +117,12 @@ def load_client_configs(
     )
     for directory in directories:
         resolution = resolve_client_config(
-            directory, env=env, mode_ceiling=mode_ceiling, store=store, llm_registry=llm_registry
+            directory,
+            env=env,
+            mode_ceiling=mode_ceiling,
+            store=store,
+            llm_registry=llm_registry,
+            secret_store=secret_store,
         )
         errors.extend(resolution.errors)
         if resolution.disabled:
@@ -113,10 +140,14 @@ def resolve_client_config(
     mode_ceiling: ApprovalMode,
     store: ConfigStore | None = None,
     llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
+    secret_store: SecretStore | None = None,
 ) -> Resolution:
     """Build one client's immutable config from its `client.yaml` and, if a version was published,
     its stored settings. Pure and side-effect free: it never raises for bad configuration and never
-    touches anything already running, so a caller can keep its current config when this fails."""
+    touches anything already running, so a caller can keep its current config when this fails.
+
+    Credentials that are not set do not make the configuration invalid: the client comes back with
+    `missing_credentials` filled in (not ready). Structural problems stay errors."""
     name = directory.name
     raw, problem = read_wiring(directory)
     if problem is not None or raw is None:
@@ -173,8 +204,11 @@ def resolve_client_config(
         )
 
     effective = clamp_mode(spec.mode, mode_ceiling)
-    secrets, missing = _resolve_secrets(spec, effective, env)
-    problems.extend(f"{name}: {message}" for message in missing)
+    try:
+        secrets, missing = _resolve_secrets(spec, effective, env, secret_store)
+    except SecretStoreError as error:  # the store itself is unusable: not a missing credential
+        problems.append(f"{name}: credential store: {error}")
+        return Resolution(errors=tuple(problems))
     llm_reason = llm_registry.check(spec.llm.provider, spec.llm.model)
     if llm_reason is not None:
         problems.append(f"{name}: {llm_reason}")
@@ -187,6 +221,7 @@ def resolve_client_config(
         secrets,
         config_version=version.version if version is not None else None,
         config_source="store" if version is not None else "file",
+        missing_credentials=tuple(missing),
     )
     return Resolution(config=config)
 
@@ -205,24 +240,60 @@ def _is_missing_setting(problem: Mapping[str, object]) -> bool:
 
 
 def _resolve_secrets(
-    spec: ClientFile, effective: ApprovalMode, env: Mapping[str, str]
+    spec: ClientFile,
+    effective: ApprovalMode,
+    env: Mapping[str, str],
+    secret_store: SecretStore | None,
 ) -> tuple[Secrets, list[str]]:
+    """Each credential from the store (the client's own scope, or Revansa's) and, failing that,
+    from the environment variable the configuration names. Returns what is still missing."""
     live = effective is not ApprovalMode.DRY_RUN  # a dry run never talks to WhatsApp
+    client = client_scope(spec.client_id)
+
+    def lookup(scope: str | None, key: str, variable: str | None) -> str | None:
+        if secret_store is not None and scope is not None:
+            stored = secret_store.get(scope, key)
+            if stored:
+                return stored
+        return (env.get(variable, "").strip() or None) if variable else None
+
+    whatsapp = spec.whatsapp
     wanted = [
-        ("sheets.credentials_env", spec.sheets.credentials_env, True),
-        ("llm.api_key_env", spec.llm.api_key_env, True),
-        ("whatsapp.token_env", spec.whatsapp.token_env, live),
-        ("whatsapp.app_secret_env", spec.whatsapp.app_secret_env, live),
-        ("whatsapp.phone_number_id_env", spec.whatsapp.phone_number_id_env, live),
+        (OPENAI_API_KEY, "OpenAI API key", GLOBAL_SCOPE, spec.llm.api_key_env, True),
+        (
+            SHEETS_CREDENTIALS_FILE,
+            "Google Sheets credentials file",
+            None,
+            spec.sheets.credentials_env,
+            True,
+        ),
+        (WHATSAPP_ACCESS_TOKEN, "WhatsApp access token", client, whatsapp.token_env, live),
+        (
+            WHATSAPP_PHONE_NUMBER_ID,
+            "WhatsApp phone number id",
+            client,
+            whatsapp.phone_number_id_env,
+            live,
+        ),
+        (WHATSAPP_APP_SECRET, "Meta app secret", GLOBAL_SCOPE, whatsapp.app_secret_env, live),
     ]
     values: dict[str, str] = {}
     missing: list[str] = []
-    for label, variable, required in wanted:
-        value = env.get(variable, "").strip()
+    for key, label, scope, variable, required in wanted:
+        value = lookup(scope, key, variable)
         if value:
-            values[variable] = value
+            values[key] = value
         elif required:
-            missing.append(f"environment variable {variable} ({label}) is not set")
+            missing.append(f"{label} is not configured")
+    # Not a secret: the platform-wide API version, else the one this client's file names.
+    stored_version = secret_store.get(GLOBAL_SCOPE, WHATSAPP_API_VERSION) if secret_store else None
+    values[WHATSAPP_API_VERSION] = stored_version or whatsapp.api_version
+    # Optional OpenAI account settings (not secrets): used only when the Admin has set them.
+    if secret_store is not None:
+        for optional in (OPENAI_ORGANIZATION, OPENAI_PROJECT, OPENAI_BASE_URL):
+            stored = secret_store.get(GLOBAL_SCOPE, optional)
+            if stored:
+                values[optional] = stored
     return Secrets(values), missing
 
 

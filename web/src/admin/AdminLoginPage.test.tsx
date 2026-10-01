@@ -7,7 +7,6 @@ import { AdminLoginPage } from "./AdminLoginPage";
 import { AdminRoute } from "./AdminRoute";
 import { AdminShell } from "./AdminShell";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
-import { AdminPlaceholderPage } from "./pages/AdminPlaceholderPage";
 
 /** A fetch stub that answers `/admin/v1/*` the way the real FastAPI router does (see
  *  src/sales_app/api/admin.py and tests/app/test_admin_api.py), without a network or a backend. */
@@ -35,6 +34,18 @@ function stubFetch(opts: {
       if (url.endsWith("/auth/logout")) {
         return jsonResponse(200, { status: "ok" });
       }
+      // The real Dashboard (rendered once login succeeds) aggregates these three endpoints; these
+      // tests exercise login/logout/routing, not the dashboard's own content, so an empty-but-valid
+      // deployment is enough to let it render without error.
+      if (url.endsWith("/clients")) {
+        return jsonResponse(200, []);
+      }
+      if (url.endsWith("/agents")) {
+        return jsonResponse(200, []);
+      }
+      if (url.endsWith("/settings/llm")) {
+        return jsonResponse(200, { read_only: true, restricted: false, providers: [] });
+      }
       throw new Error(`unexpected fetch ${url}`);
     }),
   );
@@ -49,6 +60,11 @@ function jsonResponse(status: number, body: unknown): Response {
 
 /** Mirrors the `/admin/*` route tree in App.tsx so these tests exercise the same nesting
  *  (AdminRoute guarding AdminShell, which lays out the nested section pages). */
+/** Stand-in for the section pages these tests do not exercise (they have their own test files). */
+function SectionStub({ title }: { title: string }) {
+  return <h2>{title}</h2>;
+}
+
 function renderApp(initialPath = "/admin/login") {
   render(
     <MemoryRouter initialEntries={[initialPath]}>
@@ -64,11 +80,8 @@ function renderApp(initialPath = "/admin/login") {
             }
           >
             <Route index element={<AdminDashboardPage />} />
-            <Route path="clients" element={<AdminPlaceholderPage title="Clients" description="Manage client accounts, plans and access." />} />
-            <Route path="agents" element={<AdminPlaceholderPage title="Agents" description="Configure and monitor sales agents across clients." />} />
-            <Route path="billing" element={<AdminPlaceholderPage title="Billing" description="Subscriptions, invoices and payment settings." />} />
-            <Route path="settings" element={<AdminPlaceholderPage title="Settings" description="Platform and LLM configuration." />} />
-            <Route path="users" element={<AdminPlaceholderPage title="Admin Users" description="Manage admin accounts and roles." />} />
+            <Route path="clients" element={<SectionStub title="Clients" />} />
+            <Route path="settings" element={<SectionStub title="Settings" />} />
           </Route>
         </Routes>
       </AdminAuthProvider>
@@ -158,30 +171,36 @@ describe("AdminShell navigation", () => {
     renderApp("/admin");
     await screen.findByRole("heading", { level: 1, name: "Dashboard" });
     const nav = screen.getByRole("navigation", { name: "Admin sections" });
-    for (const label of ["Dashboard", "Clients", "Agents", "Billing", "Settings", "Admin Users"]) {
+    for (const label of ["Dashboard", "Clients", "Billing", "Settings"]) {
       expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
     }
+    expect(within(nav).queryByRole("link", { name: "Admin Users" })).not.toBeInTheDocument();
   });
 
-  it("navigates to a section placeholder and marks it clearly unimplemented", async () => {
+  it("navigates to a section from the sidebar", async () => {
     stubFetch({ me: "authenticated" });
     renderApp("/admin");
     await screen.findByRole("heading", { level: 1, name: "Dashboard" });
     const user = userEvent.setup();
     await user.click(screen.getByRole("link", { name: "Clients" }));
     expect(await screen.findByRole("heading", { level: 2, name: "Clients" })).toBeInTheDocument();
-    expect(screen.getByText(/will be implemented in a later step/i)).toBeInTheDocument();
   });
 
-  it("shows placeholder stats on the dashboard, clearly marked as not live", async () => {
+  it("shows the real KPIs, and a dash (never a fake number) for metrics without a source", async () => {
     stubFetch({ me: "authenticated" });
     renderApp("/admin");
     await screen.findByRole("heading", { level: 1, name: "Dashboard" });
-    expect(screen.getByText(/placeholders/i)).toBeInTheDocument();
-    expect(screen.getByText("Total Clients")).toBeInTheDocument();
-    expect(screen.getByText("Active Agents")).toBeInTheDocument();
-    expect(screen.getByText("Monthly Revenue")).toBeInTheDocument();
-    expect(screen.getByText("Conversations Today")).toBeInTheDocument();
+    // "Activity" only exists inside the dashboard body, unlike "Clients" which also labels the
+    // sidebar nav -- wait on it first so the stat grid has actually loaded.
+    expect(await screen.findByText("Activity")).toBeInTheDocument();
+    const statGrid = document.querySelector(".admin-stat-grid") as HTMLElement;
+    for (const label of ["Clients", "LLM Models configured", "Active Agents", "Total Revenue"]) {
+      expect(within(statGrid).getByText(label)).toBeInTheDocument();
+    }
+    for (const label of ["Prospects contacted", "Conversations", "Conversions", "Revenue", "LLM cost", "WhatsApp cost"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.getAllByText("—")).toHaveLength(7);
   });
 });
 

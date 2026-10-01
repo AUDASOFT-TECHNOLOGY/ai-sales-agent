@@ -36,6 +36,8 @@ const ALPHA_DETAIL = {
   },
   brain: { factory: "app_test_brains:good_brain", settings_version: 1 },
   schedule: { daily_at: "09:00", days: ["mon", "tue"], prepare_every_minutes: 60, dispatch_every_minutes: 5, recover_every_minutes: 15 },
+  account: null,
+  meta: { status: "not_connected", credentials_stored: false },
 };
 
 const RESTRICTED_LLM_SETTINGS = {
@@ -51,14 +53,23 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
+const ALPHA_WITH_ACCOUNT = {
+  ...ALPHA_DETAIL,
+  account: { login: "alpha.login", whatsapp_number: "+216 22 768 307", logo: null, must_change_password: true },
+};
+
 function stubFetch({
   role = "owner",
   llmSettings = RESTRICTED_LLM_SETTINGS,
+  detail = ALPHA_DETAIL,
   onPut,
+  onPatch,
 }: {
   role?: string;
   llmSettings?: unknown;
+  detail?: unknown;
   onPut?: (body: unknown) => Response;
+  onPatch?: (body: Record<string, unknown>) => Response;
 } = {}) {
   vi.stubGlobal(
     "fetch",
@@ -74,8 +85,11 @@ function stubFetch({
         const body = JSON.parse(String(init.body));
         return onPut ? onPut(body) : jsonResponse(200, { ...body, api_key_env: "OPENAI_API_KEY" });
       }
+      if (url.endsWith("/clients/alpha") && init?.method === "PATCH") {
+        return onPatch ? onPatch(JSON.parse(String(init.body))) : jsonResponse(200, detail);
+      }
       if (url.endsWith("/clients/alpha")) {
-        return jsonResponse(200, ALPHA_DETAIL);
+        return jsonResponse(200, detail);
       }
       throw new Error(`unexpected fetch ${url} ${init?.method ?? "GET"}`);
     }),
@@ -107,32 +121,24 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("AdminClientDetailPage LLM configuration", () => {
-  it("shows the current provider and model", async () => {
+describe("AdminClientDetailPage LLM model", () => {
+  it("shows the current model and no provider selector", async () => {
     stubFetch();
     renderApp();
     await screen.findByRole("heading", { level: 2, name: "Alpha" });
-    await waitFor(() => expect(screen.getByLabelText("Provider")).toHaveValue("openai"));
-    expect(screen.getByLabelText("Model")).toHaveValue("test-model");
-  });
-
-  it("only offers providers that are actually wired in this deployment", async () => {
-    stubFetch();
-    renderApp();
-    await waitFor(() => expect(screen.getByLabelText("Provider")).toHaveValue("openai"));
-    const options = Array.from(screen.getByLabelText("Provider").querySelectorAll("option")).map((o) => o.textContent);
-    expect(options).toEqual(["openai"]); // "anthropic" is allow-listed but not wired: left out
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toHaveValue("openai::test-model"));
+    expect(screen.queryByLabelText("Provider")).not.toBeInTheDocument();
   });
 
   it("lets an authorized admin change the model and save it", async () => {
     stubFetch();
     renderApp();
-    await waitFor(() => expect(screen.getByLabelText("Model")).toHaveValue("test-model"));
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toHaveValue("openai::test-model"));
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Model"), "gpt-5");
+    await user.selectOptions(screen.getByLabelText("Modèle LLM"), "gpt-5");
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("Saved.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Model")).toHaveValue("gpt-5");
+    expect(screen.getByLabelText("Modèle LLM")).toHaveValue("openai::gpt-5");
   });
 
   it("shows a clear error when the server rejects the update", async () => {
@@ -140,25 +146,205 @@ describe("AdminClientDetailPage LLM configuration", () => {
       onPut: () => jsonResponse(400, { detail: "llm.model 'nope' is not allowed for provider 'openai'" }),
     });
     renderApp();
-    await waitFor(() => expect(screen.getByLabelText("Model")).toHaveValue("test-model"));
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toHaveValue("openai::test-model"));
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Model"), "gpt-5");
+    await user.selectOptions(screen.getByLabelText("Modèle LLM"), "gpt-5");
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText(/is not allowed for provider/)).toBeInTheDocument();
   });
 
-  it("disables saving for a viewer and explains why", async () => {
+  it("offers only the models enabled in Settings, from wired providers", async () => {
+    stubFetch();
+    renderApp();
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toHaveValue("openai::test-model"));
+    const options = Array.from(screen.getByLabelText("Modèle LLM").querySelectorAll("option")).map((o) => o.textContent);
+    expect(options).toEqual(["Select a model…", "test-model", "gpt-5"]); // "claude" is not wired
+  });
+
+  it("labels each option with the name Settings gives the model, not a hard-coded list", async () => {
+    stubFetch({
+      llmSettings: {
+        read_only: true,
+        restricted: false,
+        providers: [
+          {
+            provider: "openai",
+            wired: true,
+            allowed_models: ["test-model", "model-x"],
+            models: [
+              { id: "test-model", name: "Luna" },
+              { id: "model-x", name: "Sol" },
+            ],
+          },
+        ],
+      },
+    });
+    renderApp();
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toHaveValue("openai::test-model"));
+    const options = Array.from(screen.getByLabelText("Modèle LLM").querySelectorAll("option")).map((o) => o.textContent);
+    expect(options).toEqual(["Select a model…", "Luna", "Sol"]);
+  });
+
+  it("shows an empty dropdown when Settings enables no model", async () => {
+    stubFetch({ llmSettings: { read_only: true, restricted: false, providers: [{ provider: "openai", wired: true, allowed_models: null }] } });
+    renderApp();
+    const select = await screen.findByLabelText("Modèle LLM");
+    expect(select.tagName).toBe("SELECT");
+    expect(select).toBeDisabled();
+    expect(Array.from(select.querySelectorAll("option")).map((o) => o.textContent)).toEqual(["No model available"]);
+    expect(screen.getByText(/No active LLM model is configured in Settings/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("disables saving for a viewer", async () => {
     stubFetch({ role: "viewer" });
     renderApp();
-    await waitFor(() => expect(screen.getByLabelText("Provider")).toBeDisabled());
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toBeDisabled());
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("never asks for or displays an API key value", async () => {
     stubFetch();
     renderApp();
-    await waitFor(() => expect(screen.getByLabelText("Model")).toHaveValue("test-model"));
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toHaveValue("openai::test-model"));
     expect(screen.queryByLabelText(/api.?key/i)).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/sk-test/);
+  });
+});
+
+describe("AdminClientDetailPage edit mode", () => {
+  async function openEditForm() {
+    const user = userEvent.setup();
+    await screen.findByRole("heading", { level: 2, name: "Alpha" });
+    await user.click(screen.getByRole("button", { name: "Modifier" }));
+    await screen.findByRole("button", { name: "Enregistrer" });
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toHaveValue("openai::test-model"));
+    return user;
+  }
+
+  it("shows a Modifier button that opens the form with the current values", async () => {
+    stubFetch({ detail: ALPHA_WITH_ACCOUNT });
+    renderApp();
+    await openEditForm();
+    expect(screen.getByLabelText("Name")).toHaveValue("Alpha");
+    expect(screen.getByLabelText("Login")).toHaveValue("alpha.login");
+    expect(screen.getByLabelText(/New password/)).toHaveValue("");
+    expect(screen.getByLabelText("WhatsApp number")).toHaveValue("+216 22 768 307");
+    expect(screen.getByLabelText("Modèle LLM")).toHaveValue("openai::test-model");
+    expect(screen.getByLabelText("Daily quota")).toHaveValue(20);
+    expect(screen.getByLabelText("Active")).toBeChecked();
+    expect(screen.getByLabelText(/Logo/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Annuler" })).toBeInTheDocument();
+  });
+
+  it("lets the admin create the account of a client without a profile, with the password", async () => {
+    let sent: Record<string, unknown> | null = null;
+    stubFetch({
+      onPatch: (body) => {
+        sent = body;
+        return jsonResponse(200, ALPHA_WITH_ACCOUNT);
+      },
+    });
+    renderApp();
+    const user = await openEditForm();
+    expect(screen.getByLabelText("WhatsApp number")).toBeEnabled();
+    await user.type(screen.getByLabelText("Login"), "alpha.login");
+    expect(screen.getByRole("button", { name: "Enregistrer" })).toBeDisabled(); // needs all three
+    await user.type(screen.getByLabelText(/New password/), "admin-set-pass");
+    await user.type(screen.getByLabelText("WhatsApp number"), "+216 22 768 307");
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+    await screen.findByText("Client mis à jour.");
+    expect(sent).toEqual({ login: "alpha.login", new_password: "admin-set-pass", whatsapp_number: "+216 22 768 307" });
+  });
+
+  it("never offers a Meta credential field or reveals the password", async () => {
+    stubFetch({ detail: ALPHA_WITH_ACCOUNT });
+    renderApp();
+    await openEditForm();
+    expect(screen.queryByLabelText(/access token|phone number id|app secret|verify token/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/New password/)).toHaveAttribute("type", "password");
+  });
+
+  it("is not offered to a non-owner", async () => {
+    stubFetch({ role: "editor" });
+    renderApp();
+    await screen.findByRole("heading", { level: 2, name: "Alpha" });
+    expect(screen.queryByRole("button", { name: "Modifier" })).not.toBeInTheDocument();
+  });
+
+  it("sends only the changed fields, then shows the new values and a success message", async () => {
+    let sent: Record<string, unknown> | null = null;
+    stubFetch({
+      detail: ALPHA_WITH_ACCOUNT,
+      onPatch: (body) => {
+        sent = body;
+        return jsonResponse(200, { ...ALPHA_WITH_ACCOUNT, display_name: "Alpha Two", daily_action_limit: 30, status: "disabled" });
+      },
+    });
+    renderApp();
+    const user = await openEditForm();
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "Alpha Two");
+    await user.clear(screen.getByLabelText("Daily quota"));
+    await user.type(screen.getByLabelText("Daily quota"), "30");
+    await user.type(screen.getByLabelText(/New password/), "brand-new-pass");
+    await user.selectOptions(screen.getByLabelText("Modèle LLM"), "gpt-5");
+    await user.click(screen.getByLabelText("Inactive"));
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+    expect(await screen.findByText("Client mis à jour.")).toBeInTheDocument();
+    expect(sent).toEqual({
+      display_name: "Alpha Two",
+      daily_action_limit: 30,
+      new_password: "brand-new-pass",
+      llm_provider: "openai",
+      llm_model: "gpt-5",
+      status: "inactive",
+    });
+    expect(screen.getByRole("heading", { level: 2, name: "Alpha Two" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Enregistrer" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modifier" })).toBeInTheDocument();
+  });
+
+  it("omits the password when the field is left empty", async () => {
+    let sent: Record<string, unknown> | null = null;
+    stubFetch({
+      detail: ALPHA_WITH_ACCOUNT,
+      onPatch: (body) => {
+        sent = body;
+        return jsonResponse(200, ALPHA_WITH_ACCOUNT);
+      },
+    });
+    renderApp();
+    const user = await openEditForm();
+    await user.clear(screen.getByLabelText("Login"));
+    await user.type(screen.getByLabelText("Login"), "new.login");
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+    await screen.findByText("Client mis à jour.");
+    expect(sent).toEqual({ login: "new.login" });
+  });
+
+  it("shows the API error and keeps what was typed", async () => {
+    stubFetch({ detail: ALPHA_WITH_ACCOUNT, onPatch: () => jsonResponse(409, { detail: "this login is already used" }) });
+    renderApp();
+    const user = await openEditForm();
+    await user.clear(screen.getByLabelText("Login"));
+    await user.type(screen.getByLabelText("Login"), "taken");
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+    expect(await screen.findByText("this login is already used")).toBeInTheDocument();
+    expect(screen.getByLabelText("Login")).toHaveValue("taken");
+    expect(screen.getByRole("button", { name: "Enregistrer" })).toBeInTheDocument();
+  });
+
+  it("returns to the normal view on Annuler without saving", async () => {
+    const patch = vi.fn(() => jsonResponse(200, ALPHA_WITH_ACCOUNT));
+    stubFetch({ detail: ALPHA_WITH_ACCOUNT, onPatch: patch });
+    renderApp();
+    const user = await openEditForm();
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "Changed");
+    await user.click(screen.getByRole("button", { name: "Annuler" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Alpha" })).toBeInTheDocument();
+    expect(patch).not.toHaveBeenCalled();
   });
 });

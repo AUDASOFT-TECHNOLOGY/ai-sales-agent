@@ -1,12 +1,14 @@
 """One client's runtime: its Engine plus the bookkeeping the scheduler and /health need."""
 
+import logging
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from sales_app.config import ClientConfig
-from sales_app.errors import RuntimeBuildError
+from sales_app.errors import ClientNotReadyError, RuntimeBuildError
 from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
 from sales_core.approval import ApprovalMode
@@ -14,6 +16,8 @@ from sales_core.contracts import ClientContext
 from sales_core.engine import Engine, EngineConfig, InboundPolicy, UnknownSenderPolicy
 from sales_core.ports import Clock, FactsReader, FactsWriter
 from sales_integrations.system import DisabledChannel
+
+log = logging.getLogger(__name__)
 
 
 class ClientHealth:
@@ -78,15 +82,122 @@ class ScheduleState:
 
 @dataclass
 class ClientRuntime:
+    """One client's runtime. The object stays the same for the client's whole life (its `state` and
+    `health` with it); only its Engine and config are replaced, and only through `stage`.
+
+    Every use of the Engine goes through `lease()`. A lease is how "never two Engines for one
+    client" is guaranteed: a staged replacement is installed only when no lease is active, and
+    leases already running finish on the Engine they started with. Do not take a lease while
+    holding one on the same runtime (a pending replacement would make the second wait forever).
+    """
+
     config: ClientConfig
     engine: Engine
     health: ClientHealth = field(default_factory=ClientHealth)
     state: ScheduleState = field(default_factory=ScheduleState)
     stagger: timedelta = timedelta(0)  # spreads clients' triggers to spare API quotas
+    missing: tuple[str, ...] = ()  # credentials the client lacks: it takes no new work
+    _gate: threading.Condition = field(
+        default_factory=threading.Condition, init=False, repr=False, compare=False
+    )
+    _active: int = field(default=0, init=False, repr=False, compare=False)
+    _draining: bool = field(default=False, init=False, repr=False, compare=False)
+    _pending: tuple[ClientConfig, Engine, Callable[[], None] | None] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     @property
     def client_id(self) -> str:
         return self.config.client_id
+
+    @property
+    def suspended(self) -> bool:
+        return bool(self.missing)
+
+    @property
+    def replacement_pending(self) -> bool:
+        return self._pending is not None
+
+    @contextmanager
+    def lease(self) -> Iterator[Engine]:
+        """The Engine, for the duration of one job or one inbound message.
+
+        Raises ClientNotReadyError for a client lacking credentials. While a replacement is being
+        drained, new leases wait (the Engine's own lock already serialises its work, so this adds
+        no waiting that was not there) and then get the new Engine.
+        """
+        with self._gate:
+            while self._draining:
+                self._gate.wait()
+            installed = self._install_if_idle()
+            if self.missing:
+                raise ClientNotReadyError(self.client_id, self.missing)
+            self._active += 1
+            engine = self.engine
+        self._notify(installed)
+        try:
+            yield engine
+        finally:
+            with self._gate:
+                self._active -= 1
+                installed = self._install_if_idle()
+                self._gate.notify_all()
+            self._notify(installed)
+
+    def stage(
+        self,
+        config: ClientConfig,
+        engine: Engine,
+        on_installed: Callable[[], None] | None = None,
+    ) -> bool:
+        """Queue a replacement built offline and start draining. Returns True if it was installed
+        at once (nothing was running). Otherwise it is installed when the last active lease ends,
+        and `on_installed` is called then. A newer staged replacement supersedes an older one."""
+        with self._gate:
+            self._pending = (config, engine, on_installed)
+            self._draining = True
+            installed = self._install_if_idle()
+            done = self._pending is None
+        self._notify(installed)
+        return done
+
+    def relax(self) -> None:
+        """Stop holding back new leases, but keep the staged replacement: it is installed as soon
+        as the runtime is next idle."""
+        with self._gate:
+            self._draining = False
+            self._gate.notify_all()
+
+    def suspend(self, config: ClientConfig) -> None:
+        """The client lost a credential: no new work starts. Work already running finishes, and a
+        replacement that was staged is dropped."""
+        with self._gate:
+            self.config = config
+            self.missing = config.missing_credentials
+            self._pending = None
+            self._draining = False
+            self._gate.notify_all()
+
+    # ---- internals (the caller holds the gate) -------------------------------------------
+
+    def _install_if_idle(self) -> Callable[[], None] | None:
+        if self._pending is None or self._active:
+            return None
+        config, engine, on_installed = self._pending
+        self.config, self.engine, self.missing = config, engine, ()
+        self._pending = None
+        self._draining = False
+        self._gate.notify_all()
+        return on_installed or (lambda: None)
+
+    @staticmethod
+    def _notify(callback: Callable[[], None] | None) -> None:
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            log.exception("runtime install callback failed")
 
 
 def _choose[V](client_id: str, table: Mapping[str, V], provider: str, what: str) -> V:

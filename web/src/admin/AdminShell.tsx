@@ -3,27 +3,25 @@
  *  AppShell (mock store, i18n nav) — this is Revansa's own operator console. */
 
 import { Outlet, NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Users, Bot, CreditCard, Settings, ShieldCheck, LogOut } from "lucide-react";
+import { LayoutDashboard, Users, Receipt, Settings, LogOut } from "lucide-react";
 import { Glass } from "../ui/Glass";
 import { IconButton } from "../ui/Button";
 import { BrandMark } from "../ui/Brand";
 import { cx } from "../ui/cx";
 import { useAdminAuth } from "./AdminAuthContext";
 
-const NAV: Array<{ to: string; label: string; icon: typeof LayoutDashboard; end?: boolean }> = [
-  { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/admin/clients", label: "Clients", icon: Users },
-  { to: "/admin/agents", label: "Agents", icon: Bot },
-  { to: "/admin/billing", label: "Billing", icon: CreditCard },
-  { to: "/admin/settings", label: "Settings", icon: Settings },
-  { to: "/admin/users", label: "Admin Users", icon: ShieldCheck },
+const NAV: Array<{ to: string; label: string; subtitle: string; icon: typeof LayoutDashboard; end?: boolean }> = [
+  { to: "/admin", label: "Dashboard", subtitle: "Overview of your clients and sales agents.", icon: LayoutDashboard, end: true },
+  { to: "/admin/clients", label: "Clients", subtitle: "The businesses Revansa sells for.", icon: Users },
+  { to: "/admin/billing", label: "Billing", subtitle: "Plans and invoices.", icon: Receipt },
+  { to: "/admin/settings", label: "Settings", subtitle: "Integrations and credentials used across Revansa.", icon: Settings },
 ];
 
-function titleFor(pathname: string): string {
+function sectionFor(pathname: string) {
   // Longest-prefix match against NAV so a nested route (e.g. /admin/clients/:id) inherits its
   // section's title without a separate entry per sub-route.
   const match = [...NAV].sort((a, b) => b.to.length - a.to.length).find((item) => pathname === item.to || (item.to !== "/admin" && pathname.startsWith(`${item.to}/`)));
-  return match?.label ?? "Dashboard";
+  return match ?? NAV[0]!;
 }
 
 function initials(username: string): string {
@@ -35,7 +33,7 @@ export function AdminShell() {
   const { pathname } = useLocation();
   if (!admin) return null; // AdminRoute only renders this while authenticated
 
-  const title = titleFor(pathname);
+  const section = sectionFor(pathname);
 
   return (
     <div className="admin-shell">
@@ -73,9 +71,10 @@ export function AdminShell() {
       </Glass>
       <div className="admin-shell__main">
         <header className="admin-shell__topbar">
-          <h1 className="t-h1">{title}</h1>
+          <h1 className="t-h1">{section.label}</h1>
+          <p className="c-3 t-body-sm">{section.subtitle}</p>
         </header>
-        <main id="admin-main">
+        <main id="admin-main" className="admin-shell__content">
           <Outlet />
         </main>
       </div>

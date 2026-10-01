@@ -4,12 +4,10 @@ import { AdminAuthProvider } from "./admin/AdminAuthContext";
 import { AdminLoginPage } from "./admin/AdminLoginPage";
 import { AdminRoute } from "./admin/AdminRoute";
 import { AdminShell } from "./admin/AdminShell";
-import { AdminAgentDetailPage } from "./admin/pages/AdminAgentDetailPage";
-import { AdminAgentsPage } from "./admin/pages/AdminAgentsPage";
+import { AdminBillingPage } from "./admin/pages/AdminBillingPage";
 import { AdminClientDetailPage } from "./admin/pages/AdminClientDetailPage";
 import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
 import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
-import { AdminPlaceholderPage } from "./admin/pages/AdminPlaceholderPage";
 import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
 import { I18nProvider } from "./i18n";
 import { StoreProvider, useStore } from "./mock/store";
@@ -55,11 +53,8 @@ export function App() {
               <Route index element={<AdminDashboardPage />} />
               <Route path="clients" element={<AdminClientsPage />} />
               <Route path="clients/:clientId" element={<AdminClientDetailPage />} />
-              <Route path="agents" element={<AdminAgentsPage />} />
-              <Route path="agents/:agentId" element={<AdminAgentDetailPage />} />
-              <Route path="billing" element={<AdminPlaceholderPage title="Billing" description="Subscriptions, invoices and payment settings." />} />
+              <Route path="billing" element={<AdminBillingPage />} />
               <Route path="settings" element={<AdminSettingsPage />} />
-              <Route path="users" element={<AdminPlaceholderPage title="Admin Users" description="Manage admin accounts and roles." />} />
               <Route path="*" element={<Navigate to="/admin" replace />} />
             </Route>
           </Route>

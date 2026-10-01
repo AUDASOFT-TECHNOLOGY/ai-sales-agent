@@ -60,9 +60,7 @@ def add_admin_parser(commands: "argparse._SubParsersAction[argparse.ArgumentPars
     set_role.add_argument("--username", required=True)
     with_role_and_scope(set_role)
 
-    reset = actions.add_parser(
-        "reset-password", help="prompt for a new password, end its sessions"
-    )
+    reset = actions.add_parser("reset-password", help="prompt for a new password, end its sessions")
     reset.add_argument("--username", required=True)
 
 

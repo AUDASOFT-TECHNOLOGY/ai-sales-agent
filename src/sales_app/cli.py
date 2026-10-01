@@ -1,4 +1,4 @@
-"""Command line: `sales-agent validate | serve | run | config`.
+"""Command line: `sales-agent validate | serve | run | config | admin | secrets`.
 
 Exit codes: 0 success, 1 a job reported failure, 2 invalid configuration,
 3 another instance is already running.
@@ -18,6 +18,7 @@ from sales_app.errors import ConfigurationError
 from sales_app.lockfile import InstanceAlreadyRunningError, InstanceLock
 from sales_app.logs import configure_logging
 from sales_app.scheduler import Job
+from sales_app.secrets_cli import add_secrets_parser, run_secrets
 from sales_app.settings import Settings
 from sales_core.approval import ApprovalMode
 
@@ -41,6 +42,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_config(settings, args)
         if args.command == "admin":
             return run_admin(settings, args)
+        if args.command == "secrets":
+            return run_secrets(args)
         return _run(settings, args)
     except ConfigurationError as error:
         _print_errors(error)
@@ -54,6 +57,7 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("serve", help="run the scheduler and the webhook server")
     add_config_parser(commands)
     add_admin_parser(commands)
+    add_secrets_parser(commands)
     run = commands.add_parser("run", help="run one job for one client, once")
     run.add_argument("--client", required=True)
     run.add_argument("--job", required=True, choices=[j.value for j in Job])
@@ -64,16 +68,25 @@ def _parser() -> argparse.ArgumentParser:
 def _validate(settings: Settings) -> int:
     application = build_application(settings, require_clients=False)
     modes = describe_modes(application)
-    versions = {e["client_id"]: e.get("config_version") for e in application.registry.health()}
+    entries = {e["client_id"]: e for e in application.registry.health()}
+    ready = 0
     for entry in modes:
+        health = entries[entry["client_id"]]
+        if health.get("status") == "not_ready":
+            missing = ", ".join(str(m) for m in health.get("missing_credentials", []))  # type: ignore[attr-defined]
+            print(f"NOT READY  {entry['client_id']}: missing {missing}")
+            continue
+        ready += 1
         note = f" (configured {entry['configured_mode']}, clamped)" if entry["mode_clamped"] else ""
-        version = versions.get(entry["client_id"])
+        version = health.get("config_version")
         source = f" [config v{version}]" if version is not None else ""
         print(f"ok  {entry['client_id']}: mode {entry['mode']}{note}{source}")
-    skipped = [e["client_id"] for e in application.registry.health() if e["status"] == "disabled"]
+    skipped = [e["client_id"] for e in entries.values() if e["status"] == "disabled"]
     if skipped:
         print(f"skipped (enabled: false): {', '.join(str(c) for c in skipped)}")
-    print(f"{len(modes)} client(s) valid")
+    waiting = len(modes) - ready
+    suffix = f", {waiting} not ready (missing credentials)" if waiting else ""
+    print(f"{ready} client(s) valid{suffix}")
     return EXIT_OK
 
 
@@ -107,8 +120,10 @@ def _run(settings: Settings, args: argparse.Namespace) -> int:
             application = build_application(settings, mode_ceiling=ceiling)
             _announce(application)
             runtime = application.registry.get(args.client)
-            if runtime is None:
-                print(f"error: no enabled client {args.client!r}", file=sys.stderr)
+            if runtime is None or runtime.suspended:
+                missing = application.registry.missing(args.client)
+                reason = f" (not ready, missing: {'; '.join(missing)})" if missing else ""
+                print(f"error: no enabled client {args.client!r}{reason}", file=sys.stderr)
                 return EXIT_CONFIG
             result = application.scheduler.run_job_now(runtime, Job(args.job))
     except InstanceAlreadyRunningError as error:
@@ -122,6 +137,10 @@ def _run(settings: Settings, args: argparse.Namespace) -> int:
 
 def _announce(application: Application) -> None:
     for entry in describe_modes(application):
+        missing = application.registry.missing(str(entry["client_id"]))
+        if missing:
+            log.warning("client %s is not ready: %s", entry["client_id"], "; ".join(missing))
+            continue
         log.info(
             "client %s runs in %s mode%s",
             entry["client_id"],

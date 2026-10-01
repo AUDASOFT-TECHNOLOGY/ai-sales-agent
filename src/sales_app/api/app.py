@@ -8,6 +8,7 @@ processing in the background and answers. Deciding what to reply is never done h
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -16,8 +17,11 @@ from fastapi.responses import PlainTextResponse
 from sales_app.api.admin import create_admin_router
 from sales_app.api.admin_agents import create_admin_agents_router
 from sales_app.api.admin_clients import create_admin_clients_router
+from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.bootstrap import Application
+from sales_app.connection_tests import HttpClientFactory, default_http_client
+from sales_app.errors import ClientNotReadyError
 from sales_app.logs import client_logger
 from sales_app.wiring import ClientRuntime
 from sales_core.engine import InboundReceipt
@@ -27,7 +31,12 @@ log = logging.getLogger(__name__)
 SHUTDOWN_GRACE_SECONDS = 30
 
 
-def create_app(application: Application, *, run_scheduler: bool = True) -> FastAPI:
+def create_app(
+    application: Application,
+    *,
+    run_scheduler: bool = True,
+    connection_http: HttpClientFactory = default_http_client,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         stop = asyncio.Event()
@@ -54,6 +63,7 @@ def create_app(application: Application, *, run_scheduler: bool = True) -> FastA
     app.include_router(create_admin_clients_router(application))
     app.include_router(create_admin_agents_router(application))
     app.include_router(create_admin_settings_router(application))
+    app.include_router(create_admin_integrations_router(application, connection_http))
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -93,12 +103,13 @@ def create_app(application: Application, *, run_scheduler: bool = True) -> FastA
             runtime = application.registry.by_routing_key(provider, event.routing_key)
             if runtime is None:
                 # Retrying can never help, and providers disable endpoints that keep failing.
-                log.error(
-                    "no client for %s routing key %r; message dropped", provider, event.routing_key
-                )
+                _drop(application, provider, event.routing_key)
                 continue
             try:
-                receipt = await run_in_threadpool(runtime.engine.receive_inbound, event.message)
+                receipt = await run_in_threadpool(_receive, runtime, event.message)
+            except ClientNotReadyError:  # it lost a credential since the lookup above
+                _drop(application, provider, event.routing_key)
+                continue
             except Exception as error:  # noqa: BLE001 - answered with a 500 so the provider retries
                 client_logger(__name__, runtime.client_id).exception(
                     "could not store inbound message"
@@ -115,6 +126,25 @@ def create_app(application: Application, *, run_scheduler: bool = True) -> FastA
     return app
 
 
+def _drop(application: Application, provider: str, routing_key: str) -> None:
+    """Answer 200 and forget the message: a retry cannot help, and providers disable endpoints
+    that keep failing. A client that is only waiting for credentials is counted and logged."""
+    registry = application.registry
+    waiting = registry.not_ready_client_for(provider, routing_key)
+    if waiting is None:
+        log.error("no client for %s routing key %r; message dropped", provider, routing_key)
+        return
+    registry.note_dropped(waiting, application.clock.now())
+    client_logger(__name__, waiting).error(
+        "client is not ready (missing credentials); inbound message dropped"
+    )
+
+
+def _receive(runtime: ClientRuntime, message: Any) -> InboundReceipt:
+    with runtime.lease() as engine:
+        return engine.receive_inbound(message)
+
+
 def _report(
     runtime: ClientRuntime, job: str, errors: tuple[str, ...], application: Application
 ) -> None:
@@ -127,7 +157,10 @@ def _report(
 def _process(runtime: ClientRuntime, receipt: InboundReceipt, application: Application) -> None:
     """Background task: let the client's Engine handle the stored reply."""
     try:
-        report = runtime.engine.process_inbound(receipt)
+        with runtime.lease() as engine:
+            report = engine.process_inbound(receipt)
+    except ClientNotReadyError:
+        return  # stored already; recover_pending_replies() handles it once the client is ready
     except Exception as error:  # noqa: BLE001 - recover_pending_replies() will pick it up later
         client_logger(__name__, runtime.client_id).exception("processing an inbound reply failed")
         runtime.health.record_failure("inbound", application.clock.now(), str(error))

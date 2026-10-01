@@ -68,6 +68,7 @@ from sales_core.engine.models import (
     RunReport,
 )
 from sales_core.facts import ProposalRejection, review_proposals
+from sales_core.kpi import prospects_contacted
 from sales_core.planner import plan_daily_actions
 from sales_core.ports import (
     Brain,
@@ -128,6 +129,11 @@ class Engine:
         self._facts_writer = facts_writer  # None: facts a Brain proposes are refused, not lost
         self._lock = threading.RLock()
         self._events: list[AuditEvent] = []  # audit events not yet written
+
+    def prospects_contacted(self) -> int:
+        """How many distinct prospects have been sent at least one message (read-only)."""
+        with self._lock:
+            return prospects_contacted(self._repo.list_actions({ActionStatus.SENT}))
 
     @property
     def _dry_run(self) -> bool:

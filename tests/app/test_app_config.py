@@ -78,8 +78,8 @@ class TestValidClient:
         by_id = {c.client_id: c for c in loaded.clients}
         assert by_id["alpha"].spec.brain.settings == {"tone": "warm"}
         assert by_id["beta"].spec.brain.settings == {"tone": "formal"}
-        assert by_id["alpha"].secrets.get("ALPHA_TOKEN") == "token-alpha"
-        assert "BETA_TOKEN" not in by_id["alpha"].secrets  # nothing leaks between clients
+        assert by_id["alpha"].secrets.get("whatsapp.access_token") == "token-alpha"
+        assert by_id["beta"].secrets.get("whatsapp.access_token") == "token-beta"  # no leaking
 
 
 class TestDiscovery:
@@ -198,24 +198,32 @@ class TestValidation:
 
 
 class TestSecrets:
-    def test_missing_variables_are_named_not_valued(self, tmp_path):
+    def test_missing_credentials_make_a_client_not_ready_not_invalid(self, tmp_path):
         write_client(tmp_path, "alpha")
         loaded = load(tmp_path, env={})
-        text = "\n".join(loaded.errors)
-        for name in (
-            "GOOGLE_APPLICATION_CREDENTIALS",
-            "OPENAI_API_KEY",
-            "ALPHA_TOKEN",
-            "ALPHA_APP_SECRET",
-            "ALPHA_PHONE_ID",
+        assert loaded.errors == ()  # the application can still start
+        (config,) = loaded.clients
+        assert not config.ready
+        text = "; ".join(config.missing_credentials)
+        for label in (
+            "Google Sheets credentials file",
+            "OpenAI API key",
+            "WhatsApp access token",
+            "Meta app secret",
+            "WhatsApp phone number id",
         ):
-            assert name in text
-        assert loaded.clients == ()
+            assert label in text
 
     def test_blank_values_count_as_missing(self, tmp_path):
         write_client(tmp_path, "alpha")
         env = env_for("alpha") | {"ALPHA_TOKEN": "   "}
-        assert any("ALPHA_TOKEN" in e for e in load(tmp_path, env=env).errors)
+        (config,) = load(tmp_path, env=env).clients
+        assert config.missing_credentials == ("WhatsApp access token is not configured",)
+
+    def test_a_client_with_everything_set_is_ready(self, tmp_path):
+        write_client(tmp_path, "alpha")
+        (config,) = load(tmp_path, "alpha").clients
+        assert config.ready and config.missing_credentials == ()
 
     def test_dry_run_does_not_need_whatsapp_secrets(self, tmp_path):
         write_client(tmp_path, "alpha", mode="dry_run")
@@ -226,8 +234,10 @@ class TestSecrets:
     def test_a_clamped_client_needs_the_secrets_of_its_effective_mode(self, tmp_path):
         write_client(tmp_path, "alpha", mode="approval")
         env = {"GOOGLE_APPLICATION_CREDENTIALS": "c.json", "OPENAI_API_KEY": "sk"}
-        assert load(tmp_path, env=env, ceiling=AUTO).errors  # approval: WhatsApp needed
-        assert load(tmp_path, env=env, ceiling=DRY).errors == ()  # clamped to dry_run: not needed
+        (needing,) = load(tmp_path, env=env, ceiling=AUTO).clients  # approval: WhatsApp needed
+        assert not needing.ready
+        (clamped,) = load(tmp_path, env=env, ceiling=DRY).clients  # dry_run: not needed
+        assert clamped.ready
 
     def test_secrets_never_print_their_values(self, tmp_path):
         write_client(tmp_path, "alpha")
@@ -300,15 +310,15 @@ class TestLLMAllowList:
         assert any("gpt-3.5-turbo" in e and "openai" in e for e in loaded.errors)
 
     def test_the_error_is_collected_alongside_every_other_problem(self, tmp_path):
-        """Like every other post-schema check in resolve_client_config (missing secrets, the
-        brain's own settings): nothing raises, everything is collected, so one run reports every
-        problem for this client at once -- here, together with a missing secret."""
+        """Like every other post-schema check in resolve_client_config (the brain's own settings):
+        nothing raises, everything is collected. Missing credentials are not an error any more
+        (the client is just not ready), so the model problem is reported on its own."""
         write_client(tmp_path, "alpha", llm={"model": "gpt-3.5-turbo"})
         registry = build_llm_registry({"openai": ["gpt-4o"]})
         loaded = load(tmp_path, "alpha", llm_registry=registry, env={})
         assert loaded.clients == ()
         joined = "\n".join(loaded.errors)
-        assert "gpt-3.5-turbo" in joined and "environment variable" in joined
+        assert "gpt-3.5-turbo" in joined and "not configured" not in joined
 
 
 class TestCrossClientIsolation:

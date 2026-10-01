@@ -16,6 +16,7 @@ dependencies = [
     "google-auth>=2.30",
     "tzdata>=2024.1",
     "bcrypt>=4.1",
+    "cryptography>=42",
 ]
 
 [dependency-groups]

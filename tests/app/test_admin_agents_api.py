@@ -85,7 +85,9 @@ class Fixture:
         )
 
     def login(self, username="alice", password=PASSWORD):
-        return self.client.post("/admin/v1/auth/login", json={"username": username, "password": password})
+        return self.client.post(
+            "/admin/v1/auth/login", json={"username": username, "password": password}
+        )
 
 
 @pytest.fixture
@@ -93,7 +95,15 @@ def fx(tmp_path):
     # "naga" mirrors a real, disabled client directory: present on disk, excluded from the
     # registry, and must still be reachable as an agent too (see resolve_client_config's
     # "disabled: not validated, not built" rule). Written before the app boots, like alpha/beta.
-    write_client(tmp_path, "naga", enabled=False, display_name="Naga", mode="approval", timezone="Africa/Tunis", daily_action_limit=15)
+    write_client(
+        tmp_path,
+        "naga",
+        enabled=False,
+        display_name="Naga",
+        mode="approval",
+        timezone="Africa/Tunis",
+        daily_action_limit=15,
+    )
     # Present on disk but skipped entirely by discovery (leading "_", see loader.py) -- must
     # never be reachable through the API either, even by an owner guessing the name.
     write_client(tmp_path, "_template", enabled=False)

@@ -75,6 +75,15 @@ export interface ClientProviders {
   whatsapp: string | null;
 }
 
+// What the registry already reports for an active client (null for a disabled one: no runtime).
+export interface ClientHealth {
+  status: string; // "ready" | "degraded"
+  last_error: string | null;
+  last_error_at: string | null;
+  consecutive_failures: number;
+  last_runs: Record<string, string>;
+}
+
 export interface ClientSummary {
   client_id: string;
   display_name: string;
@@ -83,6 +92,8 @@ export interface ClientSummary {
   timezone: string | null;
   daily_action_limit: number | null;
   providers: ClientProviders;
+  llm_model: string | null;
+  health: ClientHealth | null;
 }
 
 export interface ClientSheets {
@@ -122,7 +133,28 @@ export interface ClientSchedule {
   recover_every_minutes: number | null;
 }
 
+// The client's account profile (never a password or its hash). `whatsapp_number` is the business
+// number the client's sales agent writes from -- NOT Meta's phone number id.
+export interface ClientAccount {
+  login: string;
+  whatsapp_number: string | null;
+  logo: string | null;
+  must_change_password: boolean;
+}
+
+// Where the client's number stands with Meta. Never "connected": no official Meta onboarding exists
+// in Revansa yet. Booleans only -- never a token or a Meta id.
+export interface ClientMeta {
+  status: "not_connected" | "credentials_stored";
+  credentials_stored: boolean;
+}
+
 export interface ClientDetail extends ClientSummary {
+  restart_required?: boolean; // the stored status differs from what is running until the next start
+  account: ClientAccount | null;
+  meta: ClientMeta;
+  revenue: number | null; // null: no revenue data source exists yet
+  prospects_contacted: number | null; // null: not readable right now
   max_attempts: number | null;
   opt_out_keywords: string[];
   sheets: ClientSheets;
@@ -138,6 +170,41 @@ export function adminListClients(): Promise<ClientSummary[]> {
 
 export function adminGetClient(clientId: string): Promise<ClientDetail> {
   return request<ClientDetail>(`/clients/${encodeURIComponent(clientId)}`);
+}
+
+export interface CreateClientRequest {
+  display_name: string;
+  logo: string | null;
+  login: string;
+  temporary_password: string;
+  llm_provider: string;
+  llm_model: string;
+  status: "active" | "inactive";
+  whatsapp_number: string;
+}
+
+// POST /admin/v1/clients (owner only). The WhatsApp number is profile data; it grants no Meta access.
+export function adminCreateClient(body: CreateClientRequest): Promise<ClientSummary> {
+  return request<ClientSummary>("/clients", { method: "POST", body: JSON.stringify(body) });
+}
+
+// A partial edit: only the fields present are changed. `logo: null` removes the logo; an absent
+// `new_password` keeps the current one. There is no field for any Meta credential.
+export interface UpdateClientRequest {
+  display_name?: string;
+  logo?: string | null;
+  login?: string;
+  new_password?: string;
+  whatsapp_number?: string;
+  llm_provider?: string;
+  llm_model?: string;
+  daily_action_limit?: number;
+  status?: "active" | "inactive";
+}
+
+// PATCH /admin/v1/clients/:clientId (owner only). Returns the refreshed client detail.
+export function adminUpdateClient(clientId: string, body: UpdateClientRequest): Promise<ClientDetail> {
+  return request<ClientDetail>(`/clients/${encodeURIComponent(clientId)}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
 export interface UpdateClientLLMRequest {
@@ -218,6 +285,8 @@ export interface LLMProviderSetting {
   // null: no allow-list is configured, so any model is accepted for this provider. An array:
   // only these model ids are allowed (empty means this provider is wired but not allow-listed).
   allowed_models: string[] | null;
+  // The readable names Settings gives to some of those ids.
+  models?: { id: string; name: string }[];
 }
 
 export interface LLMSettings {
@@ -228,4 +297,90 @@ export interface LLMSettings {
 
 export function adminGetLLMSettings(): Promise<LLMSettings> {
   return request<LLMSettings>("/settings/llm");
+}
+
+// Credentials and settings for the services Revansa talks to (see
+// src/sales_app/api/admin_integrations.py). Write-only: a sensitive credential reports only
+// whether it is configured and when it changed -- its value is never returned. A non-sensitive one
+// (a model id, an API version, a phone number id) comes back in `value`. Writes are owner-only.
+export interface Credential {
+  key: string;
+  label: string;
+  scope: "global" | "client";
+  sensitive: boolean;
+  configured: boolean;
+  value: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+// The outcome of a real call to OpenAI or Meta; it never carries a credential.
+export interface ConnectionTest {
+  ok: boolean;
+  message: string;
+  details: Record<string, string>;
+}
+
+const globalPath = (key: string) => `/settings/integrations/${encodeURIComponent(key)}`;
+const clientPath = (clientId: string, key: string) =>
+  `/clients/${encodeURIComponent(clientId)}/integrations/${encodeURIComponent(key)}`;
+
+export function adminListGlobalCredentials(): Promise<Credential[]> {
+  return request<Credential[]>("/settings/integrations");
+}
+
+export function adminSaveGlobalCredential(key: string, value: string): Promise<Credential> {
+  return request<Credential>(globalPath(key), { method: "PUT", body: JSON.stringify({ value }) });
+}
+
+export function adminRemoveGlobalCredential(key: string): Promise<Credential> {
+  return request<Credential>(`${globalPath(key)}?confirm=true`, { method: "DELETE" });
+}
+
+export function adminListClientCredentials(clientId: string): Promise<Credential[]> {
+  return request<Credential[]>(`/clients/${encodeURIComponent(clientId)}/integrations`);
+}
+
+export function adminSaveClientCredential(clientId: string, key: string, value: string): Promise<Credential> {
+  return request<Credential>(clientPath(clientId, key), { method: "PUT", body: JSON.stringify({ value }) });
+}
+
+export function adminRemoveClientCredential(clientId: string, key: string): Promise<Credential> {
+  return request<Credential>(`${clientPath(clientId, key)}?confirm=true`, { method: "DELETE" });
+}
+
+export function adminTestOpenAI(): Promise<ConnectionTest> {
+  return request<ConnectionTest>("/settings/integrations/openai/test", { method: "POST" });
+}
+
+export function adminTestClientWhatsApp(clientId: string): Promise<ConnectionTest> {
+  return request<ConnectionTest>(`/clients/${encodeURIComponent(clientId)}/integrations/whatsapp/test`, {
+    method: "POST",
+  });
+}
+
+// The OpenAI models Settings offers to clients (see src/sales_app/api/admin_settings.py). Every
+// change answers with the full, updated list. Changing it is owner-only.
+export interface OpenAIModel {
+  name: string;
+  id: string;
+  active: boolean;
+}
+
+const modelPath = (id: string) => `/settings/openai/models/${encodeURIComponent(id)}`;
+
+export async function adminListOpenAIModels(): Promise<OpenAIModel[]> {
+  return (await request<{ models: OpenAIModel[] }>("/settings/openai/models")).models;
+}
+
+export async function adminAddOpenAIModel(model: OpenAIModel): Promise<OpenAIModel[]> {
+  return (await request<{ models: OpenAIModel[] }>("/settings/openai/models", { method: "POST", body: JSON.stringify(model) })).models;
+}
+
+export async function adminUpdateOpenAIModel(currentId: string, model: OpenAIModel): Promise<OpenAIModel[]> {
+  return (await request<{ models: OpenAIModel[] }>(modelPath(currentId), { method: "PUT", body: JSON.stringify(model) })).models;
+}
+
+export async function adminDeleteOpenAIModel(id: string): Promise<OpenAIModel[]> {
+  return (await request<{ models: OpenAIModel[] }>(modelPath(id), { method: "DELETE" })).models;
 }

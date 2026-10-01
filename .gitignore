@@ -27,6 +27,12 @@ Thumbs.db
 /admin/
 web/admin/
 
+# Encrypted credential store and its audit trail (see sales_app.secret_store; back it up, do not commit)
+/secrets/
+
+# Client account profiles written at runtime (password hashes; back it up, do not commit)
+/profiles/
+
 # Web (REVENSA frontend prototype)
 web/node_modules/
 web/dist/

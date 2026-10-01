@@ -82,7 +82,9 @@ class Fixture:
         )
 
     def login(self, username="alice", password=PASSWORD):
-        return self.client.post("/admin/v1/auth/login", json={"username": username, "password": password})
+        return self.client.post(
+            "/admin/v1/auth/login", json={"username": username, "password": password}
+        )
 
 
 @pytest.fixture
@@ -114,7 +116,9 @@ class TestUnrestrictedDefault:
         body = client.get("/admin/v1/settings/llm").json()
         assert body["read_only"] is True
         assert body["restricted"] is False
-        assert body["providers"] == [{"provider": "openai", "wired": True, "allowed_models": None}]
+        assert body["providers"] == [
+            {"provider": "openai", "wired": True, "allowed_models": None, "models": []}
+        ]
 
     def test_a_client_scoped_editor_can_also_read_it(self, fx):
         # Platform-level, not per-client: any authenticated admin can see it, scoped or not.
@@ -129,7 +133,9 @@ class TestAllowListConfigured:
         fixture.login("root")
         body = fixture.client.get("/admin/v1/settings/llm").json()
         assert body["restricted"] is True
-        assert body["providers"] == [{"provider": "openai", "wired": True, "allowed_models": ["test-model"]}]
+        assert body["providers"] == [
+            {"provider": "openai", "wired": True, "allowed_models": ["test-model"], "models": []}
+        ]
 
     def test_a_provider_left_off_the_allow_list_has_no_allowed_models(self, tmp_path):
         # alpha's own llm.provider ("openai") must itself stay on the allow list, or client
@@ -145,8 +151,18 @@ class TestAllowListConfigured:
         body = fixture.client.get("/admin/v1/settings/llm").json()
         assert body["restricted"] is True
         by_provider = {p["provider"]: p for p in body["providers"]}
-        assert by_provider["openai"] == {"provider": "openai", "wired": True, "allowed_models": ["test-model"]}
-        assert by_provider["anthropic"] == {"provider": "anthropic", "wired": False, "allowed_models": ["claude"]}
+        assert by_provider["openai"] == {
+            "provider": "openai",
+            "wired": True,
+            "allowed_models": ["test-model"],
+            "models": [],
+        }
+        assert by_provider["anthropic"] == {
+            "provider": "anthropic",
+            "wired": False,
+            "allowed_models": ["claude"],
+            "models": [],
+        }
 
 
 class TestNoSecretsLeak:

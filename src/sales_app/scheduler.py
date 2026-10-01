@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from zoneinfo import ZoneInfo
 
+from sales_app.errors import ClientNotReadyError
 from sales_app.logs import client_logger
 from sales_app.registry import ClientRegistry
 from sales_app.wiring import ClientRuntime
@@ -143,16 +144,24 @@ class Scheduler:
 
     def _execute(self, runtime: ClientRuntime, job: Job, now: datetime) -> JobResult:
         logger = client_logger(__name__, runtime.client_id)
-        engine = runtime.engine
         try:
-            if job is Job.DAILY:
-                reports = [engine.recover_pending_replies(), engine.prepare(), engine.dispatch()]
-            elif job is Job.PREPARE:
-                reports = [engine.prepare()]
-            elif job is Job.DISPATCH:
-                reports = [engine.dispatch()]
-            else:
-                reports = [engine.recover_pending_replies()]
+            with runtime.lease() as engine:  # one Engine for the whole job, even across a refresh
+                if job is Job.DAILY:
+                    reports = [
+                        engine.recover_pending_replies(),
+                        engine.prepare(),
+                        engine.dispatch(),
+                    ]
+                elif job is Job.PREPARE:
+                    reports = [engine.prepare()]
+                elif job is Job.DISPATCH:
+                    reports = [engine.dispatch()]
+                else:
+                    reports = [engine.recover_pending_replies()]
+        except ClientNotReadyError as error:
+            # It lost a credential after the tick chose it: not a failure, nothing to back off from.
+            logger.warning("job %s skipped: %s", job.value, error)
+            return JobResult(runtime.client_id, job, ok=False, errors=(str(error),))
         except Exception as error:
             logger.exception("job %s failed", job.value)
             self._block(runtime, now)

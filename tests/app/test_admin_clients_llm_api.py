@@ -49,11 +49,19 @@ def _settings(tmp_path, **kw):
     return make_settings(tmp_path, **kw)
 
 
-def build(tmp_path, *client_ids, users=None, sessions=None, clock=None, with_anthropic=False, **settings_kw):
+def build(
+    tmp_path,
+    *client_ids,
+    users=None,
+    sessions=None,
+    clock=None,
+    with_anthropic=False,
+    **settings_kw,
+):
     clock = clock or FakeClock(NOW)
     for cid in client_ids:
         write_client(tmp_path, cid)
-    builders, made = (builders_with_anthropic(clock) if with_anthropic else fake_builders(clock))
+    builders, made = builders_with_anthropic(clock) if with_anthropic else fake_builders(clock)
     application = build_application(
         _settings(tmp_path, **settings_kw),
         env=env_for(*client_ids),
@@ -88,7 +96,9 @@ def owner(username="root") -> AdminUser:
 
 
 class Fixture:
-    def __init__(self, tmp_path, *client_ids, users=None, clock=None, with_anthropic=False, **settings_kw):
+    def __init__(
+        self, tmp_path, *client_ids, users=None, clock=None, with_anthropic=False, **settings_kw
+    ):
         self.tmp_path = tmp_path
         self.users = users if users is not None else InMemoryAdminUserStore()
         self.sessions = InMemoryAdminSessionStore()
@@ -109,12 +119,16 @@ class Fixture:
         )
 
     def login(self, username="alice", password=PASSWORD):
-        return self.client.post("/admin/v1/auth/login", json={"username": username, "password": password})
+        return self.client.post(
+            "/admin/v1/auth/login", json={"username": username, "password": password}
+        )
 
     def rebuild(self):
         """A fresh `Application` over the same clients/config dirs: what a restart would see."""
         builders, _made = (
-            builders_with_anthropic(self.clock) if self.with_anthropic else fake_builders(self.clock)
+            builders_with_anthropic(self.clock)
+            if self.with_anthropic
+            else fake_builders(self.clock)
         )
         return build_application(
             _settings(self.tmp_path, **self.settings_kw),
@@ -153,19 +167,25 @@ def as_vera(fx):
 
 class TestRequiresAuth:
     def test_anonymous_cannot_update_llm(self, fx):
-        response = fx.client.put("/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "test-model"})
+        response = fx.client.put(
+            "/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "test-model"}
+        )
         assert response.status_code == 401
 
 
 class TestPermissions:
     def test_a_viewer_cannot_update_llm(self, fx):
         client = as_vera(fx)
-        response = client.put("/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "test-model"})
+        response = client.put(
+            "/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "test-model"}
+        )
         assert response.status_code == 403
 
     def test_an_editor_can_update_llm(self, fx):
         client = as_alice(fx)
-        response = client.put("/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "new-model"})
+        response = client.put(
+            "/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "new-model"}
+        )
         assert response.status_code == 200
 
     def test_a_scoped_editor_gets_404_outside_its_scope(self, tmp_path):
@@ -181,9 +201,15 @@ class TestPermissions:
 class TestUpdateProviderAndModel:
     def test_updating_the_model_only(self, fx):
         client = as_root(fx)
-        response = client.put("/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "gpt-5"})
+        response = client.put(
+            "/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "gpt-5"}
+        )
         assert response.status_code == 200
-        assert response.json() == {"provider": "openai", "model": "gpt-5", "api_key_env": "OPENAI_API_KEY"}
+        assert response.json() == {
+            "provider": "openai",
+            "model": "gpt-5",
+            "api_key_env": "OPENAI_API_KEY",
+        }
 
     def test_updating_the_provider_too(self, tmp_path):
         fixture = Fixture(tmp_path, "alpha", with_anthropic=True)
@@ -253,7 +279,9 @@ class TestModelNotAllowed:
 class TestNoSecretsLeak:
     def test_no_secret_value_ever_appears(self, fx):
         client = as_root(fx)
-        response = client.put("/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "gpt-5"})
+        response = client.put(
+            "/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "gpt-5"}
+        )
         assert response.status_code == 200
         body = response.json()
         # The env var NAME is shown, like the read-only detail endpoint does -- never its value.

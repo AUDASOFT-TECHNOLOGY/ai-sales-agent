@@ -84,15 +84,17 @@ class LLMSection(_Section):
 
 class WhatsAppSection(_Section):
     provider: NonEmpty = "whatsapp"
-    token_env: EnvName
-    phone_number_id_env: EnvName
-    app_secret_env: EnvName  # signs webhook requests; may be shared by clients of one Meta app
-    api_version: NonEmpty = "v21.0"
+    # Environment variable NAMES, used only when the credential store holds no value (see
+    # sales_app.config.loader). Optional: credentials normally come from the store, set in Admin.
+    token_env: EnvName | None = None
+    phone_number_id_env: EnvName | None = None
+    app_secret_env: EnvName | None = None  # a client may point at a Meta app of its own
+    api_version: NonEmpty = "v21.0"  # the default; a global setting in the store wins
 
     @field_validator("token_env", "phone_number_id_env", "app_secret_env")
     @classmethod
-    def _check_env(cls, value: str) -> str:
-        return _reject_placeholder(value)
+    def _check_env(cls, value: str | None) -> str | None:
+        return None if value is None else _reject_placeholder(value)
 
 
 class ScheduleSection(_Section):

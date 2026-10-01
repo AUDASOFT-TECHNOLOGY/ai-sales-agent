@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { Glass } from "../ui/Glass";
 import { TextInput } from "../ui/Controls";
 import { Button } from "../ui/Button";
+import { BrandMark } from "../ui/Brand";
 import { AdminApiError } from "./api";
 import { useAdminAuth } from "./AdminAuthContext";
 
@@ -37,9 +38,10 @@ export function AdminLoginPage() {
   return (
     <div className="admin-page">
       <Glass level={2} as="form" className="admin-card" onSubmit={onSubmit} aria-label="Admin sign in">
-        <div>
+        <div className="admin-card__head">
+          <BrandMark size={36} />
           <h1 className="t-h1">Revansa Admin</h1>
-          <p className="c-2">Sign in with your operator account.</p>
+          <p className="c-2 t-body-sm">Sign in with your operator account.</p>
         </div>
         <TextInput
           label="Username"
@@ -62,7 +64,7 @@ export function AdminLoginPage() {
           required
         />
         {error ? (
-          <p className="c-danger t-body-sm" role="alert">
+          <p className="admin-alert admin-alert--danger" role="alert">
             {error}
           </p>
         ) : null}

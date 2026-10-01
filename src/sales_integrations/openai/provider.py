@@ -26,6 +26,9 @@ class OpenAIProvider:
         *,
         model: str,
         api_key: str | None = None,
+        organization: str | None = None,
+        project: str | None = None,
+        base_url: str | None = None,
         client: Any | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = DEFAULT_MAX_RETRIES,
@@ -36,7 +39,14 @@ class OpenAIProvider:
         if client is None:
             from openai import OpenAI  # imported lazily: no SDK object exists until needed
 
-            client = OpenAI(api_key=api_key, timeout=timeout, max_retries=max_retries)
+            client = OpenAI(
+                api_key=api_key,
+                organization=organization,
+                project=project,
+                base_url=base_url,
+                timeout=timeout,
+                max_retries=max_retries,
+            )
         self._client = client
 
     def complete(self, request: LLMRequest) -> LLMResponse:

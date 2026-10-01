@@ -67,10 +67,14 @@ class Fixture:
         )
         # https base_url: a Secure cookie (the real default) is otherwise never re-sent by the
         # test client's cookie jar, since http://testserver is not a secure context.
-        self.client = TestClient(create_app(self.application, run_scheduler=False), base_url="https://testserver")
+        self.client = TestClient(
+            create_app(self.application, run_scheduler=False), base_url="https://testserver"
+        )
 
     def login(self, username="alice", password=PASSWORD):
-        return self.client.post("/admin/v1/auth/login", json={"username": username, "password": password})
+        return self.client.post(
+            "/admin/v1/auth/login", json={"username": username, "password": password}
+        )
 
 
 @pytest.fixture

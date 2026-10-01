@@ -20,14 +20,22 @@ settings change (see `sales_app.config.resolution`), it takes effect on the clie
 rebuild, not instantly.
 """
 
+import base64
+import binascii
+import re
+import shutil
+from dataclasses import replace
 from typing import Literal
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from sales_app.admin_auth import AdminRole, AdminUser
+from sales_app.admin_auth.passwords import hash_password
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency, require_role
 from sales_app.bootstrap import Application
+from sales_app.client_profiles import LOGIN_PATTERN, ClientProfile, normalize_login
 from sales_app.config import (
     ClientConfig,
     build_llm_registry,
@@ -38,6 +46,9 @@ from sales_app.config import (
 )
 from sales_app.config_store import ConfigConflictError
 from sales_app.config_store.models import CLIENT_ID_PATTERN
+from sales_app.llm_models import check_model
+from sales_app.secret_store import client_scope
+from sales_app.wiring import ClientRuntime
 
 WRITE_ROLES = (AdminRole.OWNER, AdminRole.OPERATOR, AdminRole.EDITOR)
 
@@ -50,6 +61,17 @@ class ClientProvidersResponse(BaseModel):
     whatsapp: str | None = None
 
 
+class ClientHealthResponse(BaseModel):
+    """What `ClientRegistry.health()` already reports for an active client -- nothing computed
+    here. Absent (None) for a disabled client: it has no runtime, hence nothing to report."""
+
+    status: str  # "ready" or "degraded"
+    last_error: str | None = None
+    last_error_at: str | None = None
+    consecutive_failures: int = 0
+    last_runs: dict[str, str] = {}
+
+
 class ClientSummaryResponse(BaseModel):
     client_id: str
     display_name: str
@@ -58,6 +80,8 @@ class ClientSummaryResponse(BaseModel):
     timezone: str | None = None
     daily_action_limit: int | None = None
     providers: ClientProvidersResponse
+    llm_model: str | None = None  # the selected model id, e.g. "gpt-4o" -- never a secret
+    health: ClientHealthResponse | None = None  # active clients only
 
 
 class ClientSheetsResponse(BaseModel):
@@ -102,7 +126,62 @@ class ClientScheduleResponse(BaseModel):
     recover_every_minutes: int | None = None
 
 
+class ClientAccountResponse(BaseModel):
+    """The client's account profile (see `sales_app.client_profiles`). Never carries the password
+    or its hash. `whatsapp_number` is the business number the client's sales agent writes from; it
+    is NOT Meta's phone number id."""
+
+    login: str
+    whatsapp_number: str | None = None
+    logo: str | None = None
+    must_change_password: bool = True
+
+
+class ClientMetaResponse(BaseModel):
+    """Where this client's number stands with Meta. Only ever `not_connected` or
+    `credentials_stored`: there is no official Meta onboarding in Revansa yet, so nothing here can
+    say "connected" (that would need a verified onboarding). Booleans only -- never a token or a
+    Meta id."""
+
+    status: Literal["not_connected", "credentials_stored"] = "not_connected"
+    credentials_stored: bool = False
+
+
+class CreateClientRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=80)
+    logo: str | None = None  # optional; a small png/jpeg/webp `data:` URL
+    login: str
+    temporary_password: str = Field(min_length=8, max_length=128)
+    llm_provider: str = Field(min_length=1)
+    llm_model: str = Field(min_length=1)
+    status: Literal["active", "inactive"]
+    whatsapp_number: str = Field(min_length=1, max_length=40)
+
+
+class UpdateClientRequest(BaseModel):
+    """A partial edit: only the fields sent are changed. `logo` may be sent as null to remove it.
+    `new_password` is optional: left out, the current password is kept. There is deliberately no
+    field for any Meta credential."""
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+    logo: str | None = None
+    login: str | None = None
+    new_password: str | None = Field(default=None, min_length=8, max_length=128)
+    whatsapp_number: str | None = Field(default=None, min_length=1, max_length=40)
+    llm_provider: str | None = Field(default=None, min_length=1)
+    llm_model: str | None = Field(default=None, min_length=1)
+    daily_action_limit: int | None = Field(default=None, ge=1, le=1000)
+    status: Literal["active", "inactive"] | None = None
+
+
 class ClientDetailResponse(ClientSummaryResponse):
+    # True when the stored status (client.yaml `enabled`) differs from what is running: a client's
+    # runtime is only started or stopped at application start.
+    restart_required: bool = False
+    account: ClientAccountResponse | None = None  # None: no profile on record for this client
+    meta: ClientMetaResponse = ClientMetaResponse()
+    revenue: float | None = None  # always None for now: no revenue data source exists yet
+    prospects_contacted: int | None = None  # None: not readable (disabled client, or Sheet error)
     max_attempts: int | None = None
     opt_out_keywords: list[str] = []
     sheets: ClientSheetsResponse
@@ -110,6 +189,118 @@ class ClientDetailResponse(ClientSummaryResponse):
     whatsapp: ClientWhatsAppResponse
     brain: ClientBrainResponse
     schedule: ClientScheduleResponse
+
+
+MAX_LOGO_BYTES = 256 * 1024
+_LOGO_PATTERN = re.compile(r"^data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$")
+_MAGIC = {"png": b"\x89PNG\r\n\x1a\n", "jpeg": b"\xff\xd8\xff", "webp": b"RIFF"}
+
+
+def _check_logo(logo: str) -> None:
+    """A logo is stored as a data URL, so it must be a small, genuine raster image. SVG is refused
+    on purpose: it can carry script."""
+    match = _LOGO_PATTERN.match(logo)
+    if match is None:
+        raise HTTPException(400, "logo must be a png, jpeg or webp image")
+    try:
+        data = base64.b64decode(match.group(2), validate=True)
+    except binascii.Error:
+        raise HTTPException(400, "logo is not valid base64") from None
+    if len(data) > MAX_LOGO_BYTES:
+        raise HTTPException(400, f"logo must be at most {MAX_LOGO_BYTES // 1024} KB")
+    if not data.startswith(_MAGIC[match.group(1)]):
+        raise HTTPException(400, "logo content does not match its image type")
+
+
+_WHATSAPP_NUMBER_PATTERN = re.compile(r"^\+?[0-9][0-9 ().-]*$")
+
+
+def _clean_whatsapp_number(value: str) -> str:
+    """The business number as entered, whitespace collapsed. Only its shape is checked (8-15
+    digits, the E.164 range): entering a number is not Meta authorising it."""
+    number = " ".join(value.split())
+    digits = _digits(number)
+    if not _WHATSAPP_NUMBER_PATTERN.match(number) or not 8 <= len(digits) <= 15:
+        raise HTTPException(
+            400, "WhatsApp number must be a phone number with 8 to 15 digits, e.g. +216 22 768 307"
+        )
+    return number
+
+
+def _digits(number: str) -> str:
+    return "".join(ch for ch in number if ch.isdigit())
+
+
+def _meta_status(application: Application, client_id: str) -> ClientMetaResponse:
+    """`credentials_stored` only if the secret store holds both Meta values for this client. That
+    is a fact about storage, not about Meta: nothing verifies it, so it is never "connected"."""
+    stored = {
+        s.key for s in application.credentials.describe(client_scope(client_id)) if s.configured
+    }
+    complete = {"whatsapp.access_token", "whatsapp.phone_number_id"} <= stored
+    return ClientMetaResponse(
+        status="credentials_stored" if complete else "not_connected", credentials_stored=complete
+    )
+
+
+def _slug(display_name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")
+
+
+def _free_client_id(application: Application, base: str) -> str:
+    taken = {p.client_id for p in application.client_profiles.list()}
+    candidate, n = base, 2
+    while candidate in taken or (application.settings.clients_dir / candidate).exists():
+        candidate, n = f"{base}-{n}", n + 1
+    return candidate
+
+
+def _new_client_yaml(client_id: str, display_name: str, provider: str, model: str) -> dict:
+    """A new client always starts disabled: it has no Brain, Sheet or WhatsApp wiring yet, and an
+    enabled client that fails validation would stop the whole application at its next start."""
+    return {
+        "client_id": client_id,
+        "display_name": display_name,
+        "enabled": False,
+        "mode": "dry_run",
+        "timezone": "UTC",
+        "daily_action_limit": 20,
+        "max_attempts": 3,
+        "opt_out_keywords": ["stop"],
+        "brain": {"factory": "TODO", "settings": {}},
+        "sheets": {
+            "provider": "google_sheets",
+            "spreadsheet_id": "TODO",
+            "prospects_tab": "Prospects",
+            "actions_tab": "Actions",
+            "messages_tab": "Messages",
+            "log_tab": "Log",
+            "column_mapping": {},
+            "credentials_env": "GOOGLE_APPLICATION_CREDENTIALS",
+        },
+        "llm": {"provider": provider, "api_key_env": "OPENAI_API_KEY", "model": model},
+        # No credential names, and not the client's WhatsApp number (that is profile data): Meta's
+        # access token and phone number id come from the WhatsApp onboarding and live in the
+        # credential store (see sales_app.secret_store).
+        "whatsapp": {"provider": "whatsapp"},
+        "schedule": {
+            "daily_at": "09:00",
+            "days": ["mon", "tue", "wed", "thu", "fri", "sat"],
+            "prepare_every_minutes": 60,
+            "dispatch_every_minutes": 5,
+            "recover_every_minutes": 15,
+        },
+    }
+
+
+def _prospects_contacted(runtime: ClientRuntime) -> int | None:
+    """Distinct prospects that received at least one sent message (the Core's own count). Read-only; None if the client's
+    data cannot be read right now (the page then says so instead of showing a made-up number)."""
+    try:
+        with runtime.lease() as engine:
+            return engine.prospects_contacted()
+    except Exception:  # noqa: BLE001 - an unreachable Sheet (or a client not ready) must not break the page
+        return None
 
 
 def _str_or_none(value: object) -> str | None:
@@ -137,7 +328,31 @@ def _providers_from_raw(raw: dict) -> ClientProvidersResponse:
     )
 
 
-def _summary_from_config(config: ClientConfig) -> ClientSummaryResponse:
+def _health_from_runtime(runtime: ClientRuntime) -> ClientHealthResponse:
+    snapshot = runtime.health.snapshot()
+    return ClientHealthResponse(
+        status=str(snapshot["status"]),
+        last_error=snapshot["last_error"],  # type: ignore[arg-type]
+        last_error_at=snapshot["last_error_at"],  # type: ignore[arg-type]
+        consecutive_failures=int(snapshot["consecutive_failures"]),  # type: ignore[call-overload]
+        last_runs=dict(snapshot["last_runs"]),  # type: ignore[call-overload]
+    )
+
+
+def _health_for(application: Application, config: ClientConfig) -> ClientHealthResponse | None:
+    """A client's health; one that lacks credentials reports `not_ready` and what is missing."""
+    missing = application.registry.missing(config.client_id)
+    if missing:
+        return ClientHealthResponse(
+            status="not_ready", last_error=f"missing credentials: {'; '.join(missing)}"
+        )
+    runtime = application.registry.get(config.client_id)
+    return _health_from_runtime(runtime) if runtime is not None else None
+
+
+def _summary_from_config(
+    config: ClientConfig, health: ClientHealthResponse | None = None
+) -> ClientSummaryResponse:
     spec = config.spec
     return ClientSummaryResponse(
         client_id=config.client_id,
@@ -149,6 +364,8 @@ def _summary_from_config(config: ClientConfig) -> ClientSummaryResponse:
         providers=ClientProvidersResponse(
             sheets=spec.sheets.provider, llm=spec.llm.provider, whatsapp=spec.whatsapp.provider
         ),
+        llm_model=spec.llm.model,
+        health=health,
     )
 
 
@@ -156,18 +373,21 @@ def _summary_from_raw(client_id: str, raw: dict) -> ClientSummaryResponse:
     return ClientSummaryResponse(
         client_id=client_id,
         display_name=_str_or_none(raw.get("display_name")) or client_id,
-        status="disabled",
+        status="disabled" if raw.get("enabled", True) is False else "active",
         mode=_str_or_none(raw.get("mode")),
         timezone=_str_or_none(raw.get("timezone")),
         daily_action_limit=_int_or_none(raw.get("daily_action_limit")),
         providers=_providers_from_raw(raw),
+        llm_model=_str_or_none(_section(raw, "llm").get("model")),
     )
 
 
-def _detail_from_config(config: ClientConfig) -> ClientDetailResponse:
+def _detail_from_config(
+    config: ClientConfig, health: ClientHealthResponse | None = None
+) -> ClientDetailResponse:
     spec = config.spec
     return ClientDetailResponse(
-        **_summary_from_config(config).model_dump(),
+        **_summary_from_config(config, health).model_dump(),
         max_attempts=spec.max_attempts,
         opt_out_keywords=list(spec.opt_out_keywords),
         sheets=ClientSheetsResponse(
@@ -254,7 +474,8 @@ def _disabled_client_ids(application: Application) -> list[str]:
 
 def _all_summaries(application: Application) -> list[ClientSummaryResponse]:
     summaries = [
-        _summary_from_config(runtime.config) for runtime in application.registry.runtimes()
+        _summary_from_config(config, _health_for(application, config))
+        for config in application.registry.configs()
     ]
     for client_id in _disabled_client_ids(application):
         raw, _problem = read_wiring(application.settings.clients_dir / client_id)
@@ -263,39 +484,37 @@ def _all_summaries(application: Application) -> list[ClientSummaryResponse]:
 
 
 def _find_detail(application: Application, client_id: str) -> ClientDetailResponse | None:
-    runtime = application.registry.get(client_id)
-    if runtime is not None:
-        return _detail_from_config(runtime.config)
+    config = application.registry.get_config(client_id)
+    if config is not None:
+        return _detail_from_config(config, _health_for(application, config))
     if not CLIENT_ID_PATTERN.match(client_id):
         return None
     directory = application.settings.clients_dir / client_id
     if not directory.is_dir():
         return None
     raw, _problem = read_wiring(directory)
-    if raw is None or raw.get("enabled", True) is not False:
-        return None  # anything that isn't an active runtime or a genuinely disabled client: 404
-    return _detail_from_raw(client_id, raw)
+    if raw is None:
+        return None  # not a client directory: 404
+    return _detail_from_raw(client_id, raw)  # disabled, or activated and awaiting a restart
 
 
-def _wiring_and_base_document(
-    application: Application, client_id: str
-) -> tuple[dict, dict] | None:
+def _wiring_and_base_document(application: Application, client_id: str) -> tuple[dict, dict] | None:
     """The raw `client.yaml` plus the current settings document to build a new version on top of
     (so every other setting survives), for any client the Admin API can see (same existence rules
     as `_find_detail`). None if there is no such client."""
-    runtime = application.registry.get(client_id)
-    if runtime is not None:
-        raw, _problem = read_wiring(runtime.config.directory)
+    config = application.registry.get_config(client_id)
+    if config is not None:
+        raw, _problem = read_wiring(config.directory)
         if raw is None:
             return None
-        return raw, extract_document(runtime.config.spec)
+        return raw, extract_document(config.spec)
     if not CLIENT_ID_PATTERN.match(client_id):
         return None
     directory = application.settings.clients_dir / client_id
     if not directory.is_dir():
         return None
     raw, _problem = read_wiring(directory)
-    if raw is None or raw.get("enabled", True) is not False:
+    if raw is None:
         return None
     seeded = import_document(client_id, raw)
     if seeded.errors or seeded.document is None:
@@ -303,24 +522,307 @@ def _wiring_and_base_document(
     return raw, seeded.document
 
 
+_ENABLED_LINE = re.compile(r"^enabled:.*$", re.MULTILINE)
+
+
+def _stored_enabled(application: Application, client_id: str) -> bool | None:
+    """`enabled` as written in the client's `client.yaml` (None: no readable client.yaml)."""
+    if not CLIENT_ID_PATTERN.match(client_id):
+        return None
+    raw, _problem = read_wiring(application.settings.clients_dir / client_id)
+    return None if raw is None else raw.get("enabled", True) is not False
+
+
+def _write_enabled(application: Application, client_id: str, enabled: bool) -> None:
+    """Flip only the `enabled` line, so the operator's comments and layout in client.yaml survive."""
+    path = application.settings.clients_dir / client_id / "client.yaml"
+    text = path.read_text(encoding="utf-8")
+    line = f"enabled: {'true' if enabled else 'false'}"
+    if _ENABLED_LINE.search(text):
+        text = _ENABLED_LINE.sub(line, text, count=1)
+    else:
+        text = f"{line}\n{text}"
+    path.write_text(text, encoding="utf-8")
+
+
+def _unvalidated_wiring(application: Application, client_id: str) -> dict | None:
+    if not CLIENT_ID_PATTERN.match(client_id):
+        return None
+    directory = application.settings.clients_dir / client_id
+    if not directory.is_dir():
+        return None
+    return read_wiring(directory)[0]
+
+
+def _write_skeleton_settings(
+    application: Application, client_id: str, raw: dict, changes: dict
+) -> None:
+    updated = {**raw}
+    for key in ("display_name", "daily_action_limit"):
+        if key in changes:
+            updated[key] = changes[key]
+    if "llm" in changes:
+        updated["llm"] = {**_section(raw, "llm"), **changes["llm"]}
+    path = application.settings.clients_dir / client_id / "client.yaml"
+    path.write_text(yaml.safe_dump(updated, sort_keys=False), encoding="utf-8")
+
+
+def _with_stored_status(
+    application: Application, summary: ClientSummaryResponse
+) -> ClientSummaryResponse:
+    stored = _stored_enabled(application, summary.client_id)
+    if stored is None:
+        return summary
+    return summary.model_copy(update={"status": "active" if stored else "disabled"})
+
+
 def create_admin_clients_router(application: Application) -> APIRouter:
     get_current_admin = make_current_admin_dependency(application.admin_auth)
     require_write_admin = require_role(get_current_admin, *WRITE_ROLES)
+    require_owner = require_role(get_current_admin, AdminRole.OWNER)
     router = APIRouter(prefix="/admin/v1", tags=["admin"])
 
     @router.get("/clients", response_model=list[ClientSummaryResponse])
     def list_clients(admin: AdminUser = Depends(get_current_admin)) -> list[ClientSummaryResponse]:
-        return [summary for summary in _all_summaries(application) if admin.can_reach(summary.client_id)]
+        return [
+            _with_stored_status(application, summary)
+            for summary in _all_summaries(application)
+            if admin.can_reach(summary.client_id)
+        ]
+
+    def detail_response(client_id: str) -> ClientDetailResponse:
+        detail = _find_detail(application, client_id)
+        if detail is None:
+            raise HTTPException(404, "no such client")
+        profile = application.client_profiles.get(client_id)
+        runtime = application.registry.get(client_id)
+        stored = _stored_enabled(application, client_id)
+        running = application.registry.get_config(client_id) is not None
+        return detail.model_copy(
+            update={
+                "status": detail.status if stored is None else ("active" if stored else "disabled"),
+                "restart_required": stored is not None and stored != running,
+                "account": (
+                    ClientAccountResponse(
+                        login=profile.login,
+                        whatsapp_number=profile.whatsapp_number,
+                        logo=profile.logo,
+                        must_change_password=profile.must_change_password,
+                    )
+                    if profile is not None
+                    else None
+                ),
+                "meta": _meta_status(application, client_id),
+                "prospects_contacted": _prospects_contacted(runtime) if runtime else None,
+            }
+        )
 
     @router.get("/clients/{client_id}", response_model=ClientDetailResponse)
     def get_client(
         client_id: str, admin: AdminUser = Depends(get_current_admin)
     ) -> ClientDetailResponse:
         ensure_client_access(admin, client_id)  # 404 before existence is even checked
-        detail = _find_detail(application, client_id)
-        if detail is None:
+        return detail_response(client_id)
+
+    @router.patch("/clients/{client_id}", response_model=ClientDetailResponse)
+    def update_client(
+        client_id: str,
+        body: UpdateClientRequest,
+        admin: AdminUser = Depends(require_owner),
+    ) -> ClientDetailResponse:
+        ensure_client_access(admin, client_id)  # 404 before existence is even checked
+        found = _wiring_and_base_document(application, client_id)
+        profile = application.client_profiles.get(client_id)
+        # A client that only exists as the skeleton `client.yaml` its creation wrote (no Brain yet)
+        # has no valid settings document: its name, quota and model are edited in that file.
+        raw = found[0] if found is not None else _unvalidated_wiring(application, client_id)
+        if raw is None:
             raise HTTPException(404, "no such client")
-        return detail
+        base_document = found[1] if found is not None else None
+        sent = body.model_fields_set
+        others = [p for p in application.client_profiles.list() if p.client_id != client_id]
+
+        changes: dict = {}  # profile fields
+        document_changes: dict = {}  # settings-document fields
+        if body.display_name is not None:
+            display_name = body.display_name.strip()
+            if not display_name:
+                raise HTTPException(400, "client name must not be empty")
+            document_changes["display_name"] = display_name
+        if body.login is not None:
+            login = normalize_login(body.login)
+            if not LOGIN_PATTERN.match(login):
+                raise HTTPException(
+                    400, "login must be 3-64 characters: letters, digits and . _ @ + - only"
+                )
+            holder = application.client_profiles.get_by_login(login)
+            if holder is not None and holder.client_id != client_id:
+                raise HTTPException(409, "this login is already used")
+            changes["login"] = login
+        if body.new_password is not None:
+            # An admin-set password is a temporary one, as at creation: the client must replace it.
+            changes["password_hash"] = hash_password(body.new_password)
+            changes["must_change_password"] = True
+        if "logo" in sent:
+            if body.logo is not None:
+                _check_logo(body.logo)
+            changes["logo"] = body.logo
+        if body.whatsapp_number is not None:
+            whatsapp_number = _clean_whatsapp_number(body.whatsapp_number)
+            if any(
+                p.whatsapp_number and _digits(p.whatsapp_number) == _digits(whatsapp_number)
+                for p in others
+            ):
+                raise HTTPException(409, "this WhatsApp number already belongs to another client")
+            changes["whatsapp_number"] = whatsapp_number
+        if (body.llm_provider is None) != (body.llm_model is None):
+            raise HTTPException(400, "llm_provider and llm_model must be sent together")
+        if body.llm_provider is not None and body.llm_model is not None:
+            provider, model = body.llm_provider.strip(), body.llm_model.strip()
+            if provider not in application.llm_providers:
+                raise HTTPException(
+                    400, f"llm.provider {provider!r} is not wired in this deployment"
+                )
+            reason = check_model(
+                build_llm_registry(application.settings.allowed_llm_models),
+                application.credentials,
+                provider,
+                model,
+            )
+            if reason is not None:
+                raise HTTPException(400, reason)
+            document_changes["llm"] = {"provider": provider, "model": model}
+        if body.daily_action_limit is not None:
+            document_changes["daily_action_limit"] = body.daily_action_limit
+        if body.status == "active" and _stored_enabled(application, client_id) is False:
+            # Same guard as creation: an enabled client that fails validation would stop the whole
+            # application at its next start.
+            check = import_document(client_id, raw)
+            if check.errors:
+                raise HTTPException(
+                    400,
+                    "this client cannot be activated yet: " + "; ".join(check.errors),
+                )
+
+        if (
+            changes
+            and profile is None
+            and not {"login", "password_hash", "whatsapp_number"} <= (changes.keys())
+        ):
+            raise HTTPException(
+                400,
+                "this client has no account profile yet: send login, new_password and "
+                "whatsapp_number together to create it",
+            )
+        if document_changes and base_document is None:
+            _write_skeleton_settings(application, client_id, raw, document_changes)
+        elif document_changes and base_document is not None:
+            check = validate_settings_document(
+                client_id, raw, {**base_document, **document_changes}
+            )
+            if check.errors or check.document is None:
+                raise HTTPException(400, "; ".join(check.errors) or "invalid configuration")
+            current = application.config_store.current(client_id)
+            try:
+                application.config_store.publish(
+                    client_id,
+                    check.document,
+                    author=f"admin:{admin.username}",
+                    note="update client",
+                    expected_parent=current.version if current is not None else None,
+                )
+            except ConfigConflictError as error:
+                raise HTTPException(409, str(error)) from error
+        if changes:
+            try:
+                if profile is None:  # first account for a client that only had a client.yaml
+                    application.client_profiles.create(
+                        ClientProfile(
+                            client_id=client_id,
+                            created_at=application.clock.now(),
+                            created_by=f"admin:{admin.username}",
+                            **changes,
+                        )
+                    )
+                else:
+                    application.client_profiles.update(replace(profile, **changes))
+            except ValueError as error:  # e.g. a concurrent request took the same login
+                raise HTTPException(409, str(error)) from error
+        if body.status is not None:
+            _write_enabled(application, client_id, body.status == "active")
+
+        return detail_response(client_id)
+
+    @router.post("/clients", response_model=ClientSummaryResponse, status_code=201)
+    def create_client(
+        body: CreateClientRequest, admin: AdminUser = Depends(require_owner)
+    ) -> ClientSummaryResponse:
+        display_name = body.display_name.strip()
+        login = normalize_login(body.login)
+        provider, model = body.llm_provider.strip(), body.llm_model.strip()
+        if not display_name:
+            raise HTTPException(400, "client name must not be empty")
+        if not LOGIN_PATTERN.match(login):
+            raise HTTPException(
+                400, "login must be 3-64 characters: letters, digits and . _ @ + - only"
+            )
+        if body.status == "active":
+            raise HTTPException(
+                400,
+                "a new client cannot be active yet: its Brain, Google Sheet and WhatsApp are "
+                "not configured. Create it as inactive.",
+            )
+        if provider not in application.llm_providers:
+            raise HTTPException(400, f"llm.provider {provider!r} is not wired in this deployment")
+        reason = check_model(
+            build_llm_registry(application.settings.allowed_llm_models),
+            application.credentials,
+            provider,
+            model,
+        )
+        if reason is not None:
+            raise HTTPException(400, reason)
+        if body.logo is not None:
+            _check_logo(body.logo)
+        whatsapp_number = _clean_whatsapp_number(body.whatsapp_number)
+        if any(
+            p.whatsapp_number and _digits(p.whatsapp_number) == _digits(whatsapp_number)
+            for p in application.client_profiles.list()
+        ):
+            raise HTTPException(409, "this WhatsApp number already belongs to another client")
+        base = _slug(display_name)
+        if not base or not CLIENT_ID_PATTERN.match(base):
+            raise HTTPException(400, "client name must contain letters or digits")
+        if application.client_profiles.get_by_login(login) is not None:
+            raise HTTPException(409, "this login is already used")
+
+        client_id = _free_client_id(application, base)
+        directory = application.settings.clients_dir / client_id
+        directory.mkdir(parents=True)
+        try:
+            raw = _new_client_yaml(client_id, display_name, provider, model)
+            (directory / "client.yaml").write_text(
+                yaml.safe_dump(raw, sort_keys=False), encoding="utf-8"
+            )
+            application.client_profiles.create(
+                ClientProfile(
+                    client_id=client_id,
+                    login=login,
+                    password_hash=hash_password(body.temporary_password),
+                    logo=body.logo,
+                    whatsapp_number=whatsapp_number,
+                    created_at=application.clock.now(),
+                    created_by=f"admin:{admin.username}",
+                )
+            )
+        except ValueError as error:  # e.g. a concurrent request took the same login
+            shutil.rmtree(directory, ignore_errors=True)
+            raise HTTPException(409, str(error)) from error
+        except Exception:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+        application.registry.add_disabled(client_id)
+        return _summary_from_raw(client_id, raw)
 
     @router.put("/clients/{client_id}/llm", response_model=ClientLLMResponse)
     def update_client_llm(
@@ -334,7 +836,7 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         if provider not in application.llm_providers:
             raise HTTPException(400, f"llm.provider {provider!r} is not wired in this deployment")
         registry = build_llm_registry(application.settings.allowed_llm_models)
-        reason = registry.check(provider, model)
+        reason = check_model(registry, application.credentials, provider, model)
         if reason is not None:
             raise HTTPException(400, reason)
 

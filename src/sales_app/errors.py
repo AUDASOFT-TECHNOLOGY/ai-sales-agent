@@ -13,3 +13,12 @@ class ConfigurationError(Exception):
 
 class RuntimeBuildError(Exception):
     """A client's runtime could not be assembled (bad Brain, unknown provider, adapter failure)."""
+
+
+class ClientNotReadyError(Exception):
+    """The client is missing credentials: it takes no new work until they are set."""
+
+    def __init__(self, client_id: str, missing: Sequence[str]) -> None:
+        self.client_id = client_id
+        self.missing = tuple(missing)
+        super().__init__(f"client {client_id} is not ready: {'; '.join(self.missing)}")
