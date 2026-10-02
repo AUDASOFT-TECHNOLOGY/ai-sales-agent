@@ -6,72 +6,41 @@ deployment's allow-list (`Settings.allowed_llm_models`), which stays a hard guar
 pass both. Nothing is invented: until the Admin adds a model (or an older deployment still holds the
 two legacy `openai.model_sol` / `openai.model_lune` ids, which are shown as models until the list is
 first saved) a provider has no model of its own and keeps the old behaviour.
+
+The list's parsing lives in `sales_app.config.offered_models`, which the configuration loader also
+uses: a client whose model is not active there is not ready.
 """
 
 import json
-import re
-from collections.abc import Mapping
-from dataclasses import dataclass
 
 from sales_app.config.llm_registry import LLMRegistry
-from sales_app.config.secrets import OPENAI_MODEL_LUNE, OPENAI_MODEL_SOL, OPENAI_MODELS
+from sales_app.config.offered_models import (
+    MAX_NAME_LENGTH,
+    MODEL_ID_PATTERN,
+    OfferedModel,
+    models_from,
+    validate_model,
+)
+from sales_app.config.secrets import OPENAI_MODELS
 from sales_app.secret_store import GLOBAL_SCOPE, CredentialService, InvalidCredentialError
 
-MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-MAX_NAME_LENGTH = 80
-
-_LEGACY_OPENAI: Mapping[str, str] = {OPENAI_MODEL_SOL: "GPT Sol", OPENAI_MODEL_LUNE: "GPT Lune"}
-
-
-@dataclass(frozen=True, slots=True)
-class OfferedModel:
-    name: str
-    id: str
-    active: bool = True
-
-
-def validate_model(model: OfferedModel) -> OfferedModel:
-    """The cleaned model, or InvalidCredentialError describing the rule that was broken."""
-    name, model_id = model.name.strip(), model.id.strip()
-    if not name or len(name) > MAX_NAME_LENGTH or any(ord(ch) < 32 for ch in name):
-        raise InvalidCredentialError(f"model name must be 1-{MAX_NAME_LENGTH} printable characters")
-    if not MODEL_ID_PATTERN.match(model_id):
-        raise InvalidCredentialError("model id must be letters, digits, - _ . : only")
-    return OfferedModel(name, model_id, model.active)
-
-
-def _parse(raw: str) -> list[OfferedModel]:
-    try:
-        items = json.loads(raw)
-    except ValueError:
-        return []
-    models: list[OfferedModel] = []
-    for item in items if isinstance(items, list) else []:
-        if not isinstance(item, dict):
-            continue
-        try:
-            model = validate_model(
-                OfferedModel(item.get("name"), item.get("id"), item.get("active") is True)  # type: ignore[arg-type]
-            )
-        except (InvalidCredentialError, AttributeError):
-            continue  # a hand-edited entry that breaks the rules is ignored, not trusted
-        if all(m.id != model.id for m in models):
-            models.append(model)
-    return models
+__all__ = [
+    "MAX_NAME_LENGTH",
+    "MODEL_ID_PATTERN",
+    "OfferedModel",
+    "check_model",
+    "configured_models",
+    "model_names",
+    "save_models",
+    "stored_models",
+    "validate_model",
+]
 
 
 def stored_models(credentials: CredentialService) -> list[OfferedModel] | None:
     """The OpenAI models of Settings; None when the Admin never saved the list and no legacy id
     exists either."""
-    raw = credentials.reveal(GLOBAL_SCOPE, OPENAI_MODELS)
-    if raw is not None:
-        return _parse(raw)
-    legacy = [
-        OfferedModel(name, value)
-        for key, name in _LEGACY_OPENAI.items()
-        if (value := credentials.reveal(GLOBAL_SCOPE, key))
-    ]
-    return list({m.id: m for m in legacy}.values()) or None
+    return models_from(lambda key: credentials.reveal(GLOBAL_SCOPE, key))
 
 
 def save_models(

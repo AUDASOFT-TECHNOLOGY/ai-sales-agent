@@ -3,10 +3,19 @@
 import json
 from types import SimpleNamespace
 
+import httpx
+import openai
 import pytest
 
 from sales_core.contracts import LLMMessage, LLMRequest, LLMRole
-from sales_core.ports import LLMProvider
+from sales_core.ports import (
+    LLMAuthError,
+    LLMError,
+    LLMModelError,
+    LLMProvider,
+    LLMRateLimitError,
+    LLMTimeoutError,
+)
 from sales_integrations.openai import LLMOutputError, OpenAIProvider
 
 
@@ -108,3 +117,129 @@ def test_a_model_name_is_required():
 
 def test_the_real_sdk_client_is_built_lazily_and_offline():
     assert isinstance(OpenAIProvider(model="gpt-test", api_key="sk-test"), LLMProvider)
+
+
+# ---- neutral errors, defensive reading of the answer ------------------------------------------
+
+KEY = "sk-LIVE-very-secret-marker-123"
+HTTP_REQUEST = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+
+
+def status_error(cls, status):
+    """An SDK status error whose own message quotes the API key, as OpenAI's 401 does."""
+    response = httpx.Response(status, request=HTTP_REQUEST)
+    return cls(f"Incorrect API key provided: {KEY}", response=response, body=None)
+
+
+def raising(error) -> OpenAIProvider:
+    def create(**kwargs):
+        raise error
+
+    sdk = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    return OpenAIProvider(model="gpt-test", client=sdk)
+
+
+@pytest.mark.parametrize(
+    ("sdk_error", "expected"),
+    [
+        (status_error(openai.AuthenticationError, 401), LLMAuthError),
+        (status_error(openai.PermissionDeniedError, 403), LLMAuthError),
+        (status_error(openai.RateLimitError, 429), LLMRateLimitError),
+        (openai.APITimeoutError(request=HTTP_REQUEST), LLMTimeoutError),
+        (status_error(openai.NotFoundError, 404), LLMModelError),
+        (status_error(openai.BadRequestError, 400), LLMModelError),
+        (status_error(openai.UnprocessableEntityError, 422), LLMModelError),
+        (openai.APIConnectionError(request=HTTP_REQUEST), LLMError),
+        (status_error(openai.InternalServerError, 500), LLMError),
+    ],
+)
+def test_sdk_errors_become_neutral_llm_errors(sdk_error, expected):
+    with pytest.raises(LLMError) as raised:
+        raising(sdk_error).complete(request())
+    assert type(raised.value) is expected
+
+
+def test_a_timeout_is_not_reported_as_a_connection_failure():
+    with pytest.raises(LLMTimeoutError):
+        raising(openai.APITimeoutError(request=HTTP_REQUEST)).complete(request())
+
+
+@pytest.mark.parametrize(
+    "sdk_error",
+    [
+        status_error(openai.AuthenticationError, 401),
+        status_error(openai.RateLimitError, 429),
+        status_error(openai.BadRequestError, 400),
+        status_error(openai.InternalServerError, 500),
+    ],
+)
+def test_a_translated_error_never_carries_the_key_or_the_sdk_error(sdk_error):
+    with pytest.raises(LLMError) as raised:
+        raising(sdk_error).complete(request())
+    error = raised.value
+    assert KEY not in str(error) and KEY not in repr(error)
+    assert error.__cause__ is None and error.__suppress_context__
+
+
+def test_an_unrelated_exception_is_not_translated():
+    with pytest.raises(KeyError):
+        raising(KeyError("x")).complete(request())
+
+
+def answering(*, content='{"ok": true}', finish_reason="stop", refusal=None):
+    message = SimpleNamespace(content=content, refusal=refusal)
+    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
+    response = SimpleNamespace(choices=[choice], model="gpt-test", usage=None)
+    sdk = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: response))
+    )
+    return OpenAIProvider(model="gpt-test", client=sdk)
+
+
+@pytest.mark.parametrize("choices", [[], None])
+def test_no_choice_is_an_output_error(choices):
+    sdk = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=lambda **kw: SimpleNamespace(choices=choices, model="m", usage=None)
+            )
+        )
+    )
+    with pytest.raises(LLMOutputError, match="no answer"):
+        OpenAIProvider(model="m", client=sdk).complete(request())
+
+
+def test_a_refusal_is_an_output_error_without_its_text():
+    provider = answering(content=None, refusal="I cannot help with that, sk-LEAK")
+    with pytest.raises(LLMOutputError, match="refused") as raised:
+        provider.complete(request())
+    assert "sk-LEAK" not in str(raised.value)
+
+
+def test_a_cut_off_answer_is_an_output_error_even_without_a_schema():
+    with pytest.raises(LLMOutputError, match="cut off"):
+        answering(content="Hello and wel", finish_reason="length").complete(request())
+
+
+def test_a_filtered_answer_is_an_output_error():
+    with pytest.raises(LLMOutputError, match="content filter"):
+        answering(content="", finish_reason="content_filter").complete(request())
+
+
+def test_invalid_structured_json_is_an_output_error_the_brain_can_retry():
+    with pytest.raises(LLMOutputError):
+        answering(content="{not json").complete(request(response_schema={"type": "object"}))
+
+
+def test_output_errors_belong_to_the_neutral_family():
+    assert issubclass(LLMOutputError, LLMError)
+    assert all(
+        issubclass(e, LLMError)
+        for e in (LLMAuthError, LLMRateLimitError, LLMTimeoutError, LLMModelError)
+    )
+
+
+def test_temperature_is_not_sent_unless_the_request_names_one():
+    sdk = FakeSDK()
+    provider(sdk).complete(request(max_output_tokens=50))
+    assert "temperature" not in sdk.calls[0]

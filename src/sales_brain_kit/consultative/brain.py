@@ -11,8 +11,9 @@
 
 The model may propose; it never controls the Core. An unusable answer is refused, the model is
 told why and given one more try; if that fails too, `BrainOutputError` is raised and no decision
-exists. The Engine records the failure against the action and applies nothing. Errors of the
-provider itself (network, quota, ...) propagate untouched, for the Engine to isolate.
+exists. The Engine records the failure against the action and applies nothing. An `LLMOutputError`
+(the provider returned nothing usable) counts as one such attempt. Other errors of the provider
+itself (network, quota, ...) propagate untouched, for the Engine to isolate.
 """
 
 from collections.abc import Mapping
@@ -33,7 +34,7 @@ from sales_core.contracts import (
     LLMResponse,
     LLMRole,
 )
-from sales_core.ports import LLMProvider
+from sales_core.ports import LLMOutputError, LLMProvider
 
 DEFAULT_ATTEMPTS = 2  # the first answer, and one more after being told what was wrong
 
@@ -74,7 +75,13 @@ class ConsultativeSalesBrain:
         )
         problems: tuple[str, ...] = ()
         for _ in range(self._max_attempts):
-            response = self._llm.complete(llm_request)
+            try:
+                response = self._llm.complete(llm_request)
+            except LLMOutputError:
+                # No usable answer came back (empty, refused, cut off, not JSON): the same request
+                # is tried again. Every other provider error propagates untouched.
+                problems = ("the model did not return a usable answer",)
+                continue
             try:
                 output = parse_output(response)
                 return build_decision(validate_output(output, context), context)

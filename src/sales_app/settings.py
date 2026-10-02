@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     mode_ceiling: ApprovalMode = ApprovalMode.APPROVAL
     # Deployment allow-list for `llm.provider` / `llm.model` (see sales_app.config.llm_registry).
     # Empty (default): no restriction, so today's clients and tests keep working unchanged.
-    # Set as JSON, e.g. SALES_AGENT_ALLOWED_LLM_MODELS='{"openai": ["gpt-4o"]}'.
+    # Set as JSON, e.g. SALES_AGENT_ALLOWED_LLM_MODELS='{"openai": ["<model-id>"]}'.
     allowed_llm_models: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     lock_file: Path = Path(".sales-agent.lock")
     host: str = "127.0.0.1"

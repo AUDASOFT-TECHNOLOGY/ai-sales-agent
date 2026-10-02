@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from sales_app.config.brain_settings import prepare_brain_settings
 from sales_app.config.llm_registry import EMPTY_LLM_REGISTRY, LLMRegistry
+from sales_app.config.offered_models import inactive_model_reason, models_from
 from sales_app.config.resolution import (
     CONFIG_FILENAME,
     check_document,
@@ -246,7 +247,8 @@ def _resolve_secrets(
     secret_store: SecretStore | None,
 ) -> tuple[Secrets, list[str]]:
     """Each credential from the store (the client's own scope, or Revansa's) and, failing that,
-    from the environment variable the configuration names. Returns what is still missing."""
+    from the environment variable the configuration names. Returns what is still missing (a model
+    that Settings no longer offers is listed there too: the client is not ready either way)."""
     live = effective is not ApprovalMode.DRY_RUN  # a dry run never talks to WhatsApp
     client = client_scope(spec.client_id)
 
@@ -294,6 +296,15 @@ def _resolve_secrets(
             stored = secret_store.get(GLOBAL_SCOPE, optional)
             if stored:
                 values[optional] = stored
+        # Not ready, never run: the model was deactivated (or removed) in Admin Settings. Nothing
+        # is said when Settings holds no list, so deployments that never used it are unchanged.
+        reason = inactive_model_reason(
+            models_from(lambda key: secret_store.get(GLOBAL_SCOPE, key)),
+            spec.llm.provider,
+            spec.llm.model,
+        )
+        if reason is not None:
+            missing.append(reason)
     return Secrets(values), missing
 
 

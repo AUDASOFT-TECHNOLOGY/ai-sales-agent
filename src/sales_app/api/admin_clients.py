@@ -80,7 +80,7 @@ class ClientSummaryResponse(BaseModel):
     timezone: str | None = None
     daily_action_limit: int | None = None
     providers: ClientProvidersResponse
-    llm_model: str | None = None  # the selected model id, e.g. "gpt-4o" -- never a secret
+    llm_model: str | None = None  # the selected provider model id -- never a secret
     health: ClientHealthResponse | None = None  # active clients only
 
 

@@ -7,6 +7,7 @@ running client (new Engine built offline and installed only when idle, old runti
 parsers, the status endpoints and the CLI.
 """
 
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -462,6 +463,37 @@ class TestAFailedChangeKeepsTheOldRuntime:
         status = w.manager.status("beta")
         assert status.state == "failed" and "already used by client 'alpha'" in status.errors[0]
         assert beta.engine is before and w.phone_of("beta") == "2000000002"
+
+
+def _models(*entries):
+    return json.dumps([{"name": n, "id": i, "active": a} for n, i, a in entries])
+
+
+class TestAModelDeactivatedInSettings:
+    """See test_llm_model_activation for the resolution rules."""
+
+    def test_deactivating_the_model_stops_the_client_and_reactivating_resumes_it(self, world):
+        w = world("alpha")
+        w.make_ready()
+        runtime = w.registry.get("alpha")
+        assert w.registry.runtimes() == [runtime]
+
+        w.save(GLOBAL_SCOPE, "openai.models", _models(("M", "test-model", False)))
+        assert runtime.suspended and w.registry.runtimes() == []
+        assert w.manager.status("alpha").state == "not_ready"
+        assert w.registry.health()[0]["status"] == "not_ready"
+        assert w.application.scheduler.tick() == []
+
+        w.save(GLOBAL_SCOPE, "openai.models", _models(("M", "test-model", True)))
+        assert w.registry.get("alpha") is runtime and not runtime.suspended
+
+    @pytest.mark.parametrize("models", [None, _models(("M", "test-model", True))])
+    def test_a_listed_or_unlisted_model_keeps_running(self, world, models):
+        w = world("alpha")
+        w.make_ready()
+        if models is not None:
+            w.save(GLOBAL_SCOPE, "openai.models", models)
+        assert len(w.registry.runtimes()) == 1
 
 
 class TestRemovingACredential:

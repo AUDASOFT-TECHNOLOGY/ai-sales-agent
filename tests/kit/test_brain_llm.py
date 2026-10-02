@@ -31,7 +31,13 @@ from sales_brain_kit.consultative.context import build_context
 from sales_brain_kit.consultative.output import parse_output, response_schema
 from sales_core.contracts import DecisionType, LLMResponse, LLMRole
 from sales_core.engine.applier import validate_decision
-from sales_core.ports import Brain
+from sales_core.ports import (
+    Brain,
+    LLMAuthError,
+    LLMError,
+    LLMOutputError,
+    LLMRateLimitError,
+)
 from sales_integrations.fakes import FakeLLMProvider
 
 ONGOING = {
@@ -331,3 +337,40 @@ class TestTheFactory:
         prepared = ConsultativeSalesSpec().prepare(settings_doc(), 1)
         brain = create_brain(FakeLLMProvider([json.dumps(answer())]), prepared)
         assert brain.decide(request()).decision_type is DecisionType.SEND_MESSAGE
+
+
+class TestAnUnusableProviderAnswer:
+    """`LLMOutputError` (empty, refused, cut off, not JSON) is retried; other errors are not."""
+
+    def test_it_is_retried_and_the_next_answer_is_used(self):
+        brain, llm = make_brain(None, LLMOutputError("cut off"), answer())
+        assert brain.decide(request()).message.text == "Hello! Glad to help."
+        assert len(llm.calls) == 2
+        assert llm.calls[0] == llm.calls[1]  # nothing to feed back: the same request is repeated
+
+    def test_it_stops_after_max_attempts(self):
+        brain, llm = make_brain(
+            None, LLMOutputError("a"), LLMOutputError("b"), LLMOutputError("c"), max_attempts=3
+        )
+        with pytest.raises(BrainOutputError):
+            brain.decide(request())
+        assert len(llm.calls) == 3
+
+    def test_the_default_is_the_first_answer_and_one_more(self):
+        brain, llm = make_brain(None, LLMOutputError("a"), LLMOutputError("b"), answer())
+        with pytest.raises(BrainOutputError):
+            brain.decide(request())
+        assert len(llm.calls) == 2
+
+    def test_it_mixes_with_answers_the_brain_refuses(self):
+        brain, llm = make_brain(None, LLMOutputError("a"), {"decision": "nonsense"}, max_attempts=2)
+        with pytest.raises(BrainOutputError):
+            brain.decide(request())
+        assert len(llm.calls) == 2
+
+    @pytest.mark.parametrize("error", [LLMAuthError("x"), LLMRateLimitError("x"), LLMError("x")])
+    def test_other_provider_errors_propagate_without_a_retry(self, error):
+        brain, llm = make_brain(None, error, answer())
+        with pytest.raises(type(error)):
+            brain.decide(request())
+        assert len(llm.calls) == 1
