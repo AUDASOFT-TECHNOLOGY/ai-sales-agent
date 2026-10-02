@@ -12,6 +12,7 @@ export default defineConfig({
       // The Admin login talks to the real FastAPI backend (sales_app). Proxying keeps the
       // browser on one origin in dev, so the session cookie round-trips with no CORS setup.
       "/admin/v1": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/client/v1": { target: "http://127.0.0.1:8000", changeOrigin: true },
     },
   },
   preview: { port: 4173, strictPort: true },

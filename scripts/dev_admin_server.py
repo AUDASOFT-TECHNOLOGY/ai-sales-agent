@@ -21,6 +21,10 @@ Then, in another terminal:
 Open http://localhost:5173/#/admin/login and sign in with:
     username: admin
     password: admin-dev-password
+
+The Client space is at http://localhost:5173/#/login, with two seeded dev accounts:
+    login: naga          password: naga-dev-password      (active)
+    login: tounesimmo    password: tounesimmo-dev-password (inactive: login is refused)
 """
 
 from __future__ import annotations
@@ -42,7 +46,7 @@ from sales_app.admin_auth import (
 from sales_app.admin_auth.passwords import hash_password
 from sales_app.api import create_app
 from sales_app.bootstrap import build_application
-from sales_app.client_profiles import InMemoryClientProfileStore
+from sales_app.client_profiles import ClientProfile, InMemoryClientProfileStore
 from sales_app.config_store import InMemoryConfigStore
 from sales_app.secret_store import InMemorySecretAudit, InMemorySecretStore
 from sales_app.settings import Settings
@@ -70,6 +74,7 @@ REAL_CLIENTS_DIR = Path(__file__).resolve().parent.parent / "clients"
 
 
 ENABLED_FOR_DEV = "naga"  # the app refuses to boot with no enabled client at all
+CLIENT_DEV_PASSWORDS = {"naga": "naga-dev-password", "tounesimmo": "tounesimmo-dev-password"}
 
 
 class DevBrain:
@@ -171,7 +176,21 @@ def main() -> None:
         builders=_fake_builders(clock),
         clock=clock,
         config_store=InMemoryConfigStore(),
-        client_profile_store=InMemoryClientProfileStore(),
+        client_profile_store=InMemoryClientProfileStore(
+            [
+                ClientProfile(
+                    client_id=client_id,
+                    login=client_id,
+                    password_hash=hash_password(password),
+                    must_change_password=False,
+                    whatsapp_number="+216 20 000 000",
+                    created_at=datetime.now(UTC),
+                )
+                for client_id, password in CLIENT_DEV_PASSWORDS.items()
+                if client_id in client_ids
+            ]
+        ),
+        client_session_store=InMemoryAdminSessionStore(),
         admin_user_store=admin_users,
         admin_session_store=InMemoryAdminSessionStore(),
         # Settings saves (OpenAI key, models) need a credential store; in memory, nothing on disk.
@@ -181,6 +200,8 @@ def main() -> None:
 
     print("Clients copied from", REAL_CLIENTS_DIR, "->", ", ".join(client_ids))
     print(f"Admin login: username={ADMIN_USERNAME!r} password={ADMIN_PASSWORD!r}")
+    for client_id, password in CLIENT_DEV_PASSWORDS.items():
+        print(f"Client login: login={client_id!r} password={password!r}")
     print("Serving on http://127.0.0.1:8000 -- run `cd web && npm run dev` in another terminal,")
     print("then open http://localhost:5173/#/admin/login")
 

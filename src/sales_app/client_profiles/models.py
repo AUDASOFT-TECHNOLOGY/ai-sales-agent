@@ -36,6 +36,9 @@ class ClientProfile:
     must_change_password: bool = True
     logo: str | None = None  # a small `data:image/...;base64,` URL, validated by the Admin API
     whatsapp_number: str | None = None
+    # Set when the client changes its number itself: the new number is not connected to Meta until
+    # a fresh onboarding happens, and the client is told so.
+    whatsapp_reconnect_required: bool = False
     created_at: datetime
     created_by: str | None = None
 

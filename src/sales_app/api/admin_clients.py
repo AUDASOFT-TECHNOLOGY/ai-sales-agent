@@ -576,6 +576,34 @@ def _with_stored_status(
     return summary.model_copy(update={"status": "active" if stored else "disabled"})
 
 
+def rename_client(application: Application, client_id: str, name: str, *, author: str) -> None:
+    """Change a client's business name where every other writer changes it (the versioned settings,
+    or the skeleton `client.yaml` of a client without a Brain yet), so there is never a second copy
+    of the name. Also used by the Client API when a client renames itself: this module stays the
+    only API layer that publishes settings."""
+    found = _wiring_and_base_document(application, client_id)
+    raw = found[0] if found is not None else _unvalidated_wiring(application, client_id)
+    if raw is None:
+        raise HTTPException(404, "no such client")
+    if found is None:
+        _write_skeleton_settings(application, client_id, raw, {"display_name": name})
+        return
+    check = validate_settings_document(client_id, raw, {**found[1], "display_name": name})
+    if check.errors or check.document is None:
+        raise HTTPException(400, "; ".join(check.errors) or "invalid name")
+    current = application.config_store.current(client_id)
+    try:
+        application.config_store.publish(
+            client_id,
+            check.document,
+            author=author,
+            note="rename client",
+            expected_parent=current.version if current is not None else None,
+        )
+    except ConfigConflictError as error:
+        raise HTTPException(409, str(error)) from error
+
+
 def create_admin_clients_router(application: Application) -> APIRouter:
     get_current_admin = make_current_admin_dependency(application.admin_auth)
     require_write_admin = require_role(get_current_admin, *WRITE_ROLES)

@@ -14,6 +14,7 @@ from sales_app.admin_auth import (
     FileAdminSessionStore,
     FileAdminUserStore,
 )
+from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore, FileClientProfileStore
 from sales_app.config import build_llm_registry, clamp_mode, load_client_configs
 from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
@@ -47,6 +48,7 @@ class Application:
     config_store: ConfigStore  # kept for the CLI and, later, runtime refresh and the Admin API
     admin_auth: AdminAuthService  # Admin Revansa login and session verification
     client_profiles: ClientProfileStore  # client account profiles, kept out of client.yaml
+    client_auth: ClientAuthService  # Client login, session and password change
     scheduler: Scheduler
     parsers: (
         ParserTable  # channel provider name -> webhook parser; replaced when credentials change
@@ -79,6 +81,7 @@ def build_application(
     admin_user_store: AdminUserStore | None = None,
     admin_session_store: AdminSessionStore | None = None,
     client_profile_store: ClientProfileStore | None = None,
+    client_session_store: AdminSessionStore | None = None,
     secret_store: SecretStore | None = None,
     secret_audit: SecretAudit | None = None,
     refresh_executor: Executor | None = None,
@@ -115,6 +118,18 @@ def build_application(
         client_profile_store
         if client_profile_store is not None
         else FileClientProfileStore(settings.profiles_dir / "profiles.json")
+    )
+    client_sessions = (
+        client_session_store
+        if client_session_store is not None
+        else FileAdminSessionStore(settings.profiles_dir / "sessions")
+    )
+    client_auth = ClientAuthService(
+        client_profiles,
+        client_sessions,
+        clock,
+        is_active=lambda client_id: is_client_active(settings.clients_dir, client_id),
+        session_ttl=timedelta(hours=settings.client_session_ttl_hours),
     )
     admin_auth = AdminAuthService(
         admin_users,
@@ -187,6 +202,7 @@ def build_application(
         config_store=store,
         admin_auth=admin_auth,
         client_profiles=client_profiles,
+        client_auth=client_auth,
         scheduler=Scheduler(registry, clock, executor=executor),
         parsers=parsers,
         clock=clock,

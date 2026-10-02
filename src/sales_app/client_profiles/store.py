@@ -120,6 +120,7 @@ def _to_json(profile: ClientProfile) -> dict[str, Any]:
         "must_change_password": profile.must_change_password,
         "logo": profile.logo,
         "whatsapp_number": profile.whatsapp_number,
+        "whatsapp_reconnect_required": profile.whatsapp_reconnect_required,
         "created_at": profile.created_at.isoformat(),
         "created_by": profile.created_by,
     }
@@ -133,6 +134,7 @@ def _from_json(data: dict[str, Any]) -> ClientProfile:
         must_change_password=data["must_change_password"],
         logo=data.get("logo"),
         whatsapp_number=data.get("whatsapp_number"),
+        whatsapp_reconnect_required=data.get("whatsapp_reconnect_required", False),
         created_at=datetime.fromisoformat(data["created_at"]),
         created_by=data.get("created_by"),
     )

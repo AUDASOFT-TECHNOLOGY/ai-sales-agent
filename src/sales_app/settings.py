@@ -30,8 +30,9 @@ class Settings(BaseSettings):
     # (`sales-agent secrets generate-key`). Never logged: SecretStr hides it from repr.
     secrets_key: SecretStr | None = None
     admin_session_ttl_hours: float = Field(default=24.0, gt=0)
+    client_session_ttl_hours: float = Field(default=24.0, gt=0)
     # False only for local http development; a production deployment must keep this true so the
-    # session cookie is never sent over a plain connection.
+    # session cookies (Admin and Client) are never sent over a plain connection.
     admin_cookie_secure: bool = True
     log_level: str = "INFO"
     # Highest mode any client may run in, whatever its client.yaml says. Autonomy needs an

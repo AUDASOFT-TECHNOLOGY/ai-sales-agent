@@ -1,12 +1,13 @@
 import { Suspense, useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { motion } from "motion/react";
-import { ChevronsLeft, ChevronsRight, History, MessageSquare, Rocket, Search, SlidersHorizontal, Users, Radar } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, History, LogOut, MessageSquare, Rocket, Search, SlidersHorizontal, UserRound, Users, Radar } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
-import { TENANT, USER } from "../mock/data";
+import { useClientAuth } from "../client/ClientAuthContext";
+import { TENANT } from "../mock/data";
 import { useStore } from "../mock/store";
 import { Pulse, useAgentLabel } from "../agent/Pulse";
-import { IconButton } from "../ui/Button";
+import { Button, IconButton } from "../ui/Button";
 import { Segmented } from "../ui/Controls";
 import { PopoverCard, Tip } from "../ui/Overlays";
 import { Wordmark, BrandMark } from "../ui/Brand";
@@ -34,6 +35,7 @@ const TITLE: Record<string, MessageKey> = {
   "/history": "nav.history",
   "/configure": "configure.title",
   "/notifications": "notifications.title",
+  "/profile": "profile.title",
 };
 
 function Aurora() {
@@ -103,7 +105,9 @@ function ContextBar({ onPalette }: { onPalette: () => void }) {
   const { t, locale, setLocale } = useI18n();
   const { pathname } = useLocation();
   const { state, agentState } = useStore();
+  const { profile, logout } = useClientAuth();
   const label = useAgentLabel(agentState, state.needs.length);
+  const initials = (profile?.name ?? "").trim().slice(0, 2).toUpperCase();
   const title = TITLE[pathname] ?? TITLE["/" + pathname.split("/")[1]!] ?? "command.title";
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -133,20 +137,26 @@ function ContextBar({ onPalette }: { onPalette: () => void }) {
         label={t("bar.menu")}
         trigger={
           <button type="button" className="user-btn" aria-label={t("bar.menu")}>
-            <span className="avatar-sm">{USER.initials}</span>
+            <span className="avatar-sm">{initials}</span>
           </button>
         }
       >
         <div className="stack">
           <div className="row">
-            <span className="avatar-sm">{USER.initials}</span>
+            <span className="avatar-sm">{initials}</span>
             <div>
-              <p className="t-label">{USER.name}</p>
-              <p className="c-3 t-body-sm">
-                {state.role === "owner" ? t("common.owner") : t("common.viewer")} · {TENANT.name}
-              </p>
+              <p className="t-label">{profile?.name}</p>
+              <p className="c-3 t-body-sm">{profile?.login}</p>
             </div>
           </div>
+          <hr className="divider" />
+          <Link to="/profile" className="btn" data-variant="ghost" data-size="md">
+            <UserRound size={16} aria-hidden />
+            <span className="btn__label">{t("profile.menu")}</span>
+          </Link>
+          <Button variant="ghost" leading={<LogOut size={16} aria-hidden />} onClick={() => void logout()}>
+            {t("auth.logout")}
+          </Button>
           <hr className="divider" />
           <p className="t-label c-2">{t("bar.language")}</p>
           <Segmented

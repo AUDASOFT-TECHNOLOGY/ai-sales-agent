@@ -19,6 +19,7 @@ from sales_app.api.admin_agents import create_admin_agents_router
 from sales_app.api.admin_clients import create_admin_clients_router
 from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_settings import create_admin_settings_router
+from sales_app.api.client import create_client_router
 from sales_app.bootstrap import Application
 from sales_app.connection_tests import HttpClientFactory, default_http_client
 from sales_app.errors import ClientNotReadyError
@@ -64,6 +65,7 @@ def create_app(
     app.include_router(create_admin_agents_router(application))
     app.include_router(create_admin_settings_router(application))
     app.include_router(create_admin_integrations_router(application, connection_http))
+    app.include_router(create_client_router(application))
 
     @app.get("/health")
     def health() -> dict[str, str]:

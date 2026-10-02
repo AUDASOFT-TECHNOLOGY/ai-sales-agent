@@ -9,6 +9,10 @@ import { AdminClientDetailPage } from "./admin/pages/AdminClientDetailPage";
 import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
 import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
 import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
+import { ClientAuthProvider } from "./client/ClientAuthContext";
+import { ClientLoginPage } from "./client/ClientLoginPage";
+import { ClientProfilePage } from "./client/ClientProfilePage";
+import { ClientRoute } from "./client/ClientRoute";
 import { I18nProvider } from "./i18n";
 import { StoreProvider, useStore } from "./mock/store";
 import { AppShell } from "./shell/AppShell";
@@ -59,13 +63,25 @@ export function App() {
             </Route>
           </Route>
 
+          {/* Client: its own session (ClientAuthContext), separate from the Admin's. Everything but
+              /login sits behind ClientRoute. */}
           <Route
             element={
-              <StoreProvider>
+              <ClientAuthProvider>
                 <Outlet />
-              </StoreProvider>
+              </ClientAuthProvider>
             }
           >
+            <Route path="login" element={<ClientLoginPage />} />
+            <Route
+              element={
+                <ClientRoute>
+                  <StoreProvider>
+                    <Outlet />
+                  </StoreProvider>
+                </ClientRoute>
+              }
+            >
             <Route element={<AppShell />}>
               <Route index element={<Home />} />
               <Route path="setup" element={<Runway />} />
@@ -78,7 +94,9 @@ export function App() {
               <Route path="results" element={<Navigate to="/dashboard" replace />} />
               <Route path="history" element={<History />} />
               <Route path="notifications" element={<Notifications />} />
+              <Route path="profile" element={<ClientProfilePage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Route>
             </Route>
           </Route>
         </Routes>
