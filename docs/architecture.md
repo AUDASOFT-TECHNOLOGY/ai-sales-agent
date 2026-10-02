@@ -46,6 +46,12 @@ Web Admin (Configuration, CRM, Dashboard) becomes the official interface, the CE
 and the Dashboard share one KPI computation, and PostgreSQL may replace the Sheet behind the same
 ports without touching `sales_core`. See [web-admin-product-design.md](web-admin-product-design.md).
 
+Accounts, sessions and versioned client settings can live in a SQL database (PostgreSQL in
+production) through `sales_app/persistence/`, the **only** package of `sales_app` allowed to import a
+SQL library. It implements the existing ports (`AdminUserStore`, `AdminSessionStore`,
+`ClientProfileStore`, `ConfigStore`); nothing else knows whether data is in files or in SQL. Credentials
+stay in the `SecretStore`, never in the database. See [persistence.md](persistence.md).
+
 Client settings are stored as versioned JSON through the `ConfigStore` port in `sales_app`
 (`sales_app/config_store/`); `sales_core` never sees it. Operator wiring and secrets stay in
 `client.yaml` and the environment. See [client-configuration-design.md](client-configuration-design.md)

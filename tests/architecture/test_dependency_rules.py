@@ -101,8 +101,62 @@ def test_the_app_never_imports_a_brain_package():
     assert not _imported_top_levels(SRC / "sales_app") & set(_brain_packages())
 
 
+PERSISTENCE = SRC / "sales_app" / "persistence"
+SQL_LIBRARIES = {"sqlalchemy", "alembic", "psycopg", "psycopg2", "sqlite3"}
+
+
+def _imported_top_levels_outside(package_dir: Path, excluded: Path) -> set[str]:
+    return {
+        name
+        for py in package_dir.rglob("*.py")
+        if excluded not in py.parents
+        for name in _imported_top_levels_of_file(py)
+    }
+
+
 def test_the_app_contains_no_vendor_or_storage_code():
-    assert not _imported_top_levels(SRC / "sales_app") & VENDOR_AND_STORAGE
+    """The one exception is `sales_app/persistence`, the SQL adapter (see the next test)."""
+    assert not _imported_top_levels_outside(SRC / "sales_app", PERSISTENCE) & VENDOR_AND_STORAGE
+
+
+def test_sql_is_confined_to_the_persistence_package():
+    """Strictly targeted: only SQLAlchemy and Alembic, only in `sales_app/persistence`. The Core,
+    the kit, the Brains, the integrations and the rest of the app never import a SQL library, and
+    the persistence package imports no other vendor or storage library (nor a driver directly)."""
+    for package in (
+        SRC / "sales_core",
+        SRC / "sales_brain_kit",
+        SRC / "sales_integrations",
+        BRAINS,
+    ):
+        assert not _imported_top_levels(package) & SQL_LIBRARIES, package.name
+    assert not _imported_top_levels_outside(SRC / "sales_app", PERSISTENCE) & SQL_LIBRARIES
+    persistence = _imported_top_levels(PERSISTENCE)
+    assert persistence & {"sqlalchemy", "alembic"}
+    assert not persistence & (VENDOR_AND_STORAGE - {"sqlalchemy"})
+    assert not persistence & {
+        "sales_core",
+        "sales_integrations",
+        "sales_brain_kit",
+        *_brain_packages(),
+    }
+
+
+def test_no_credential_is_stored_in_the_database_schema():
+    """Credentials stay in the SecretStore: no table or column of the schema may hold one."""
+    from sales_app.persistence.tables import metadata
+
+    forbidden = (
+        "secret",
+        "token_value",
+        "access_token",
+        "api_key",
+        "phone_number_id",
+        "app_secret",
+    )
+    columns = {f"{t.name}.{c.name}" for t in metadata.tables.values() for c in t.columns}
+    assert not {c for c in columns if any(word in c for word in forbidden)}
+    assert not {t for t in metadata.tables if "secret" in t}
 
 
 def test_the_app_uses_no_commercial_vocabulary():

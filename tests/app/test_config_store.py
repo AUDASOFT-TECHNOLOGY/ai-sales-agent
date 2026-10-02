@@ -14,15 +14,18 @@ from sales_app.config_store import (
     FileConfigStore,
     InMemoryConfigStore,
 )
+from sales_app.persistence import SqlConfigStore
 
 DOC = {"display_name": "Alpha", "daily_action_limit": 20, "tags": ["a", "b"], "nested": {"k": 1}}
 FIXED = datetime(2026, 5, 1, 9, 30, tzinfo=UTC)
 
 
-@pytest.fixture(params=["file", "memory"])
+@pytest.fixture(params=["file", "memory", "sql"])
 def store(request, tmp_path) -> ConfigStore:
     if request.param == "file":
         return FileConfigStore(tmp_path / "config", now=lambda: FIXED)
+    if request.param == "sql":
+        return SqlConfigStore(request.getfixturevalue("sql_engine"), now=lambda: FIXED)
     return InMemoryConfigStore(now=lambda: FIXED)
 
 

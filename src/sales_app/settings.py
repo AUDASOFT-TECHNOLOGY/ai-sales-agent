@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # The master key that opens secrets_dir: SALES_AGENT_SECRETS_KEY, 32 random bytes in base64
     # (`sales-agent secrets generate-key`). Never logged: SecretStr hides it from repr.
     secrets_key: SecretStr | None = None
+    # Where accounts, sessions and versioned settings live (see sales_app.persistence):
+    # SALES_AGENT_DATABASE_URL, e.g. postgresql://user:password@host:5432/revansa. Unset: the JSON
+    # files in admin_dir / profiles_dir / config_dir (the fallback kept during the move to a
+    # database). The URL carries a password, so SecretStr keeps it out of any repr or log.
+    database_url: SecretStr | None = None
     admin_session_ttl_hours: float = Field(default=24.0, gt=0)
     client_session_ttl_hours: float = Field(default=24.0, gt=0)
     # False only for local http development; a production deployment must keep this true so the

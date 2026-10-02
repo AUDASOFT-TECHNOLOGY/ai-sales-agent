@@ -25,9 +25,10 @@ from sales_app.config import (
     read_wiring,
     validate_settings_document,
 )
-from sales_app.config_store import ConfigStore, ConfigStoreError, ConfigVersion, FileConfigStore
+from sales_app.config_store import ConfigStore, ConfigStoreError, ConfigVersion
 from sales_app.config_store.models import CLIENT_ID_PATTERN, thaw_document
 from sales_app.errors import ConfigurationError
+from sales_app.persistence import build_account_stores
 from sales_app.settings import Settings
 
 EXIT_OK, EXIT_STORE, EXIT_INVALID = 0, 1, 2
@@ -65,13 +66,15 @@ def add_config_parser(commands: "argparse._SubParsersAction[argparse.ArgumentPar
 
 
 def run_config(settings: Settings, args: argparse.Namespace) -> int:
-    store = FileConfigStore(settings.config_dir)
+    stores = build_account_stores(settings)  # files or the database, as the settings say
     handler = _HANDLERS[args.config_command]
     try:
-        return handler(settings, store, args)
+        return handler(settings, stores.config_store, args)
     except ConfigStoreError as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_STORE
+    finally:
+        stores.close()
 
 
 # ---- commands ---------------------------------------------------------------------------------

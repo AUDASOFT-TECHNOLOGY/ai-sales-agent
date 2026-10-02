@@ -8,6 +8,7 @@ from sales_app.client_profiles import (
     FileClientProfileStore,
     InMemoryClientProfileStore,
 )
+from sales_app.persistence import SqlClientProfileStore
 
 NOW = datetime(2026, 5, 1, tzinfo=UTC)
 
@@ -18,10 +19,12 @@ def profile(client_id="acme", login="acme.admin", **kw):
     )
 
 
-@pytest.fixture(params=["memory", "file"])
+@pytest.fixture(params=["memory", "file", "sql"])
 def store(request, tmp_path):
     if request.param == "memory":
         return InMemoryClientProfileStore()
+    if request.param == "sql":
+        return SqlClientProfileStore(request.getfixturevalue("sql_engine"))
     return FileClientProfileStore(tmp_path / "profiles" / "profiles.json")
 
 

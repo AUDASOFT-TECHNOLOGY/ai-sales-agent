@@ -1,4 +1,4 @@
-"""Command line: `sales-agent validate | serve | run | config | admin | secrets`.
+"""Command line: `sales-agent validate | serve | run | config | admin | secrets | db`.
 
 Exit codes: 0 success, 1 a job reported failure, 2 invalid configuration,
 3 another instance is already running.
@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from sales_app.admin_cli import add_admin_parser, run_admin
 from sales_app.bootstrap import Application, build_application, describe_modes
 from sales_app.config_cli import add_config_parser, run_config
+from sales_app.db_cli import add_db_parser, run_db
 from sales_app.errors import ConfigurationError
 from sales_app.lockfile import InstanceAlreadyRunningError, InstanceLock
 from sales_app.logs import configure_logging
@@ -42,6 +43,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_config(settings, args)
         if args.command == "admin":
             return run_admin(settings, args)
+        if args.command == "db":
+            return run_db(settings, args)
         if args.command == "secrets":
             return run_secrets(args)
         return _run(settings, args)
@@ -58,6 +61,7 @@ def _parser() -> argparse.ArgumentParser:
     add_config_parser(commands)
     add_admin_parser(commands)
     add_secrets_parser(commands)
+    add_db_parser(commands)
     run = commands.add_parser("run", help="run one job for one client, once")
     run.add_argument("--client", required=True)
     run.add_argument("--job", required=True, choices=[j.value for j in Job])

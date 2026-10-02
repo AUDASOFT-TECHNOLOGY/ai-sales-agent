@@ -7,20 +7,15 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from sales_app.admin_auth import (
-    AdminAuthService,
-    AdminSessionStore,
-    AdminUserStore,
-    FileAdminSessionStore,
-    FileAdminUserStore,
-)
+from sales_app.admin_auth import AdminAuthService, AdminSessionStore, AdminUserStore
 from sales_app.client_auth import ClientAuthService, is_client_active
-from sales_app.client_profiles import ClientProfileStore, FileClientProfileStore
+from sales_app.client_profiles import ClientProfileStore
 from sales_app.config import build_llm_registry, clamp_mode, load_client_configs
 from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
-from sales_app.config_store import ConfigStore, FileConfigStore
+from sales_app.config_store import ConfigStore
 from sales_app.errors import ConfigurationError
 from sales_app.parsers import ParserTable, build_parsers
+from sales_app.persistence import AccountStores, build_account_stores
 from sales_app.registry import ClientRegistry
 from sales_app.runtime_manager import RuntimeManager
 from sales_app.scheduler import Scheduler
@@ -62,10 +57,14 @@ class Application:
     # secrets), so a future Admin can list what is actually wired without holding the builders
     # table itself. See sales_app.wiring.integrations.IntegrationBuilders.
     llm_providers: tuple[str, ...] = ()
+    # The database connection pool, when accounts and settings live in SQL (None: file fallback).
+    account_stores: AccountStores | None = None
 
     def close(self) -> None:
         self.runtime_manager.shutdown()  # first: a refresh may be waiting for a job to end
         self.scheduler.shutdown()
+        if self.account_stores is not None:
+            self.account_stores.close()
 
 
 def build_application(
@@ -103,27 +102,70 @@ def build_application(
         else clamp_mode(mode_ceiling, settings.mode_ceiling)
     )
 
-    store = config_store if config_store is not None else FileConfigStore(settings.config_dir)
-    admin_users = (
-        admin_user_store
-        if admin_user_store is not None
-        else FileAdminUserStore(settings.admin_dir / "users.json")
+    injected = (
+        config_store,
+        admin_user_store,
+        admin_session_store,
+        client_profile_store,
+        client_session_store,
     )
-    admin_sessions = (
-        admin_session_store
-        if admin_session_store is not None
-        else FileAdminSessionStore(settings.admin_dir / "sessions")
-    )
-    client_profiles = (
-        client_profile_store
-        if client_profile_store is not None
-        else FileClientProfileStore(settings.profiles_dir / "profiles.json")
-    )
-    client_sessions = (
-        client_session_store
-        if client_session_store is not None
-        else FileAdminSessionStore(settings.profiles_dir / "sessions")
-    )
+    # Files or SQL, decided by the settings (see sales_app.persistence.factory). Anything a caller
+    # injects (the tests do) wins; the defaults are only built if something is missing.
+    defaults = build_account_stores(settings) if any(s is None for s in injected) else None
+    try:
+        store = config_store if config_store is not None else defaults.config_store
+        admin_users = admin_user_store if admin_user_store is not None else defaults.admin_users
+        admin_sessions = (
+            admin_session_store if admin_session_store is not None else defaults.admin_sessions
+        )
+        client_profiles = (
+            client_profile_store if client_profile_store is not None else defaults.client_profiles
+        )
+        client_sessions = (
+            client_session_store if client_session_store is not None else defaults.client_sessions
+        )
+        return _assemble(
+            settings,
+            environment,
+            clock,
+            ceiling,
+            builders,
+            executor,
+            require_clients,
+            refresh_executor,
+            secret_store,
+            secret_audit,
+            store,
+            admin_users,
+            admin_sessions,
+            client_profiles,
+            client_sessions,
+            defaults,
+        )
+    except BaseException:
+        if defaults is not None:
+            defaults.close()
+        raise
+
+
+def _assemble(
+    settings: Settings,
+    environment: Mapping[str, str],
+    clock: Clock,
+    ceiling: ApprovalMode,
+    builders: IntegrationBuilders | None,
+    executor: Executor | None,
+    require_clients: bool,
+    refresh_executor: Executor | None,
+    secret_store: SecretStore | None,
+    secret_audit: SecretAudit | None,
+    store: ConfigStore,
+    admin_users: AdminUserStore,
+    admin_sessions: AdminSessionStore,
+    client_profiles: ClientProfileStore,
+    client_sessions: AdminSessionStore,
+    account_stores: AccountStores | None,
+) -> Application:
     client_auth = ClientAuthService(
         client_profiles,
         client_sessions,
@@ -209,6 +251,7 @@ def build_application(
         credentials=credentials,
         runtime_manager=manager,
         llm_providers=tuple(sorted(builders.llms)),
+        account_stores=account_stores,
     )
 
 

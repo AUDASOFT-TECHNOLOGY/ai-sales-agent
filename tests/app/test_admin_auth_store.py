@@ -17,6 +17,7 @@ from sales_app.admin_auth import (
     InMemoryAdminSessionStore,
     InMemoryAdminUserStore,
 )
+from sales_app.persistence import SqlAdminSessionStore, SqlAdminUserStore
 
 NOW = datetime(2026, 5, 1, 9, 30, tzinfo=UTC)
 
@@ -85,10 +86,12 @@ class TestAdminSessionModel:
 # ---- AdminUserStore contract -------------------------------------------------------------------
 
 
-@pytest.fixture(params=["file", "memory"])
+@pytest.fixture(params=["file", "memory", "sql"])
 def user_store(request, tmp_path) -> AdminUserStore:
     if request.param == "file":
         return FileAdminUserStore(tmp_path / "admin" / "users.json")
+    if request.param == "sql":
+        return SqlAdminUserStore(request.getfixturevalue("sql_engine"))
     return InMemoryAdminUserStore()
 
 
@@ -159,10 +162,15 @@ class TestFileAdminUserStoreSpecifics:
 # ---- AdminSessionStore contract -----------------------------------------------------------------
 
 
-@pytest.fixture(params=["file", "memory"])
+@pytest.fixture(params=["file", "memory", "sql"])
 def session_store(request, tmp_path) -> AdminSessionStore:
     if request.param == "file":
         return FileAdminSessionStore(tmp_path / "admin" / "sessions")
+    if request.param == "sql":
+        engine = request.getfixturevalue("sql_engine")
+        SqlAdminUserStore(engine).create(user("alice"))  # a session belongs to an account
+        SqlAdminUserStore(engine).create(user("bob"))
+        return SqlAdminSessionStore(engine)
     return InMemoryAdminSessionStore()
 
 

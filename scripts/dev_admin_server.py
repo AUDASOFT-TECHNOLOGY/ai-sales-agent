@@ -10,7 +10,8 @@ Tounesimmo stays disabled, exactly as in `clients/`.
 
 This is dev tooling only: it is not imported by the application and does not ship any behaviour
 `sales_app` relies on. `clients/` is only read: the client directories are copied into a throwaway temp directory,
-and everything else lives in in-memory stores, so it never conflicts with a real deployment.
+and everything else lives in in-memory stores, so it never conflicts with a real deployment (it
+ignores SALES_AGENT_DATABASE_URL: every store is injected, so no database is opened).
 
 Usage:
     uv run python scripts/dev_admin_server.py

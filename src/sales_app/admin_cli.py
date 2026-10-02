@@ -18,14 +18,9 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from sales_app.admin_auth import (
-    AdminRole,
-    AdminStoreError,
-    AdminUser,
-    FileAdminSessionStore,
-    FileAdminUserStore,
-)
+from sales_app.admin_auth import AdminRole, AdminStoreError, AdminUser
 from sales_app.admin_auth.passwords import hash_password
+from sales_app.persistence import build_account_stores
 from sales_app.settings import Settings
 
 EXIT_OK, EXIT_STORE, EXIT_INVALID = 0, 1, 2
@@ -65,13 +60,19 @@ def add_admin_parser(commands: "argparse._SubParsersAction[argparse.ArgumentPars
 
 
 def run_admin(settings: Settings, args: argparse.Namespace) -> int:
-    users = FileAdminUserStore(settings.admin_dir / "users.json")
-    sessions = FileAdminSessionStore(settings.admin_dir / "sessions")
+    stores = build_account_stores(settings)  # files or the database, as the settings say
     try:
-        return _HANDLERS[args.admin_command](settings, users, sessions, args)
+        return _HANDLERS[args.admin_command](
+            settings, stores.admin_users, stores.admin_sessions, args
+        )
     except AdminStoreError as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_STORE
+    except ValueError as error:  # e.g. an account scoped to a client that does not exist
+        print(f"error: {error}", file=sys.stderr)
+        return EXIT_INVALID
+    finally:
+        stores.close()
 
 
 # ---- commands -----------------------------------------------------------------------------
