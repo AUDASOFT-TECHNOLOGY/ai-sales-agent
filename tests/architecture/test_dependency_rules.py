@@ -295,12 +295,15 @@ def test_the_pure_adapter_modules_import_no_google_library():
         assert not _imported_top_levels_of_file(SHEETS_ADAPTER / name) & GOOGLE_LIBRARIES, name
 
 
-def test_only_the_wiring_table_of_the_app_knows_the_sheets_adapter():
+def test_only_the_wiring_layer_of_the_app_knows_the_sheets_adapter():
+    """The adapter is the business of its provider's descriptor (`wiring/providers/google_sheets.py`):
+    the integration table built from the descriptors, and everything else in the app, never import it."""
+    allowed = SRC / "sales_app" / "wiring" / "providers" / "google_sheets.py"
     for py in (SRC / "sales_app").rglob("*.py"):
         uses = any(
             m.startswith("sales_integrations.google_sheets") for m in _imported_modules_of_file(py)
         )
-        assert uses == (py.name == "integrations.py" and py.parent.name == "wiring"), py.name
+        assert uses == (py == allowed), py.name
 
 
 def _imported_modules_of_file(path: Path) -> set[str]:

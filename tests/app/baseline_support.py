@@ -40,7 +40,9 @@ from sales_app.client_profiles import InMemoryClientProfileStore
 from sales_app.config import resolve_client_config
 from sales_app.config_store import InMemoryConfigStore
 from sales_app.secret_store import InMemorySecretAudit, InMemorySecretStore
-from sales_app.wiring import integrations as integrations_module
+from sales_app.wiring.providers import google_sheets as sheets_provider
+from sales_app.wiring.providers import openai as openai_provider
+from sales_app.wiring.providers import whatsapp as whatsapp_provider
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import Channel
 from sales_integrations.fakes import (
@@ -198,7 +200,7 @@ def settings_secret_store(models: list[tuple[str, str, bool]] | None = None, **g
 
 @dataclass
 class Recording:
-    """What the real factories of `sales_app.wiring.integrations` handed to the vendor classes."""
+    """What the real factories (declared by the provider descriptors) handed to the vendor classes."""
 
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     llms: list[Any] = field(default_factory=list)
@@ -209,6 +211,9 @@ class Recording:
 
 def install_recording_vendors(monkeypatch) -> Recording:
     """Replace the four vendor classes the default builders construct with recorders.
+
+    The classes are looked up where each provider's descriptor module uses them.
+
 
     The real builders (`default_builders`) then run unchanged: each records exactly the arguments
     it passes, and returns an in-memory fake that satisfies the Core port. No network, no file.
@@ -250,10 +255,10 @@ def install_recording_vendors(monkeypatch) -> Recording:
             calls.append(("WhatsAppChannel", dict(kwargs)))
             super().__init__(Channel.WHATSAPP, clock=FakeClock(NOW))
 
-    monkeypatch.setattr(integrations_module, "GoogleSheetsApi", RecordingApi)
-    monkeypatch.setattr(integrations_module, "GoogleSheetsRepository", RecordingRepository)
-    monkeypatch.setattr(integrations_module, "OpenAIProvider", RecordingOpenAI)
-    monkeypatch.setattr(integrations_module, "WhatsAppChannel", RecordingWhatsApp)
+    monkeypatch.setattr(sheets_provider, "GoogleSheetsApi", RecordingApi)
+    monkeypatch.setattr(sheets_provider, "GoogleSheetsRepository", RecordingRepository)
+    monkeypatch.setattr(openai_provider, "OpenAIProvider", RecordingOpenAI)
+    monkeypatch.setattr(whatsapp_provider, "WhatsAppChannel", RecordingWhatsApp)
     return recording
 
 
