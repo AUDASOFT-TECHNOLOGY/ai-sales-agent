@@ -1,0 +1,32 @@
+{
+  "schema_version": 3,
+  "client_id": "naga",
+  "display_name": "Naga",
+  "enabled": false,
+  "mode": "approval",
+  "timezone": "Africa/Tunis",
+  "daily_action_limit": 20,
+  "max_attempts": 3,
+  "opt_out_keywords": ["stop"],
+  "brain": {"agent": "naga", "settings_version": 1, "settings": {}},
+  "source": {
+    "provider": "google_sheets",
+    "settings": {"spreadsheet_id": "sheet-naga", "prospects_tab": "Prospects", "column_mapping": {}}
+  },
+  "store": {
+    "provider": "google_sheets",
+    "connection": "same_as_source",
+    "settings": {"actions_tab": "Actions", "messages_tab": "Messages", "log_tab": "Log", "column_mapping": {}}
+  },
+  "channels": [
+    {"id": "whatsapp", "provider": "whatsapp", "enabled": true, "priority": 1, "settings": {"api_version": "v21.0"}}
+  ],
+  "llm": {"model": "gpt-lune"},
+  "schedule": {"daily_at": "09:00", "days": ["mon", "tue", "wed", "thu", "fri", "sat"]},
+  "polling": {"prepare_every_minutes": 60, "dispatch_every_minutes": 5, "recover_every_minutes": 15},
+  "inbound": {
+    "spontaneous_conversations": {"enabled": false, "when_disabled": "store_and_flag", "allowed_decisions": ["send_message", "schedule_follow_up", "handoff_to_human", "close", "no_action"]},
+    "unknown_contacts": {"policy": "ignore", "max_new_per_day": 30},
+    "limits": {"max_replies_per_prospect_per_day": 20}
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": 3,
+  "display_name": "Alpha V3",
+  "timezone": "Africa/Tunis",
+  "mode": "approval",
+  "daily_action_limit": 14,
+  "opt_out_keywords": ["stop", "halt"],
+  "brain": {"settings_version": 1, "settings": {"tone": "v3"}},
+  "source": {
+    "provider": "google_sheets",
+    "settings": {"spreadsheet_id": "sheet-alpha-v3", "prospects_tab": "Leads", "column_mapping": {"prospects.phone": "Tel"}}
+  },
+  "store": {
+    "provider": "google_sheets",
+    "connection": "same_as_source",
+    "settings": {"actions_tab": "Actions", "messages_tab": "Messages", "log_tab": "Log", "column_mapping": {}}
+  },
+  "channels": [
+    {"id": "whatsapp", "provider": "whatsapp", "enabled": true, "priority": 1, "settings": {"api_version": "v22.0"}},
+    {"id": "email", "provider": "email", "enabled": false, "priority": 2, "settings": {"from_address": "a@example.com"}}
+  ],
+  "llm": {"model": "muse-spark"},
+  "schedule": {"daily_at": "08:30", "days": ["mon", "tue"]},
+  "inbound": {"spontaneous_conversations": {"enabled": false}, "unknown_contacts": {"policy": "ignore", "max_new_per_day": 3}, "limits": {"max_replies_per_prospect_per_day": 5}}
+}

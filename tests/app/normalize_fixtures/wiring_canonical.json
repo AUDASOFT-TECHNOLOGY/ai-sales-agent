@@ -1,0 +1,8 @@
+{
+  "schema_version": 3,
+  "client_id": "alpha",
+  "enabled": true,
+  "max_attempts": 4,
+  "brain": {"agent": "consultative_sales"},
+  "polling": {"prepare_every_minutes": 30, "dispatch_every_minutes": 3, "recover_every_minutes": 10}
+}
