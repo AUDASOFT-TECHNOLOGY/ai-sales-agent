@@ -633,15 +633,24 @@ class TestTheNewPipelineIsParallel:
             text = path.read_text(encoding="utf-8")
             assert not re.search(r"spec_resolution|config\.canonical|config\.normalize", text), path
 
-    def test_only_the_new_pipeline_imports_the_canonical_modules(self):
-        for module in ("canonical", "normalize"):
+    def test_only_the_new_pipeline_and_the_runtime_boundary_import_the_canonical_modules(self):
+        """The spec resolution reads them; `runtime_config` (increment 7) turns a spec into what the
+        runtime runs on. Nothing that loads configuration, and no API, imports either."""
+        expected = {
+            "canonical": [
+                "sales_app/config/runtime_config.py",
+                "sales_app/config/spec_resolution.py",
+            ],
+            "normalize": ["sales_app/config/spec_resolution.py"],
+        }
+        for module, importers_expected in expected.items():
             importers = [
                 p.relative_to(SRC).as_posix()
                 for p in (SRC / "sales_app").rglob("*.py")
                 if re.search(rf"config\.{module}\b", p.read_text(encoding="utf-8"))
                 and p.name != f"{module}.py"
             ]
-            assert importers == ["sales_app/config/spec_resolution.py"], module
+            assert importers == importers_expected, module
 
     def test_the_legacy_resolution_is_unchanged_in_shape(self):
         assert [f.name for f in dataclasses.fields(ClientConfig)] == [

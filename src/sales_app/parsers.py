@@ -7,6 +7,7 @@ request sees either the old parsers or the new ones, never a mixture.
 from collections.abc import Iterator, Mapping, Sequence
 
 from sales_app.config import ClientConfig
+from sales_app.config.runtime_config import channel_provider_key
 from sales_app.wiring import IntegrationBuilders
 from sales_core.ports import WebhookParser
 
@@ -48,7 +49,7 @@ def build_parsers(
         secrets: dict[str, str] = {}
         serving = False
         for config in [*installed, *configs]:
-            if config.spec.whatsapp.provider != name:
+            if channel_provider_key(config) != name:
                 continue
             serving = True
             key = provider.routing_key(config)

@@ -8,6 +8,11 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from sales_app.config import ClientConfig
+from sales_app.config.runtime_config import (
+    NO_CHANNEL_REASON,
+    CanonicalClientConfig,
+    channel_provider_key,
+)
 from sales_app.errors import ClientNotReadyError, RuntimeBuildError
 from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
@@ -237,7 +242,11 @@ def build_runtime(
     brain = _stage(
         client_id, "brain", lambda: load_brain(spec.brain.factory, llm, spec.brain.settings)
     )
-    provider = _choose(client_id, builders.channels, spec.whatsapp.provider, "whatsapp")
+    channel_key = channel_provider_key(config)
+    if channel_key is None:
+        raise RuntimeBuildError(f"{client_id}: {NO_CHANNEL_REASON}")
+    what = "channel" if isinstance(config, CanonicalClientConfig) else "whatsapp"
+    provider = _choose(client_id, builders.channels, channel_key, what)
     if config.effective_mode is ApprovalMode.DRY_RUN:
         channel = DisabledChannel(provider.kind)  # a dry run cannot send, by construction
     else:

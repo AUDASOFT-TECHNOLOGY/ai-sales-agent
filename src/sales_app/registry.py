@@ -13,6 +13,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 
 from sales_app.config import ClientConfig, LoadedConfig
+from sales_app.config.runtime_config import channel_provider_key
 from sales_app.errors import ConfigurationError, RuntimeBuildError
 from sales_app.wiring import ClientRuntime, IntegrationBuilders, build_runtime
 from sales_core.ports import Clock
@@ -144,7 +145,7 @@ class ClientRegistry:
             if self._routing is None:
                 return self._static_routes.get((provider, key))
             for config in self.configs():
-                if config.spec.whatsapp.provider == provider and (
+                if channel_provider_key(config) == provider and (
                     self._routing(provider, config) == key
                 ):
                     return config.client_id

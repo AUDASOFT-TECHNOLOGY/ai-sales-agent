@@ -191,6 +191,37 @@ def resolve_client_config(
             )
         return Resolution(errors=tuple(problems))
 
+    return complete_client_config(
+        spec,
+        name=name,
+        directory=directory,
+        config_version=version.version if version is not None else None,
+        env=env,
+        mode_ceiling=mode_ceiling,
+        llm_registry=llm_registry,
+        secret_store=secret_store,
+    )
+
+
+def complete_client_config(
+    spec: ClientFile,
+    *,
+    name: str,
+    directory: Path,
+    config_version: int | None,
+    env: Mapping[str, str],
+    mode_ceiling: ApprovalMode,
+    llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
+    secret_store: SecretStore | None = None,
+    extra_missing: tuple[str, ...] = (),
+) -> Resolution:
+    """The last steps of resolving a client, once its settings have become a `ClientFile`: the
+    Brain's own rules, the effective mode, the credentials, the model allow-list.
+
+    Shared by `resolve_client_config` and by anything else that arrives at a `ClientFile` another
+    way, so a client is judged by the same rules however its configuration was read. `extra_missing`
+    adds reasons the client is not ready, after the credentials'."""
+    version_number = config_version
     problems = []
     if spec.client_id != name:
         problems.append(f"{name}: client_id {spec.client_id!r} must equal the directory name")
@@ -199,9 +230,9 @@ def resolve_client_config(
     # unimportable Brain module is left for the runtime build to report, with more context.
     spec, brain_problems = prepare_brain_settings(spec, require_module=False)
     problems.extend(f"{name}: {message}" for message in brain_problems)
-    if brain_problems and version is not None:
+    if brain_problems and version_number is not None:
         problems.append(
-            f"{name}: settings in force come from configuration version {version.version}"
+            f"{name}: settings in force come from configuration version {version_number}"
         )
 
     effective = clamp_mode(spec.mode, mode_ceiling)
@@ -220,9 +251,9 @@ def resolve_client_config(
         directory,
         effective,
         secrets,
-        config_version=version.version if version is not None else None,
-        config_source="store" if version is not None else "file",
-        missing_credentials=tuple(missing),
+        config_version=version_number,
+        config_source="store" if version_number is not None else "file",
+        missing_credentials=(*missing, *extra_missing),
     )
     return Resolution(config=config)
 

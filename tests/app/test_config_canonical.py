@@ -482,9 +482,8 @@ class TestTheModuleIsProviderNeutralAndInert:
         assert not re.search(rf"\b{name}\b", self.SOURCE, flags=re.IGNORECASE), name
 
     def test_only_the_read_only_parallel_pipeline_imports_it(self):
-        """Increment 5: only `resolve_client_spec` (read-only, parallel) uses it; no consumer does.
-
-        Retire this test when the runtime is switched to the canonical spec."""
+        """Increment 5 added `resolve_client_spec`; increment 7 added the one boundary that turns a
+        spec into what the runtime runs on (`runtime_config`). Nothing else imports it."""
         src = Path(canonical.__file__).resolve().parents[2]
         importers = [
             path.relative_to(src).as_posix()
@@ -495,4 +494,7 @@ class TestTheModuleIsProviderNeutralAndInert:
                 path.read_text(encoding="utf-8"),
             )
         ]
-        assert importers == ["sales_app/config/spec_resolution.py"]
+        assert importers == [
+            "sales_app/config/runtime_config.py",
+            "sales_app/config/spec_resolution.py",
+        ]
