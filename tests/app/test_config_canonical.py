@@ -481,8 +481,10 @@ class TestTheModuleIsProviderNeutralAndInert:
     def test_no_provider_or_model_is_named_in_the_module(self, name):
         assert not re.search(rf"\b{name}\b", self.SOURCE, flags=re.IGNORECASE), name
 
-    def test_nothing_in_the_application_imports_it_yet(self):
-        """Retire this test when the canonical schema is wired into configuration loading."""
+    def test_only_the_read_only_parallel_pipeline_imports_it(self):
+        """Increment 5: only `resolve_client_spec` (read-only, parallel) uses it; no consumer does.
+
+        Retire this test when the runtime is switched to the canonical spec."""
         src = Path(canonical.__file__).resolve().parents[2]
         importers = [
             path.relative_to(src).as_posix()
@@ -493,4 +495,4 @@ class TestTheModuleIsProviderNeutralAndInert:
                 path.read_text(encoding="utf-8"),
             )
         ]
-        assert importers == []
+        assert importers == ["sales_app/config/spec_resolution.py"]

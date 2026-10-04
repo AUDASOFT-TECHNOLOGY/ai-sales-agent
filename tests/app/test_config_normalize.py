@@ -684,8 +684,10 @@ class TestPurity:
 
 
 class TestTheModuleIsInert:
-    def test_nothing_in_the_application_imports_it_yet(self):
-        """Retire this test when the normaliser is wired into configuration loading."""
+    def test_only_the_read_only_parallel_pipeline_imports_it(self):
+        """Increment 5: only `resolve_client_spec` (read-only, parallel) uses it; no consumer does.
+
+        Retire this test when the runtime is switched to the canonical spec."""
         src = Path(normalize_module.__file__).resolve().parents[2]
         importers = [
             path.relative_to(src).as_posix()
@@ -696,7 +698,7 @@ class TestTheModuleIsInert:
                 path.read_text(encoding="utf-8"),
             )
         ]
-        assert importers == []
+        assert importers == ["sales_app/config/spec_resolution.py"]
 
     def test_the_normaliser_does_not_import_the_runtime(self):
         text = Path(normalize_module.__file__).read_text(encoding="utf-8")
