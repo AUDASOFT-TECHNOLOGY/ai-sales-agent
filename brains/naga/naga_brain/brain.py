@@ -5,13 +5,20 @@ what comes next, which language, what is paid how) is the kit's, and everything 
 *data*: Naga's settings, stored with the client's configuration and edited by a business user. No
 product, price, language, market, payment detail or process is written here.
 
-The application finds `SETTINGS_SPEC` next to `create_brain` (named by `brain.factory`), so Naga's
-settings are validated when they are published and when they are loaded.
+The application finds this Brain by its key, `naga`, through the `revansa.brains` entry point that
+names `BRAIN` (see this package's `pyproject.toml`). `BRAIN` carries `create_brain` and
+`SETTINGS_SPEC`, so Naga's settings are validated when they are published and when they are loaded.
+`create_brain` and `SETTINGS_SPEC` stay importable here for the legacy `brain.factory` form.
 """
 
 from collections.abc import Mapping
 
-from sales_brain_kit import ConsultativeSalesBrain, ConsultativeSalesSpec, parse_settings
+from sales_brain_kit import (
+    BrainDescriptor,
+    ConsultativeSalesBrain,
+    ConsultativeSalesSpec,
+    parse_settings,
+)
 from sales_core.ports import LLMProvider
 
 SETTINGS_SPEC = ConsultativeSalesSpec()
@@ -28,3 +35,6 @@ def create_brain(llm: LLMProvider, settings: Mapping[str, object]) -> NagaBrain:
     Brain that cannot be built.
     """
     return NagaBrain(llm, parse_settings(settings))
+
+
+BRAIN = BrainDescriptor(key="naga", factory=create_brain, settings_spec=SETTINGS_SPEC)

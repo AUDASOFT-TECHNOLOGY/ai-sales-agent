@@ -7,19 +7,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
+from sales_app.brain_registry import BrainRegistry, installed_brains
 from sales_app.config import ClientConfig
 from sales_app.config.runtime_config import (
     NO_CHANNEL_REASON,
     CanonicalClientConfig,
     channel_provider_key,
 )
+from sales_app.config.schema import BrainSection
 from sales_app.errors import ClientNotReadyError, RuntimeBuildError
 from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import ClientContext
 from sales_core.engine import Engine, EngineConfig, InboundPolicy, UnknownSenderPolicy
-from sales_core.ports import Clock, FactsReader, FactsWriter
+from sales_core.ports import Brain, Clock, FactsReader, FactsWriter, LLMProvider
 from sales_integrations.system import DisabledChannel
 
 log = logging.getLogger(__name__)
@@ -219,12 +221,22 @@ def _stage[T](client_id: str, stage: str, build: Callable[[], T]) -> T:
         raise RuntimeBuildError(f"{client_id}: {stage}: {error}") from error
 
 
+def _build_brain(section: BrainSection, llm: LLMProvider, brains: BrainRegistry | None) -> Brain:
+    """A Brain named by key comes from the registry of installed Brains and nothing else; only the
+    operator's legacy `factory` is loaded by path."""
+    if section.agent is not None:
+        return (brains or installed_brains()).create(section.agent, llm, section.settings)
+    assert section.factory is not None
+    return load_brain(section.factory, llm, section.settings)
+
+
 def build_runtime(
     config: ClientConfig,
     builders: IntegrationBuilders,
     clock: Clock,
     *,
     stagger: timedelta = timedelta(0),
+    brains: BrainRegistry | None = None,
 ) -> ClientRuntime:
     """Assemble one client's Engine. Everything here comes from that client's own config."""
     spec, client_id = config.spec, config.client_id
@@ -239,9 +251,7 @@ def build_runtime(
         "llm",
         lambda: _choose(client_id, builders.llms, spec.llm.provider, "llm")(config),
     )
-    brain = _stage(
-        client_id, "brain", lambda: load_brain(spec.brain.factory, llm, spec.brain.settings)
-    )
+    brain = _stage(client_id, "brain", lambda: _build_brain(spec.brain, llm, brains))
     channel_key = channel_provider_key(config)
     if channel_key is None:
         raise RuntimeBuildError(f"{client_id}: {NO_CHANNEL_REASON}")

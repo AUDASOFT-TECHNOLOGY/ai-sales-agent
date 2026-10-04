@@ -1,12 +1,14 @@
 """A Brain's own settings rules, found through the `SETTINGS_SPEC` attribute of its module.
 
-The Brain module is located from `brain.factory` with `importlib`, so `sales_app` still knows no
-Brain by name. A Brain without a spec keeps opaque settings, exactly as before.
+A Brain named by key (`brain.agent`) brings its spec in its descriptor, found in the registry of
+installed entry points. Only the operator's legacy `brain.factory` is located with `importlib`, so
+`sales_app` still knows no Brain by name. A Brain without a spec keeps opaque settings.
 """
 
 import importlib
 from dataclasses import dataclass
 
+from sales_app.brain_registry import BrainRegistry, installed_brains
 from sales_app.config.schema import ClientFile
 from sales_core.ports import BrainSettingsSpec
 
@@ -36,13 +38,25 @@ def find_settings_spec(factory_path: str) -> SpecLookup:
     return SpecLookup(spec=spec)
 
 
+def find_agent_settings_spec(agent: str, registry: BrainRegistry) -> SpecLookup:
+    """The settings rules of an installed Brain, from its descriptor. No import by path."""
+    installed = registry.find(agent)
+    if installed is None:
+        return SpecLookup(error=registry.problem_for(agent), import_failed=True)
+    return SpecLookup(spec=installed.settings_spec)
+
+
 def prepare_brain_settings(
-    client: ClientFile, *, require_module: bool
+    client: ClientFile, *, require_module: bool, brains: BrainRegistry | None = None
 ) -> tuple[ClientFile, tuple[str, ...]]:
     """Validate the Brain's settings with its spec and return the client with the normalised
     latest version. `require_module`: an unimportable Brain module is a problem (publishing), not
     something to skip (loading, where the runtime build reports it with more context)."""
-    lookup = find_settings_spec(client.brain.factory)
+    if client.brain.agent is not None:
+        lookup = find_agent_settings_spec(client.brain.agent, brains or installed_brains())
+    else:
+        assert client.brain.factory is not None
+        lookup = find_settings_spec(client.brain.factory)
     if lookup.import_failed and not require_module:
         return client, ()
     if lookup.error is not None:

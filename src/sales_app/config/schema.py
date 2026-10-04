@@ -12,9 +12,11 @@ from pydantic import (
     StrictStr,
     StringConstraints,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
+from sales_app.brain_registry import BRAIN_KEY_PATTERN
 from sales_core.approval import ApprovalMode
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -41,7 +43,10 @@ def _reject_placeholder(value: str) -> str:
 
 
 class BrainSection(_Section):
-    factory: str  # "package.module:callable", resolved at startup, never imported statically
+    # Exactly one of the two. `factory` is the operator's legacy "package.module:callable". `agent`
+    # is a catalogue key, found among the installed Brains and never turned into a path.
+    factory: str | None = None
+    agent: Annotated[str, StringConstraints(pattern=BRAIN_KEY_PATTERN)] | None = None
     settings: dict[str, Any] = Field(
         default_factory=dict
     )  # handed to the Brain (validated by its spec)
@@ -49,10 +54,27 @@ class BrainSection(_Section):
 
     @field_validator("factory")
     @classmethod
-    def _check_factory(cls, value: str) -> str:
+    def _check_factory(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if not _FACTORY.match(value):
             raise ValueError("must look like 'package.module:callable'")
         return _reject_placeholder(value)
+
+    @model_serializer(mode="wrap")
+    def _leave_out_the_unused_way(self, handler: Any) -> dict[str, Any]:
+        """A legacy section dumps exactly as before: the way not used is not written."""
+        data = handler(self)
+        for name in ("factory", "agent"):
+            if data.get(name) is None:
+                data.pop(name, None)
+        return data
+
+    @model_validator(mode="after")
+    def _exactly_one_way_to_name_the_brain(self) -> "BrainSection":
+        if (self.factory is None) == (self.agent is None):
+            raise ValueError("brain needs exactly one of `factory` and `agent`")
+        return self
 
 
 class SheetsSection(_Section):

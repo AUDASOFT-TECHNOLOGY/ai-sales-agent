@@ -12,6 +12,7 @@ from sales_brain_kit.consultative import (
     ConsultativeSalesBrain,
     create_brain,
 )
+from sales_brain_kit.descriptor import ENTRY_POINT_GROUP, BrainDescriptor
 from sales_brain_kit.readiness import ReadinessReport, check_readiness
 from sales_brain_kit.settings import ConsultativeSalesSettings
 from sales_brain_kit.spec import (
@@ -23,8 +24,10 @@ from sales_brain_kit.spec import (
 )
 
 __all__ = [
+    "ENTRY_POINT_GROUP",
     "FAMILY",
     "SETTINGS_VERSION",
+    "BrainDescriptor",
     "BrainOutputError",
     "ConsultativeSalesBrain",
     "ConsultativeSalesSettings",

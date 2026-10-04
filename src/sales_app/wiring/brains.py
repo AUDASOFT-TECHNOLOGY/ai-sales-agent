@@ -1,17 +1,17 @@
-"""Loading a client's Brain from the entry point named in its configuration.
+"""Loading a client's Brain.
 
-The app never imports a Brain package by name: the dotted path comes from `client.yaml`, so
-nothing in `sales_app` knows which clients or Brains exist.
+A Brain named by key (`brain.agent`) is built by the registry of installed entry points and is
+never imported from a path (see `sales_app.brain_registry`). `load_brain` is the legacy way, kept
+for the operator's own `brain.factory`: the dotted path comes from the operator's `client.yaml`.
 """
 
 import importlib
 from collections.abc import Mapping
 
+from sales_app.brain_registry import BrainLoadError
 from sales_core.ports import Brain, LLMProvider
 
-
-class BrainLoadError(Exception):
-    """The configured Brain cannot be imported, built, or does not implement the Brain port."""
+__all__ = ["BrainLoadError", "load_brain"]
 
 
 def load_brain(factory_path: str, llm: LLMProvider, settings: Mapping[str, object]) -> Brain:

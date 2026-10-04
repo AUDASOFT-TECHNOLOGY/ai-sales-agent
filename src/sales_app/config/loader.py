@@ -10,6 +10,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from sales_app.brain_registry import BrainRegistry
 from sales_app.config.brain_settings import prepare_brain_settings
 from sales_app.config.llm_registry import EMPTY_LLM_REGISTRY, LLMRegistry
 from sales_app.config.offered_models import inactive_model_reason, models_from
@@ -214,6 +215,7 @@ def complete_client_config(
     llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
     secret_store: SecretStore | None = None,
     extra_missing: tuple[str, ...] = (),
+    brains: BrainRegistry | None = None,
 ) -> Resolution:
     """The last steps of resolving a client, once its settings have become a `ClientFile`: the
     Brain's own rules, the effective mode, the credentials, the model allow-list.
@@ -228,7 +230,7 @@ def complete_client_config(
 
     # A Brain that declares settings rules gets its settings validated and normalised here. An
     # unimportable Brain module is left for the runtime build to report, with more context.
-    spec, brain_problems = prepare_brain_settings(spec, require_module=False)
+    spec, brain_problems = prepare_brain_settings(spec, require_module=False, brains=brains)
     problems.extend(f"{name}: {message}" for message in brain_problems)
     if brain_problems and version_number is not None:
         problems.append(

@@ -27,6 +27,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from sales_app.brain_registry import BrainRegistry, installed_brains
 from sales_app.config.canonical import ClientSpec
 from sales_app.config.llm_registry import EMPTY_LLM_REGISTRY, LLMRegistry
 from sales_app.config.loader import ClientConfig, Resolution, complete_client_config
@@ -102,12 +103,16 @@ def channel_provider_key(config: ClientConfig) -> str | None:
 def legacy_file_from_spec(
     spec: ClientSpec,
     env_fallbacks: Mapping[str, str] | None = None,
-    brain_factories: Mapping[str, str] | None = None,
+    brains: BrainRegistry | None = None,
+    *,
+    allow_legacy_factory: bool = False,
 ) -> ClientFile:
     """The `ClientFile` a canonical spec stands for, or `NotRunnableError`.
 
-    `env_fallbacks` are the legacy `*_env` names (they never lived in the spec); `brain_factories`
-    maps a Brain catalogue key to its factory path, supplied by the caller (nothing is discovered).
+    `env_fallbacks` are the legacy `*_env` names (they never lived in the spec). A Brain named by
+    `agent` stays a key: it is checked against `brains` (default: those installed) and handed on
+    as a key, never turned into a path. A `legacy_factory` is a Python path, so it is only carried
+    over when the caller says it comes from the operator's own legacy wiring.
     """
     names = env_fallbacks or {}
     data = spec.model_dump(mode="json")
@@ -146,9 +151,16 @@ def legacy_file_from_spec(
         )
 
     brain = data["brain"]
-    factory = brain["legacy_factory"] or (brain_factories or {}).get(brain["agent"] or "")
-    if factory is None:
-        problems.append(f"brain.agent: {brain['agent']!r} is not a Brain this runtime can find")
+    if brain["legacy_factory"] is not None:
+        if not allow_legacy_factory:
+            problems.append(
+                "brain.legacy_factory: a Python path is not accepted from a canonical "
+                "configuration; name the Brain with `brain.agent`"
+            )
+    else:
+        reason = (brains or installed_brains()).problem_for(brain["agent"])
+        if reason is not None:
+            problems.append(f"brain.agent: {brain['agent']!r} is not a Brain this runtime can find")
 
     channels = [c for c in data["channels"] if c["enabled"]]
     channel = channels[0] if len(channels) == 1 else None
@@ -185,7 +197,8 @@ def legacy_file_from_spec(
         "max_attempts": data["max_attempts"],
         "opt_out_keywords": data["opt_out_keywords"],
         "brain": {
-            "factory": factory,
+            "factory": brain["legacy_factory"],
+            "agent": brain["agent"],
             "settings": brain["settings"],
             "settings_version": brain["settings_version"],
         },
@@ -238,7 +251,7 @@ def client_config_from_spec(
     mode_ceiling: ApprovalMode,
     llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
     secret_store: SecretStore | None = None,
-    brain_factories: Mapping[str, str] | None = None,
+    brains: BrainRegistry | None = None,
 ) -> Resolution:
     """The `Resolution` (a config, "disabled", or problems) for a resolved canonical spec.
 
@@ -263,7 +276,13 @@ def client_config_from_spec(
             )
         )
     try:
-        legacy = legacy_file_from_spec(spec, resolution.env_fallbacks, brain_factories)
+        legacy = legacy_file_from_spec(
+            spec,
+            resolution.env_fallbacks,
+            brains,
+            # A client.yaml written in the canonical shape is the client's: it may not name a path.
+            allow_legacy_factory=resolution.origin == "legacy",
+        )
     except NotRunnableError as error:
         return Resolution(errors=tuple(f"{name}: {problem}" for problem in error.problems))
 
@@ -277,6 +296,7 @@ def client_config_from_spec(
         llm_registry=llm_registry,
         secret_store=secret_store,
         extra_missing=() if enabled else (NO_CHANNEL_REASON,),
+        brains=brains,
     )
     config = done.config
     if config is None:
@@ -304,12 +324,14 @@ def resolve_canonical_client_config(
     store: Any = None,
     registry: Any = None,
     known_brains: Mapping[str, str] | None = None,
+    brains: BrainRegistry | None = None,
     llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
     secret_store: SecretStore | None = None,
 ) -> Resolution:
     """`resolve_client_spec` and `client_config_from_spec` in one: a client directory to what the
-    runtime runs on, through the canonical spec. `known_brains` (factory path -> catalogue key)
-    serves both ways: the normaliser names a Brain by its key, and the runtime finds its factory."""
+    runtime runs on, through the canonical spec. `known_brains` (factory path -> catalogue key) is
+    only for the legacy normaliser, which then names a Brain by its key; the Brain itself is found
+    in `brains` (default: the installed ones), never by a path."""
     resolved = resolve_client_spec(
         directory, store=store, registry=registry, known_brains=known_brains
     )
@@ -320,5 +342,5 @@ def resolve_canonical_client_config(
         mode_ceiling=mode_ceiling,
         llm_registry=llm_registry,
         secret_store=secret_store,
-        brain_factories={key: path for path, key in (known_brains or {}).items()},
+        brains=brains,
     )

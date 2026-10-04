@@ -8,6 +8,9 @@ dependencies = ["ai-sales-agent-core"]
 [tool.uv.sources]
 ai-sales-agent-core = { workspace = true }
 
+[project.entry-points."revansa.brains"]
+naga = "naga_brain.brain:BRAIN"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

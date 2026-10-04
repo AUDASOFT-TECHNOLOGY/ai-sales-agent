@@ -12,6 +12,7 @@ import threading
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 
+from sales_app.brain_registry import BrainRegistry
 from sales_app.config import ClientConfig, LoadedConfig
 from sales_app.config.runtime_config import channel_provider_key
 from sales_app.errors import ConfigurationError, RuntimeBuildError
@@ -43,7 +44,11 @@ class ClientRegistry:
 
     @classmethod
     def build(
-        cls, loaded: LoadedConfig, builders: IntegrationBuilders, clock: Clock
+        cls,
+        loaded: LoadedConfig,
+        builders: IntegrationBuilders,
+        clock: Clock,
+        brains: BrainRegistry | None = None,
     ) -> "ClientRegistry":
         """Build every ready client, collecting all failures into one ConfigurationError. A client
         that lacks credentials is not an error: it is recorded as not ready and not built."""
@@ -56,7 +61,11 @@ class ClientRegistry:
                 continue
             try:
                 runtime = build_runtime(
-                    config, builders, clock, stagger=timedelta(seconds=STAGGER_SECONDS * index)
+                    config,
+                    builders,
+                    clock,
+                    stagger=timedelta(seconds=STAGGER_SECONDS * index),
+                    brains=brains,
                 )
             except RuntimeBuildError as error:
                 errors.append(str(error))

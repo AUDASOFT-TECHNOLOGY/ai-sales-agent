@@ -14,6 +14,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import app_spec_brains
 import app_test_brains as brains
 import pytest
 import yaml
@@ -30,6 +31,7 @@ from baseline_support import (
 )
 from factories import NOW
 
+from sales_app.brain_registry import BrainRegistry, InstalledBrain
 from sales_app.config import LoadedConfig, build_llm_registry, load_client_configs
 from sales_app.config.normalize import normalize
 from sales_app.config.runtime_config import (
@@ -41,14 +43,18 @@ from sales_app.config.runtime_config import (
     channel_provider_key,
     client_config_from_spec,
     legacy_file_from_spec,
-    resolve_canonical_client_config,
+)
+from sales_app.config.runtime_config import (
+    resolve_canonical_client_config as resolve_with_brains,
 )
 from sales_app.config.spec_resolution import resolve_client_spec
 from sales_app.errors import RuntimeBuildError
 from sales_app.parsers import build_parsers
 from sales_app.registry import ClientRegistry
-from sales_app.wiring import ChannelProvider, IntegrationBuilders, build_runtime, default_builders
+from sales_app.wiring import ChannelProvider, IntegrationBuilders, default_builders
+from sales_app.wiring import build_runtime as build_runtime_with_brains
 from sales_app.wiring.providers import ChannelSupport, ProviderKind, ProviderRegistry
+from sales_brain_kit import ConsultativeSalesSpec
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import Channel
 from sales_core.ports import InvalidSignatureError
@@ -63,6 +69,21 @@ FACTORY = "app_test_brains:good_brain"
 @pytest.fixture(autouse=True)
 def _reset_created():
     brains.CREATED.clear()
+
+
+TEST_BRAINS = {FACTORY: "test_brain", "app_spec_brains:create_brain": "spec_brain"}
+
+
+def installed_test_brain() -> BrainRegistry:
+    """The suite's Brains by key: a plain one, and one that declares settings rules."""
+    return BrainRegistry(
+        [
+            InstalledBrain("test_brain", brains.good_brain, None, "tests:good"),
+            InstalledBrain(
+                "spec_brain", app_spec_brains.create_brain, ConsultativeSalesSpec(), "tests:spec"
+            ),
+        ]
+    )
 
 
 def yaml_fixture(name: str) -> dict[str, Any]:
@@ -99,8 +120,24 @@ def canonical_yaml(root: Path, spec: dict[str, Any], name: str = "alpha") -> Pat
     return write(root / "canonical", spec, name)
 
 
+def resolve_canonical_client_config(*args, **kwargs):
+    """The canonical resolution with `test_brain` installed, as the suite's Brain."""
+    return resolve_with_brains(*args, **{"brains": installed_test_brain(), **kwargs})
+
+
+def build_runtime(*args, **kwargs):
+    kwargs["brains"] = kwargs.get("brains") or installed_test_brain()
+    return build_runtime_with_brains(*args, **kwargs)
+
+
 def canonical_spec(raw: dict[str, Any], document=None) -> dict[str, Any]:
-    return deepcopy(normalize(raw, document).spec)
+    """The canonical spec of a configuration, as a canonical file would write it: the suite's
+    Brain is named by key (a canonical file may not carry a Python path)."""
+    spec = deepcopy(normalize(raw, document).spec)
+    agent = TEST_BRAINS.get(spec["brain"].get("legacy_factory"))
+    if agent is not None:
+        spec["brain"] = {**spec["brain"], "agent": agent, "legacy_factory": None}
+    return spec
 
 
 def three_ways(root: Path, raw, document, *, ceiling=AUTO, env=None, secret_store=None, **kwargs):
@@ -162,11 +199,13 @@ def full_store(*client_ids: str):
     return store
 
 
-def run(config, monkeypatch, tmp_path) -> dict[str, Any]:
+def run(config, monkeypatch, tmp_path, registry=None) -> dict[str, Any]:
     """Build the runtime with the real builders over recording vendors; what was passed where."""
     brains.CREATED.clear()
     recording = install_recording_vendors(monkeypatch)
-    runtime = build_runtime(config, default_builders(make_settings(tmp_path)), FakeClock(NOW))
+    runtime = build_runtime(
+        config, default_builders(make_settings(tmp_path)), FakeClock(NOW), brains=registry
+    )
     return {
         "vendor_calls": recording.calls,
         "engine": engine_snapshot(runtime),
@@ -184,7 +223,17 @@ class TestACanonicalClientRunsLikeALegacyOne:
         # read through the canonical spec: identical, down to the environment names and the secrets
         assert snapshot_config(through.config) == snapshot_config(legacy.config)
         # from a canonical file: the same, except the environment names it never carried
-        assert without_env_names(own.config.spec) == without_env_names(legacy.config.spec)
+        own_spec, legacy_spec = (
+            without_env_names(own.config.spec),
+            without_env_names(legacy.config.spec),
+        )
+        # ...and the Brain, which a canonical file names by key where the legacy file has a path
+        legacy_brain = legacy_spec.pop("brain")
+        assert own_spec.pop("brain") == {
+            **{k: v for k, v in legacy_brain.items() if k != "factory"},
+            "agent": "test_brain",
+        }
+        assert own_spec == legacy_spec
         assert own.config.effective_mode == legacy.config.effective_mode
 
     @pytest.mark.parametrize("ceiling", [APPROVAL, DRY], ids=["live", "dry_run"])
@@ -279,10 +328,13 @@ class TestACanonicalClientRunsLikeALegacyOne:
             env=env_for("alpha"),
             mode_ceiling=APPROVAL,
             known_brains={FACTORY: "test_brain"},
+            brains=installed_test_brain(),
         )
         assert by_key.config.canonical.brain.agent == "test_brain"
-        assert by_key.config.spec.brain.factory == FACTORY
-        assert run(by_key.config, monkeypatch, tmp_path) == run(
+        # The key is resolved by the registry: it never became a Python path.
+        assert by_key.config.spec.brain.agent == "test_brain"
+        assert by_key.config.spec.brain.factory is None
+        assert run(by_key.config, monkeypatch, tmp_path, installed_test_brain()) == run(
             legacy.config, monkeypatch, tmp_path
         )
 
@@ -398,7 +450,7 @@ class TestWhatTheRuntimeCannotRunYet:
 
     def test_the_mapping_itself_is_a_pure_function(self):
         spec = resolve_client_spec_of(minimal())
-        file = legacy_file_from_spec(spec, {"openai.api_key": "MY_KEY"})
+        file = legacy_file_from_spec(spec, {"openai.api_key": "MY_KEY"}, allow_legacy_factory=True)
         assert file.llm.api_key_env == "MY_KEY" and file.sheets.provider == "google_sheets"
         with pytest.raises(NotRunnableError):
             legacy_file_from_spec(
@@ -535,7 +587,10 @@ class TestRegistryAndParsersFollowTheChannel:
             configs.append(result.config)
         builders = default_builders(make_settings(tmp_path))
         registry = ClientRegistry.build(
-            LoadedConfig(tuple(configs), (), ()), builders, FakeClock(NOW)
+            LoadedConfig(tuple(configs), (), ()),
+            builders,
+            FakeClock(NOW),
+            brains=installed_test_brain(),
         )
         return configs, builders, registry
 
@@ -568,7 +623,9 @@ class TestRegistryAndParsersFollowTheChannel:
             secret_store=full_store(),
         ).config
         builders = default_builders(make_settings(tmp_path))
-        registry = ClientRegistry.build(LoadedConfig((config,), (), ()), builders, FakeClock(NOW))
+        registry = ClientRegistry.build(
+            LoadedConfig((config,), (), ()), builders, FakeClock(NOW), brains=installed_test_brain()
+        )
         assert registry.by_routing_key("whatsapp", phone_id("alpha")) is None
         assert registry.not_ready_client_for("whatsapp", phone_id("alpha")) is None
         (entry,) = registry.health()
@@ -633,7 +690,9 @@ class TestRegistryAndParsersFollowTheChannel:
         ).config
         runtime = build_runtime(config, builders, FakeClock(NOW))
         assert runtime.client_id == "alpha" and "alpha" in made.channels
-        registry = ClientRegistry.build(LoadedConfig((config,), (), ()), builders, FakeClock(NOW))
+        registry = ClientRegistry.build(
+            LoadedConfig((config,), (), ()), builders, FakeClock(NOW), brains=installed_test_brain()
+        )
         assert registry.by_routing_key("whatsapp", phone_id("alpha")) is None
         assert registry.by_routing_key("fake_channel", phone_id("alpha")).client_id == "alpha"
 
