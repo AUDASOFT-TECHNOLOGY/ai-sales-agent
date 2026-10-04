@@ -1,0 +1,42 @@
+# Legacy client.yaml with every value real and every optional key written out.
+client_id: alpha
+display_name: Alpha Legacy
+enabled: true
+mode: approval
+timezone: Africa/Tunis
+daily_action_limit: 12
+max_attempts: 4
+opt_out_keywords: ["stop", "arret"]
+brain:
+  factory: app_test_brains:good_brain
+  settings_version: 1
+  settings:
+    tone: warm
+sheets:
+  provider: google_sheets
+  spreadsheet_id: sheet-alpha
+  prospects_tab: Leads
+  actions_tab: ActionsX
+  messages_tab: MessagesX
+  log_tab: LogX
+  column_mapping:
+    prospects.phone: Mobile
+    prospects.display_name: Name
+    actions.draft_text: Draft
+  credentials_env: GOOGLE_APPLICATION_CREDENTIALS
+llm:
+  provider: openai
+  api_key_env: OPENAI_API_KEY
+  model: gpt-upstream-1
+whatsapp:
+  provider: whatsapp
+  token_env: ALPHA_TOKEN
+  phone_number_id_env: ALPHA_PHONE_ID
+  app_secret_env: ALPHA_APP_SECRET
+  api_version: v22.0
+schedule:
+  daily_at: "10:30"
+  days: [mon, tue, wed]
+  prepare_every_minutes: 30
+  dispatch_every_minutes: 3
+  recover_every_minutes: 10

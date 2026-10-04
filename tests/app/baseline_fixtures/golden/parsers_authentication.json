@@ -1,0 +1,43 @@
+{
+  "alpha_unsigned": {
+    "rejected": "missing signature"
+  },
+  "alpha_with_beta_secret": {
+    "rejected": "signature does not match"
+  },
+  "alpha_with_its_secret": {
+    "events": [
+      [
+        "phone-alpha",
+        "wamid.phone-alpha"
+      ]
+    ]
+  },
+  "beta_with_its_secret": {
+    "events": [
+      [
+        "phone-beta",
+        "wamid.phone-beta"
+      ]
+    ]
+  },
+  "not_ready_delta_is_still_authenticated": {
+    "events": [
+      [
+        "phone-delta",
+        "wamid.phone-delta"
+      ]
+    ]
+  },
+  "not_ready_delta_with_a_wrong_secret": {
+    "rejected": "signature does not match"
+  },
+  "unknown_account_is_returned_unverified": {
+    "events": [
+      [
+        "phone-unknown",
+        "wamid.phone-unknown"
+      ]
+    ]
+  }
+}

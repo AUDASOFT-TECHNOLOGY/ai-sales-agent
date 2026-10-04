@@ -1,0 +1,9 @@
+{
+  "response": {
+    "body": {
+      "detail": "llm.model: Value error, is still a placeholder"
+    },
+    "status": 400
+  },
+  "stored": null
+}

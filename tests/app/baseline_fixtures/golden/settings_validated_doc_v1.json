@@ -1,0 +1,57 @@
+{
+  "brain": {
+    "settings": {
+      "tone": "v1"
+    },
+    "settings_version": 1
+  },
+  "daily_action_limit": 9,
+  "display_name": "Alpha V1",
+  "inbound": {
+    "limits": {
+      "max_replies_per_prospect_per_day": 20
+    },
+    "spontaneous_conversations": {
+      "allowed_decisions": [
+        "send_message",
+        "schedule_follow_up",
+        "handoff_to_human",
+        "close",
+        "no_action"
+      ],
+      "enabled": true,
+      "when_disabled": "store_and_flag"
+    },
+    "unknown_contacts": {
+      "max_new_per_day": 30,
+      "policy": "ignore"
+    }
+  },
+  "llm": {
+    "model": "gpt-upstream-1",
+    "provider": "openai"
+  },
+  "mode": "approval",
+  "opt_out_keywords": [
+    "stop"
+  ],
+  "schedule": {
+    "daily_at": "08:00",
+    "days": [
+      "mon",
+      "tue"
+    ]
+  },
+  "schema_version": 2,
+  "sheets": {
+    "actions_tab": "Actions",
+    "column_mapping": {
+      "prospects.phone": "Tel"
+    },
+    "log_tab": "Log",
+    "messages_tab": "Messages",
+    "prospects_tab": "Prospects",
+    "spreadsheet_id": "sheet-alpha-v1"
+  },
+  "timezone": "Africa/Tunis"
+}

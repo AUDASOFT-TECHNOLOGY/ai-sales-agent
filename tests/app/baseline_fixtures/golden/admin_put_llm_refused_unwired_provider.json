@@ -1,0 +1,9 @@
+{
+  "response": {
+    "body": {
+      "detail": "llm.provider 'anthropic' is not wired in this deployment"
+    },
+    "status": 400
+  },
+  "stored": null
+}

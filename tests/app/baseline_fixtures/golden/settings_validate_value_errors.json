@@ -1,0 +1,8 @@
+{
+  "errors": [
+    "timezone: Value error, unknown timezone 'Nowhere/Land'",
+    "daily_action_limit: Input should be greater than or equal to 1",
+    "sheets.spreadsheet_id: Value error, is still a placeholder",
+    "llm.model: Value error, is still a placeholder"
+  ]
+}

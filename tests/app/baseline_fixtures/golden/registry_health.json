@@ -1,0 +1,49 @@
+[
+  {
+    "client_id": "alpha",
+    "config_source": "file",
+    "config_version": null,
+    "configured_mode": "approval",
+    "consecutive_failures": 0,
+    "last_error": null,
+    "last_error_at": null,
+    "last_runs": {},
+    "mode": "approval",
+    "mode_clamped": false,
+    "status": "ready"
+  },
+  {
+    "client_id": "beta",
+    "config_source": "file",
+    "config_version": null,
+    "configured_mode": "approval",
+    "consecutive_failures": 0,
+    "last_error": null,
+    "last_error_at": null,
+    "last_runs": {},
+    "mode": "approval",
+    "mode_clamped": false,
+    "status": "ready"
+  },
+  {
+    "client_id": "delta",
+    "config_source": "file",
+    "config_version": null,
+    "configured_mode": "approval",
+    "consecutive_failures": 0,
+    "dropped_inbound": 0,
+    "last_error": "missing credentials: WhatsApp access token is not configured",
+    "last_error_at": null,
+    "last_runs": {},
+    "missing_credentials": [
+      "WhatsApp access token is not configured"
+    ],
+    "mode": "approval",
+    "mode_clamped": false,
+    "status": "not_ready"
+  },
+  {
+    "client_id": "pholder",
+    "status": "disabled"
+  }
+]

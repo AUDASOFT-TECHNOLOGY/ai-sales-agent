@@ -1,0 +1,59 @@
+{
+  "brain": {
+    "settings": {
+      "tone": "up"
+    },
+    "settings_version": 1
+  },
+  "daily_action_limit": 20,
+  "display_name": "Alpha Upstream",
+  "inbound": {
+    "limits": {
+      "max_replies_per_prospect_per_day": 20
+    },
+    "spontaneous_conversations": {
+      "allowed_decisions": [
+        "send_message",
+        "schedule_follow_up",
+        "handoff_to_human",
+        "close",
+        "no_action"
+      ],
+      "enabled": false,
+      "when_disabled": "store_and_flag"
+    },
+    "unknown_contacts": {
+      "max_new_per_day": 30,
+      "policy": "ignore"
+    }
+  },
+  "llm": {
+    "model": "gpt-upstream-1",
+    "provider": "openai"
+  },
+  "mode": "dry_run",
+  "opt_out_keywords": [
+    "stop"
+  ],
+  "schedule": {
+    "daily_at": "09:00",
+    "days": [
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri",
+      "sat"
+    ]
+  },
+  "schema_version": 2,
+  "sheets": {
+    "actions_tab": "Actions",
+    "column_mapping": {},
+    "log_tab": "Log",
+    "messages_tab": "Messages",
+    "prospects_tab": "Prospects",
+    "spreadsheet_id": "sheet-alpha-up"
+  },
+  "timezone": "Africa/Tunis"
+}

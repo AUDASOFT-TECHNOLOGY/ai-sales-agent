@@ -1,0 +1,21 @@
+# Legacy client.yaml as shipped for a new client: every value still a placeholder.
+client_id: pholder
+display_name: Pholder
+enabled: true
+mode: approval
+timezone: Africa/Tunis
+brain:
+  factory: app_test_brains:good_brain
+  settings: {}
+sheets:
+  provider: google_sheets
+  spreadsheet_id: TODO
+llm:
+  provider: openai
+  api_key_env: OPENAI_API_KEY
+  model: TODO
+whatsapp:
+  provider: whatsapp
+  token_env: PHOLDER_TOKEN
+  phone_number_id_env: PHOLDER_PHONE_ID
+  app_secret_env: PHOLDER_APP_SECRET

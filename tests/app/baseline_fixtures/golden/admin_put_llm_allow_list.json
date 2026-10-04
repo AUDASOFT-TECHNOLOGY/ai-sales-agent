@@ -1,0 +1,83 @@
+{
+  "allowed": {
+    "body": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "status": 200
+  },
+  "refused": {
+    "body": {
+      "detail": "llm.model 'gpt-upstream-2' is not allowed for provider 'openai'"
+    },
+    "status": 400
+  },
+  "stored": {
+    "author": "admin:root",
+    "document": {
+      "brain": {
+        "settings": {
+          "tone": "warm"
+        },
+        "settings_version": 1
+      },
+      "daily_action_limit": 12,
+      "display_name": "Alpha Legacy",
+      "inbound": {
+        "limits": {
+          "max_replies_per_prospect_per_day": 20
+        },
+        "spontaneous_conversations": {
+          "allowed_decisions": [
+            "send_message",
+            "schedule_follow_up",
+            "handoff_to_human",
+            "close",
+            "no_action"
+          ],
+          "enabled": true,
+          "when_disabled": "store_and_flag"
+        },
+        "unknown_contacts": {
+          "max_new_per_day": 30,
+          "policy": "ignore"
+        }
+      },
+      "llm": {
+        "model": "gpt-upstream-1",
+        "provider": "openai"
+      },
+      "mode": "approval",
+      "opt_out_keywords": [
+        "stop",
+        "arret"
+      ],
+      "schedule": {
+        "daily_at": "10:30",
+        "days": [
+          "mon",
+          "tue",
+          "wed"
+        ]
+      },
+      "schema_version": 2,
+      "sheets": {
+        "actions_tab": "ActionsX",
+        "column_mapping": {
+          "actions.draft_text": "Draft",
+          "prospects.display_name": "Name",
+          "prospects.phone": "Mobile"
+        },
+        "log_tab": "LogX",
+        "messages_tab": "MessagesX",
+        "prospects_tab": "Leads",
+        "spreadsheet_id": "sheet-alpha"
+      },
+      "timezone": "Africa/Tunis"
+    },
+    "note": "update LLM provider/model",
+    "parent": null,
+    "version": 1
+  }
+}

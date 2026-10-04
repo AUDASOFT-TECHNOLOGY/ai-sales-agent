@@ -1,0 +1,8 @@
+{
+  "config": null,
+  "disabled": false,
+  "errors": [
+    "pholder: sheets.spreadsheet_id: Value error, is still a placeholder",
+    "pholder: llm.model: Value error, is still a placeholder"
+  ]
+}

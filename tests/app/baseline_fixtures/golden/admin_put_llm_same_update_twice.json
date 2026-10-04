@@ -1,0 +1,83 @@
+{
+  "first": {
+    "body": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "same-model",
+      "provider": "openai"
+    },
+    "status": 200
+  },
+  "second": {
+    "body": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "same-model",
+      "provider": "openai"
+    },
+    "status": 200
+  },
+  "stored": {
+    "author": "admin:root",
+    "document": {
+      "brain": {
+        "settings": {
+          "tone": "beta"
+        },
+        "settings_version": 1
+      },
+      "daily_action_limit": 20,
+      "display_name": "Beta",
+      "inbound": {
+        "limits": {
+          "max_replies_per_prospect_per_day": 20
+        },
+        "spontaneous_conversations": {
+          "allowed_decisions": [
+            "send_message",
+            "schedule_follow_up",
+            "handoff_to_human",
+            "close",
+            "no_action"
+          ],
+          "enabled": true,
+          "when_disabled": "store_and_flag"
+        },
+        "unknown_contacts": {
+          "max_new_per_day": 30,
+          "policy": "ignore"
+        }
+      },
+      "llm": {
+        "model": "same-model",
+        "provider": "openai"
+      },
+      "mode": "approval",
+      "opt_out_keywords": [
+        "stop"
+      ],
+      "schedule": {
+        "daily_at": "09:00",
+        "days": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri",
+          "sat"
+        ]
+      },
+      "schema_version": 2,
+      "sheets": {
+        "actions_tab": "Actions",
+        "column_mapping": {},
+        "log_tab": "Log",
+        "messages_tab": "Messages",
+        "prospects_tab": "Prospects",
+        "spreadsheet_id": "sheet-beta"
+      },
+      "timezone": "Africa/Tunis"
+    },
+    "note": "update LLM provider/model",
+    "parent": 1,
+    "version": 2
+  }
+}

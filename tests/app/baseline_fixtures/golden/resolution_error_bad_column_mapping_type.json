@@ -1,0 +1,7 @@
+{
+  "config": null,
+  "disabled": false,
+  "errors": [
+    "alpha: sheets.column_mapping: Input should be a valid dictionary"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "errors": [
+    "schema_version: must be one of [1, 2], got 7"
+  ]
+}

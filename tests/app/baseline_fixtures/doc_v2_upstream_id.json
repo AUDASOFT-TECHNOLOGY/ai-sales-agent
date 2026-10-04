@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "display_name": "Alpha Upstream",
+  "timezone": "Africa/Tunis",
+  "sheets": {"spreadsheet_id": "sheet-alpha-up"},
+  "llm": {"provider": "openai", "model": "gpt-upstream-1"},
+  "brain": {"settings_version": 1, "settings": {"tone": "up"}}
+}

@@ -1,0 +1,7 @@
+{
+  "config": null,
+  "disabled": false,
+  "errors": [
+    "alpha: mode: Input should be 'approval', 'autonomous' or 'dry_run'"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "response": {
+    "body": {
+      "detail": "no such client"
+    },
+    "status": 404
+  },
+  "stored": null
+}

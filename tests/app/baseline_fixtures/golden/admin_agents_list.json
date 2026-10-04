@@ -1,0 +1,65 @@
+{
+  "body": [
+    {
+      "agent_id": "alpha",
+      "brain": {
+        "factory": "app_test_brains:good_brain",
+        "settings_version": 1
+      },
+      "client_id": "alpha",
+      "display_name": "Alpha Legacy",
+      "llm": {
+        "model": "gpt-upstream-1",
+        "provider": "openai"
+      },
+      "mode": "approval",
+      "status": "active"
+    },
+    {
+      "agent_id": "beta",
+      "brain": {
+        "factory": "app_test_brains:good_brain",
+        "settings_version": 1
+      },
+      "client_id": "beta",
+      "display_name": "Beta",
+      "llm": {
+        "model": "test-model",
+        "provider": "openai"
+      },
+      "mode": "approval",
+      "status": "active"
+    },
+    {
+      "agent_id": "delta",
+      "brain": {
+        "factory": "app_test_brains:good_brain",
+        "settings_version": 1
+      },
+      "client_id": "delta",
+      "display_name": "Delta",
+      "llm": {
+        "model": "test-model",
+        "provider": "openai"
+      },
+      "mode": "approval",
+      "status": "active"
+    },
+    {
+      "agent_id": "pholder",
+      "brain": {
+        "factory": "app_test_brains:good_brain",
+        "settings_version": null
+      },
+      "client_id": "pholder",
+      "display_name": "Pholder",
+      "llm": {
+        "model": "TODO",
+        "provider": "openai"
+      },
+      "mode": "approval",
+      "status": "disabled"
+    }
+  ],
+  "status": 200
+}

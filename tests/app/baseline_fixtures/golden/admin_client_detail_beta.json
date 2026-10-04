@@ -1,0 +1,75 @@
+{
+  "body": {
+    "account": null,
+    "brain": {
+      "factory": "app_test_brains:good_brain",
+      "settings_version": 1
+    },
+    "client_id": "beta",
+    "daily_action_limit": 20,
+    "display_name": "Beta",
+    "health": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_runs": {},
+      "status": "ready"
+    },
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "test-model",
+      "provider": "openai"
+    },
+    "llm_model": "test-model",
+    "max_attempts": 3,
+    "meta": {
+      "credentials_stored": false,
+      "status": "not_connected"
+    },
+    "mode": "approval",
+    "opt_out_keywords": [
+      "stop"
+    ],
+    "prospects_contacted": 0,
+    "providers": {
+      "llm": "openai",
+      "sheets": "google_sheets",
+      "whatsapp": "whatsapp"
+    },
+    "restart_required": false,
+    "revenue": null,
+    "schedule": {
+      "daily_at": "09:00",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat"
+      ],
+      "dispatch_every_minutes": 5,
+      "prepare_every_minutes": 60,
+      "recover_every_minutes": 15
+    },
+    "sheets": {
+      "actions_tab": "Actions",
+      "credentials_env": "GOOGLE_APPLICATION_CREDENTIALS",
+      "log_tab": "Log",
+      "messages_tab": "Messages",
+      "prospects_tab": "Prospects",
+      "provider": "google_sheets",
+      "spreadsheet_id": "sheet-beta"
+    },
+    "status": "active",
+    "timezone": "Africa/Tunis",
+    "whatsapp": {
+      "api_version": "v21.0",
+      "app_secret_env": "BETA_APP_SECRET",
+      "phone_number_id_env": "BETA_PHONE_ID",
+      "provider": "whatsapp",
+      "token_env": "BETA_TOKEN"
+    }
+  },
+  "status": 200
+}

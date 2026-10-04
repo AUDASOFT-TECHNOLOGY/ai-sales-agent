@@ -1,0 +1,101 @@
+{
+  "config": {
+    "client_id": "alpha",
+    "config_source": "store",
+    "config_version": 1,
+    "directory": "alpha",
+    "effective_mode": "dry_run",
+    "missing_credentials": [],
+    "mode_clamped": false,
+    "phone_number_id": "phone-alpha",
+    "ready": true,
+    "secrets": {
+      "openai.api_key": "sk-test",
+      "openai.base_url": null,
+      "openai.organization": null,
+      "openai.project": null,
+      "sheets.credentials_file": "creds.json",
+      "whatsapp.access_token": "token-alpha",
+      "whatsapp.api_version": "v21.0",
+      "whatsapp.app_secret": "secret-alpha",
+      "whatsapp.phone_number_id": "phone-alpha"
+    },
+    "spec": {
+      "brain": {
+        "factory": "app_test_brains:good_brain",
+        "settings": {
+          "tone": "up"
+        },
+        "settings_version": 1
+      },
+      "client_id": "alpha",
+      "daily_action_limit": 20,
+      "display_name": "Alpha Upstream",
+      "enabled": true,
+      "inbound": {
+        "limits": {
+          "max_replies_per_prospect_per_day": 20
+        },
+        "spontaneous_conversations": {
+          "allowed_decisions": [
+            "send_message",
+            "schedule_follow_up",
+            "handoff_to_human",
+            "close",
+            "no_action"
+          ],
+          "enabled": false,
+          "when_disabled": "store_and_flag"
+        },
+        "unknown_contacts": {
+          "max_new_per_day": 30,
+          "policy": "ignore"
+        }
+      },
+      "llm": {
+        "api_key_env": "OPENAI_API_KEY",
+        "model": "gpt-upstream-1",
+        "provider": "openai"
+      },
+      "max_attempts": 3,
+      "mode": "dry_run",
+      "opt_out_keywords": [
+        "stop"
+      ],
+      "schedule": {
+        "daily_at": "09:00",
+        "days": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri",
+          "sat"
+        ],
+        "dispatch_every_minutes": 5,
+        "prepare_every_minutes": 60,
+        "recover_every_minutes": 15
+      },
+      "sheets": {
+        "actions_tab": "Actions",
+        "column_mapping": {},
+        "credentials_env": "GOOGLE_APPLICATION_CREDENTIALS",
+        "log_tab": "Log",
+        "messages_tab": "Messages",
+        "prospects_tab": "Prospects",
+        "provider": "google_sheets",
+        "spreadsheet_id": "sheet-alpha-up"
+      },
+      "timezone": "Africa/Tunis",
+      "whatsapp": {
+        "api_version": "v21.0",
+        "app_secret_env": "ALPHA_APP_SECRET",
+        "phone_number_id_env": "ALPHA_PHONE_ID",
+        "provider": "whatsapp",
+        "token_env": "ALPHA_TOKEN"
+      }
+    }
+  },
+  "disabled": false,
+  "errors": []
+}

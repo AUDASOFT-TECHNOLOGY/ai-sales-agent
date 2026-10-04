@@ -1,0 +1,7 @@
+{
+  "config": null,
+  "disabled": false,
+  "errors": [
+    "alpha: daily_action_limit: Input should be greater than or equal to 1"
+  ]
+}

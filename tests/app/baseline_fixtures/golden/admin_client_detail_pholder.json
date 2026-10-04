@@ -1,0 +1,60 @@
+{
+  "body": {
+    "account": null,
+    "brain": {
+      "factory": "app_test_brains:good_brain",
+      "settings_version": null
+    },
+    "client_id": "pholder",
+    "daily_action_limit": null,
+    "display_name": "Pholder",
+    "health": null,
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "TODO",
+      "provider": "openai"
+    },
+    "llm_model": "TODO",
+    "max_attempts": null,
+    "meta": {
+      "credentials_stored": false,
+      "status": "not_connected"
+    },
+    "mode": "approval",
+    "opt_out_keywords": [],
+    "prospects_contacted": null,
+    "providers": {
+      "llm": "openai",
+      "sheets": "google_sheets",
+      "whatsapp": "whatsapp"
+    },
+    "restart_required": false,
+    "revenue": null,
+    "schedule": {
+      "daily_at": null,
+      "days": [],
+      "dispatch_every_minutes": null,
+      "prepare_every_minutes": null,
+      "recover_every_minutes": null
+    },
+    "sheets": {
+      "actions_tab": null,
+      "credentials_env": null,
+      "log_tab": null,
+      "messages_tab": null,
+      "prospects_tab": null,
+      "provider": "google_sheets",
+      "spreadsheet_id": "TODO"
+    },
+    "status": "disabled",
+    "timezone": "Africa/Tunis",
+    "whatsapp": {
+      "api_version": null,
+      "app_secret_env": "PHOLDER_APP_SECRET",
+      "phone_number_id_env": "PHOLDER_PHONE_ID",
+      "provider": "whatsapp",
+      "token_env": "PHOLDER_TOKEN"
+    }
+  },
+  "status": 200
+}

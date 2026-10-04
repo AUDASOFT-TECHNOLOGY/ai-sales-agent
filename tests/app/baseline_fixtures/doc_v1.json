@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "display_name": "Alpha V1",
+  "timezone": "Africa/Tunis",
+  "mode": "approval",
+  "daily_action_limit": 9,
+  "opt_out_keywords": ["stop"],
+  "sheets": {
+    "spreadsheet_id": "sheet-alpha-v1",
+    "prospects_tab": "Prospects",
+    "actions_tab": "Actions",
+    "messages_tab": "Messages",
+    "log_tab": "Log",
+    "column_mapping": {"prospects.phone": "Tel"}
+  },
+  "llm": {"model": "gpt-upstream-1"},
+  "schedule": {"daily_at": "08:00", "days": ["mon", "tue"]},
+  "brain": {"settings": {"tone": "v1"}}
+}

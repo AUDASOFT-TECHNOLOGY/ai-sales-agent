@@ -1,0 +1,6 @@
+{
+  "errors": [
+    "whatsapp: is not a client setting (operator-owned or unknown)",
+    "whatsapp.token_env: looks like a secret; keep secrets in environment variables and reference them by name"
+  ]
+}

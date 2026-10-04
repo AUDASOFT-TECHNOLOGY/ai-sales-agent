@@ -1,0 +1,21 @@
+{
+  "response": {
+    "body": {
+      "detail": [
+        {
+          "input": {
+            "provider": "openai"
+          },
+          "loc": [
+            "body",
+            "model"
+          ],
+          "msg": "Field required",
+          "type": "missing"
+        }
+      ]
+    },
+    "status": 422
+  },
+  "stored": null
+}

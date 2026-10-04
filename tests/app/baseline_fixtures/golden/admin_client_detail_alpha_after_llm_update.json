@@ -1,0 +1,194 @@
+{
+  "agent": {
+    "body": {
+      "agent_id": "alpha",
+      "brain": {
+        "factory": "app_test_brains:good_brain",
+        "settings_version": 1
+      },
+      "channels": {
+        "sheets": "google_sheets",
+        "whatsapp": "whatsapp"
+      },
+      "client_id": "alpha",
+      "daily_action_limit": 12,
+      "display_name": "Alpha Legacy",
+      "llm": {
+        "model": "gpt-upstream-1",
+        "provider": "openai"
+      },
+      "max_attempts": 4,
+      "mode": "approval",
+      "schedule": {
+        "daily_at": "10:30",
+        "days": [
+          "mon",
+          "tue",
+          "wed"
+        ],
+        "dispatch_every_minutes": 3,
+        "prepare_every_minutes": 30,
+        "recover_every_minutes": 10
+      },
+      "status": "active",
+      "timezone": "Africa/Tunis"
+    },
+    "status": 200
+  },
+  "detail": {
+    "body": {
+      "account": null,
+      "brain": {
+        "factory": "app_test_brains:good_brain",
+        "settings_version": 1
+      },
+      "client_id": "alpha",
+      "daily_action_limit": 12,
+      "display_name": "Alpha Legacy",
+      "health": {
+        "consecutive_failures": 0,
+        "last_error": null,
+        "last_error_at": null,
+        "last_runs": {},
+        "status": "ready"
+      },
+      "llm": {
+        "api_key_env": "OPENAI_API_KEY",
+        "model": "gpt-upstream-1",
+        "provider": "openai"
+      },
+      "llm_model": "gpt-upstream-1",
+      "max_attempts": 4,
+      "meta": {
+        "credentials_stored": false,
+        "status": "not_connected"
+      },
+      "mode": "approval",
+      "opt_out_keywords": [
+        "stop",
+        "arret"
+      ],
+      "prospects_contacted": 0,
+      "providers": {
+        "llm": "openai",
+        "sheets": "google_sheets",
+        "whatsapp": "whatsapp"
+      },
+      "restart_required": false,
+      "revenue": null,
+      "schedule": {
+        "daily_at": "10:30",
+        "days": [
+          "mon",
+          "tue",
+          "wed"
+        ],
+        "dispatch_every_minutes": 3,
+        "prepare_every_minutes": 30,
+        "recover_every_minutes": 10
+      },
+      "sheets": {
+        "actions_tab": "ActionsX",
+        "credentials_env": "GOOGLE_APPLICATION_CREDENTIALS",
+        "log_tab": "LogX",
+        "messages_tab": "MessagesX",
+        "prospects_tab": "Leads",
+        "provider": "google_sheets",
+        "spreadsheet_id": "sheet-alpha"
+      },
+      "status": "active",
+      "timezone": "Africa/Tunis",
+      "whatsapp": {
+        "api_version": "v22.0",
+        "app_secret_env": "ALPHA_APP_SECRET",
+        "phone_number_id_env": "ALPHA_PHONE_ID",
+        "provider": "whatsapp",
+        "token_env": "ALPHA_TOKEN"
+      }
+    },
+    "status": 200
+  },
+  "list": {
+    "body": [
+      {
+        "client_id": "alpha",
+        "daily_action_limit": 12,
+        "display_name": "Alpha Legacy",
+        "health": {
+          "consecutive_failures": 0,
+          "last_error": null,
+          "last_error_at": null,
+          "last_runs": {},
+          "status": "ready"
+        },
+        "llm_model": "gpt-upstream-1",
+        "mode": "approval",
+        "providers": {
+          "llm": "openai",
+          "sheets": "google_sheets",
+          "whatsapp": "whatsapp"
+        },
+        "status": "active",
+        "timezone": "Africa/Tunis"
+      },
+      {
+        "client_id": "beta",
+        "daily_action_limit": 20,
+        "display_name": "Beta",
+        "health": {
+          "consecutive_failures": 0,
+          "last_error": null,
+          "last_error_at": null,
+          "last_runs": {},
+          "status": "ready"
+        },
+        "llm_model": "test-model",
+        "mode": "approval",
+        "providers": {
+          "llm": "openai",
+          "sheets": "google_sheets",
+          "whatsapp": "whatsapp"
+        },
+        "status": "active",
+        "timezone": "Africa/Tunis"
+      },
+      {
+        "client_id": "delta",
+        "daily_action_limit": 20,
+        "display_name": "Delta",
+        "health": {
+          "consecutive_failures": 0,
+          "last_error": "missing credentials: WhatsApp access token is not configured",
+          "last_error_at": null,
+          "last_runs": {},
+          "status": "not_ready"
+        },
+        "llm_model": "test-model",
+        "mode": "approval",
+        "providers": {
+          "llm": "openai",
+          "sheets": "google_sheets",
+          "whatsapp": "whatsapp"
+        },
+        "status": "active",
+        "timezone": "Africa/Tunis"
+      },
+      {
+        "client_id": "pholder",
+        "daily_action_limit": null,
+        "display_name": "Pholder",
+        "health": null,
+        "llm_model": "TODO",
+        "mode": "approval",
+        "providers": {
+          "llm": "openai",
+          "sheets": "google_sheets",
+          "whatsapp": "whatsapp"
+        },
+        "status": "disabled",
+        "timezone": "Africa/Tunis"
+      }
+    ],
+    "status": 200
+  }
+}

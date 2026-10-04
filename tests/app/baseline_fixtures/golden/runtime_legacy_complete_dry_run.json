@@ -1,0 +1,72 @@
+{
+  "engine": {
+    "channel": {
+      "class": "DisabledChannel",
+      "kind": "whatsapp"
+    },
+    "client": {
+      "client_id": "alpha",
+      "display_name": "Alpha Legacy",
+      "settings": {
+        "tone": "warm"
+      },
+      "timezone": "Africa/Tunis"
+    },
+    "daily_action_limit": 12,
+    "has_facts_reader": true,
+    "has_facts_writer": true,
+    "inbound": {
+      "max_new_per_day": 30,
+      "spontaneous_conversations": true,
+      "unknown_sender": "ignore"
+    },
+    "max_attempts": 4,
+    "missing": [],
+    "mode": "dry_run",
+    "opt_out_keywords": [
+      "arret",
+      "stop"
+    ],
+    "repository_class": "RecordingRepository",
+    "stagger_seconds": 0.0
+  },
+  "vendor_calls": [
+    [
+      "GoogleSheetsApi.from_service_account_file",
+      {
+        "path": "creds.json"
+      }
+    ],
+    [
+      "GoogleSheetsRepository",
+      {
+        "api_is_the_recorded_api": true,
+        "client_id": "alpha",
+        "column_mapping": {
+          "actions.draft_text": "Draft",
+          "prospects.display_name": "Name",
+          "prospects.phone": "Mobile"
+        },
+        "spreadsheet_id": "sheet-alpha",
+        "tabs": {
+          "actions": "ActionsX",
+          "facts": "Facts",
+          "log": "LogX",
+          "messages": "MessagesX",
+          "prospects": "Leads"
+        },
+        "timezone": "Africa/Tunis"
+      }
+    ],
+    [
+      "OpenAIProvider",
+      {
+        "api_key": "sk-test",
+        "base_url": null,
+        "model": "gpt-upstream-1",
+        "organization": null,
+        "project": null
+      }
+    ]
+  ]
+}

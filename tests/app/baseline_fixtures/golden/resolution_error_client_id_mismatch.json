@@ -1,0 +1,7 @@
+{
+  "config": null,
+  "disabled": false,
+  "errors": [
+    "alpha: client_id 'other' must equal the directory name"
+  ]
+}

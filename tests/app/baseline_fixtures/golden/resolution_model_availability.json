@@ -1,0 +1,146 @@
+{
+  "empty_allow_list": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [],
+    "ready": true
+  },
+  "empty_list": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [
+      "LLM model 'gpt-upstream-1' is not active in Settings"
+    ],
+    "ready": false
+  },
+  "legacy_id_differs": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [
+      "LLM model 'gpt-upstream-1' is not active in Settings"
+    ],
+    "ready": false
+  },
+  "legacy_id_matches": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [],
+    "ready": true
+  },
+  "list_wins_over_legacy_ids": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [],
+    "ready": true
+  },
+  "list_with_the_model_active": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [],
+    "ready": true
+  },
+  "list_with_the_model_inactive": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [
+      "LLM model 'gpt-upstream-1' is not active in Settings"
+    ],
+    "ready": false
+  },
+  "list_without_the_model": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [
+      "LLM model 'gpt-upstream-1' is not active in Settings"
+    ],
+    "ready": false
+  },
+  "model_not_on_the_allow_list": {
+    "errors": [
+      "alpha: llm.model 'gpt-upstream-1' is not allowed for provider 'openai'"
+    ],
+    "llm": null,
+    "missing_credentials": null,
+    "ready": null
+  },
+  "model_on_the_allow_list": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [],
+    "ready": true
+  },
+  "no_list_saved": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [],
+    "ready": true
+  },
+  "no_secret_store": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [],
+    "ready": true
+  },
+  "provider_not_on_the_allow_list": {
+    "errors": [
+      "alpha: llm.provider 'openai' is not on the deployment's allowed list"
+    ],
+    "llm": null,
+    "missing_credentials": null,
+    "ready": null
+  },
+  "v1_document_without_a_provider": {
+    "errors": [],
+    "llm": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "missing_credentials": [],
+    "ready": true
+  }
+}

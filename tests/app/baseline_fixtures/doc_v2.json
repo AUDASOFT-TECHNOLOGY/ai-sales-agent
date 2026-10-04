@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "display_name": "Alpha V2",
+  "timezone": "Africa/Tunis",
+  "mode": "approval",
+  "daily_action_limit": 11,
+  "opt_out_keywords": ["stop", "halt"],
+  "sheets": {
+    "spreadsheet_id": "sheet-alpha-v2",
+    "prospects_tab": "Prospects",
+    "actions_tab": "Actions",
+    "messages_tab": "Messages",
+    "log_tab": "Log",
+    "column_mapping": {"prospects.email": "Mail", "messages.text": "Body"}
+  },
+  "llm": {"provider": "openai", "model": "test-model"},
+  "schedule": {"daily_at": "09:15", "days": ["mon", "tue", "wed", "thu"]},
+  "inbound": {
+    "spontaneous_conversations": {"enabled": false, "when_disabled": "store_and_flag", "allowed_decisions": ["send_message", "close"]},
+    "unknown_contacts": {"policy": "ignore", "max_new_per_day": 5},
+    "limits": {"max_replies_per_prospect_per_day": 7}
+  },
+  "brain": {"settings_version": 1, "settings": {"tone": "v2"}}
+}

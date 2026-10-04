@@ -1,0 +1,25 @@
+{
+  "alpha": "alpha",
+  "beta": "beta",
+  "config_client_ids": [
+    "alpha",
+    "beta",
+    "delta"
+  ],
+  "delta_is_known_as_waiting": "delta",
+  "delta_not_ready": null,
+  "get_config_delta_is_known": true,
+  "get_runtime_delta": false,
+  "missing_alpha": [],
+  "missing_delta": [
+    "WhatsApp access token is not configured"
+  ],
+  "missing_unknown": [],
+  "ready_client_is_not_waiting": null,
+  "runtime_client_ids": [
+    "alpha",
+    "beta"
+  ],
+  "unknown_key": null,
+  "unknown_provider": null
+}

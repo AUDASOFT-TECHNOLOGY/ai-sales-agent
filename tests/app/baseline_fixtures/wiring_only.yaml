@@ -1,0 +1,15 @@
+# What is left of client.yaml when a stored settings document owns the client's settings.
+client_id: alpha
+enabled: true
+brain:
+  factory: app_test_brains:good_brain
+sheets:
+  provider: google_sheets
+llm:
+  provider: openai
+  api_key_env: OPENAI_API_KEY
+whatsapp:
+  provider: whatsapp
+  token_env: ALPHA_TOKEN
+  phone_number_id_env: ALPHA_PHONE_ID
+  app_secret_env: ALPHA_APP_SECRET

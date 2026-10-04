@@ -1,0 +1,13 @@
+{
+  "clients": [
+    "alpha",
+    "beta"
+  ],
+  "disabled": [],
+  "errors": [
+    "WhatsApp phone_number_id 'phone-alpha' is used by several clients: alpha, beta",
+    "spreadsheet_id 'sheet-alpha' is used by several clients: alpha, beta",
+    "whatsapp.phone_number_id_env 'ALPHA_PHONE_ID' is used by several clients: alpha, beta",
+    "whatsapp.token_env 'ALPHA_TOKEN' is used by several clients: alpha, beta"
+  ]
+}

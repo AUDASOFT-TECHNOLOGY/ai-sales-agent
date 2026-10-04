@@ -1,0 +1,39 @@
+{
+  "body": {
+    "agent_id": "delta",
+    "brain": {
+      "factory": "app_test_brains:good_brain",
+      "settings_version": 1
+    },
+    "channels": {
+      "sheets": "google_sheets",
+      "whatsapp": "whatsapp"
+    },
+    "client_id": "delta",
+    "daily_action_limit": 20,
+    "display_name": "Delta",
+    "llm": {
+      "model": "test-model",
+      "provider": "openai"
+    },
+    "max_attempts": 3,
+    "mode": "approval",
+    "schedule": {
+      "daily_at": "09:00",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat"
+      ],
+      "dispatch_every_minutes": 5,
+      "prepare_every_minutes": 60,
+      "recover_every_minutes": 15
+    },
+    "status": "active",
+    "timezone": "Africa/Tunis"
+  },
+  "status": 200
+}

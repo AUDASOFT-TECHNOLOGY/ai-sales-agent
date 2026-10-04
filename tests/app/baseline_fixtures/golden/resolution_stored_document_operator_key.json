@@ -1,0 +1,8 @@
+{
+  "config": null,
+  "disabled": false,
+  "errors": [
+    "alpha: configuration version 1: mode_ceiling: is not a client setting (operator-owned or unknown)",
+    "alpha: configuration version 1: brain.factory: is not a client setting (operator-owned or unknown)"
+  ]
+}

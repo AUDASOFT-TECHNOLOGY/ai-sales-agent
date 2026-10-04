@@ -1,0 +1,79 @@
+{
+  "engine": {
+    "channel": {
+      "class": "RecordingWhatsApp",
+      "kind": "whatsapp"
+    },
+    "client": {
+      "client_id": "alpha",
+      "display_name": "Alpha V2",
+      "settings": {
+        "tone": "v2"
+      },
+      "timezone": "Africa/Tunis"
+    },
+    "daily_action_limit": 11,
+    "has_facts_reader": true,
+    "has_facts_writer": true,
+    "inbound": {
+      "max_new_per_day": 5,
+      "spontaneous_conversations": false,
+      "unknown_sender": "ignore"
+    },
+    "max_attempts": 3,
+    "missing": [],
+    "mode": "approval",
+    "opt_out_keywords": [
+      "halt",
+      "stop"
+    ],
+    "repository_class": "RecordingRepository",
+    "stagger_seconds": 0.0
+  },
+  "vendor_calls": [
+    [
+      "GoogleSheetsApi.from_service_account_file",
+      {
+        "path": "creds.json"
+      }
+    ],
+    [
+      "GoogleSheetsRepository",
+      {
+        "api_is_the_recorded_api": true,
+        "client_id": "alpha",
+        "column_mapping": {
+          "messages.text": "Body",
+          "prospects.email": "Mail"
+        },
+        "spreadsheet_id": "sheet-alpha-v2",
+        "tabs": {
+          "actions": "Actions",
+          "facts": "Facts",
+          "log": "Log",
+          "messages": "Messages",
+          "prospects": "Prospects"
+        },
+        "timezone": "Africa/Tunis"
+      }
+    ],
+    [
+      "OpenAIProvider",
+      {
+        "api_key": "sk-test",
+        "base_url": null,
+        "model": "test-model",
+        "organization": null,
+        "project": null
+      }
+    ],
+    [
+      "WhatsAppChannel",
+      {
+        "api_version": "v21.0",
+        "phone_number_id": "phone-alpha",
+        "token": "token-alpha"
+      }
+    ]
+  ]
+}

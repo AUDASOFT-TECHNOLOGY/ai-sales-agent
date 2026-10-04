@@ -1,0 +1,32 @@
+{
+  "body": {
+    "agent_id": "pholder",
+    "brain": {
+      "factory": "app_test_brains:good_brain",
+      "settings_version": null
+    },
+    "channels": {
+      "sheets": "google_sheets",
+      "whatsapp": "whatsapp"
+    },
+    "client_id": "pholder",
+    "daily_action_limit": null,
+    "display_name": "Pholder",
+    "llm": {
+      "model": "TODO",
+      "provider": "openai"
+    },
+    "max_attempts": null,
+    "mode": "approval",
+    "schedule": {
+      "daily_at": null,
+      "days": [],
+      "dispatch_every_minutes": null,
+      "prepare_every_minutes": null,
+      "recover_every_minutes": null
+    },
+    "status": "disabled",
+    "timezone": "Africa/Tunis"
+  },
+  "status": 200
+}

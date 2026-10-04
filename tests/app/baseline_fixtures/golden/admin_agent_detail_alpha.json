@@ -1,0 +1,36 @@
+{
+  "body": {
+    "agent_id": "alpha",
+    "brain": {
+      "factory": "app_test_brains:good_brain",
+      "settings_version": 1
+    },
+    "channels": {
+      "sheets": "google_sheets",
+      "whatsapp": "whatsapp"
+    },
+    "client_id": "alpha",
+    "daily_action_limit": 12,
+    "display_name": "Alpha Legacy",
+    "llm": {
+      "model": "gpt-upstream-1",
+      "provider": "openai"
+    },
+    "max_attempts": 4,
+    "mode": "approval",
+    "schedule": {
+      "daily_at": "10:30",
+      "days": [
+        "mon",
+        "tue",
+        "wed"
+      ],
+      "dispatch_every_minutes": 3,
+      "prepare_every_minutes": 30,
+      "recover_every_minutes": 10
+    },
+    "status": "active",
+    "timezone": "Africa/Tunis"
+  },
+  "status": 200
+}

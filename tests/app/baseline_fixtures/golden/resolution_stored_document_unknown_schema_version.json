@@ -1,0 +1,7 @@
+{
+  "config": null,
+  "disabled": false,
+  "errors": [
+    "alpha: configuration version 1: schema_version: must be one of [1, 2], got 9"
+  ]
+}
