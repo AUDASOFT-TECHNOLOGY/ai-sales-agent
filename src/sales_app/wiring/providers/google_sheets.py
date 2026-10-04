@@ -119,6 +119,7 @@ DESCRIPTOR = ProviderDescriptor(
             required_when=Requirement.ALWAYS,
         ),
     ),
+    connection_keys=(SHEETS_CREDENTIALS_FILE,),
     capabilities={"can_write_back": True, "can_host_store": True},
     unique_across_clients=(UniquenessRule("setting", "spreadsheet_id", "spreadsheet_id"),),
     build=build_repository,

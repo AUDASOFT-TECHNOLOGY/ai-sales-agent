@@ -10,6 +10,10 @@ class DuplicateProviderError(ValueError):
     """A provider key was registered twice."""
 
 
+class DuplicateCredentialError(ValueError):
+    """Two providers declare the same credential key: a key belongs to one provider."""
+
+
 class UnknownProviderError(KeyError):
     """No provider is registered under this key."""
 
@@ -25,8 +29,19 @@ class ProviderRegistry:
     def register(self, descriptor: ProviderDescriptor) -> ProviderDescriptor:
         if descriptor.key in self._by_key:
             raise DuplicateProviderError(f"provider {descriptor.key!r} is already registered")
+        for credential in descriptor.credentials:
+            owner = self.credential_owner(credential.key)
+            if owner is not None:
+                raise DuplicateCredentialError(
+                    f"credential {credential.key!r} of {descriptor.key!r} is already "
+                    f"declared by {owner.key!r}"
+                )
         self._by_key[descriptor.key] = descriptor
         return descriptor
+
+    def credential_owner(self, key: str) -> ProviderDescriptor | None:
+        """The provider that declares this credential key, if any."""
+        return next((d for d in self._by_key.values() if d.credential(key) is not None), None)
 
     def get(self, key: str) -> ProviderDescriptor | None:
         return self._by_key.get(key)

@@ -105,6 +105,9 @@ DESCRIPTOR = ProviderDescriptor(
             rule="must be the numeric id Meta gives the phone number (digits only)",
         ),
     ),
+    # What Meta can check on its own: the token for the phone number. The app secret and the verify
+    # token prove themselves only when Meta calls the webhook.
+    connection_keys=(WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_API_VERSION),
     capabilities={
         "can_initiate": True,
         "reply_window_hours": 24,

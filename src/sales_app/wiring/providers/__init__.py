@@ -6,6 +6,7 @@ means writing its module and listing it here; nothing else in the application na
 
 from sales_app.wiring.providers import google_sheets, meta, openai, whatsapp
 from sales_app.wiring.providers.registry import (
+    DuplicateCredentialError,
     DuplicateProviderError,
     ProviderRegistry,
     UnknownProviderError,
@@ -31,6 +32,7 @@ def default_registry() -> ProviderRegistry:
 __all__ = [
     "ChannelSupport",
     "CredentialDeclaration",
+    "DuplicateCredentialError",
     "DuplicateProviderError",
     "EmptySettings",
     "ProviderDescriptor",

@@ -82,6 +82,7 @@ DESCRIPTOR = ProviderDescriptor(
             rule=_HTTPS_URL_RULE,
         ),
     ),
+    connection_keys=(OPENAI_API_KEY, OPENAI_ORGANIZATION, OPENAI_PROJECT, OPENAI_BASE_URL),
     capabilities={"structured_output": "json_schema"},
     build=build_provider,
 )

@@ -51,6 +51,7 @@ DESCRIPTOR = ProviderDescriptor(
             rule="must be an https URL without credentials",
         ),
     ),
+    connection_keys=(META_API_KEY, META_BASE_URL),
     capabilities={"structured_output": "unverified"},
     build=None,
 )

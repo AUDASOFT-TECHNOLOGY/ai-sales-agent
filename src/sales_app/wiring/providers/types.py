@@ -106,6 +106,9 @@ class ProviderDescriptor:
       staying two providers.
     - `settings_models` give, per role, the model that validates the non-secret settings of a
       client's configuration (what is under `settings` there).
+    - `connection_keys` are the credentials that together make a connection to the provider (the
+      ones a connection check needs). Some credentials are not among them because they prove
+      themselves only when the provider calls Revansa (a webhook secret, a verify token).
     - `build` makes the thing the runtime uses (a repository, a channel, a model client). A provider
       with no `build` is known but cannot be run yet.
     """
@@ -117,6 +120,7 @@ class ProviderDescriptor:
     family: str | None = None
     settings_models: Mapping[ProviderKind, type[BaseModel]] = field(default_factory=dict)
     credentials: tuple[CredentialDeclaration, ...] = ()
+    connection_keys: tuple[str, ...] = ()
     capabilities: Mapping[str, object] = field(default_factory=dict)
     unique_across_clients: tuple[UniquenessRule, ...] = ()
     can_host_store: bool = False
@@ -137,6 +141,9 @@ class ProviderDescriptor:
         keys = [credential.key for credential in self.credentials]
         if len(set(keys)) != len(keys):
             raise ValueError(f"{self.key}: a credential is declared twice")
+        undeclared = [key for key in self.connection_keys if key not in keys]
+        if undeclared:
+            raise ValueError(f"{self.key}: connection keys that are not declared: {undeclared}")
         object.__setattr__(self, "roles", roles)
         object.__setattr__(self, "settings_models", MappingProxyType(dict(self.settings_models)))
         object.__setattr__(self, "capabilities", MappingProxyType(dict(self.capabilities)))

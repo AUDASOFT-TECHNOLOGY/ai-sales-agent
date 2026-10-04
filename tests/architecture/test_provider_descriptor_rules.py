@@ -21,7 +21,7 @@ OWN_ADAPTER = {
     "openai": {"openai"},
     "meta": set(),
 }
-SHARED = ("types", "registry", "__init__")
+SHARED = ("types", "registry", "credentials", "__init__")
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -66,7 +66,7 @@ def test_a_descriptor_does_not_import_another_provider(name):
         assert not any(module == o or module.startswith(o + ".") for o in others), (name, module)
 
 
-@pytest.mark.parametrize("name", ["types", "registry"])
+@pytest.mark.parametrize("name", ["types", "registry", "credentials"])
 def test_the_shared_modules_import_no_adapter_and_no_core(name):
     modules = imported_modules(PROVIDERS / f"{name}.py")
     tops = {m.split(".")[0] for m in modules}
