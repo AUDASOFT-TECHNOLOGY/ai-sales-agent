@@ -579,7 +579,7 @@ class TestBrains:
 class TestNothingExternalHappens:
     def test_the_resolution_takes_neither_an_environment_nor_a_secret_store(self):
         parameters = set(inspect.signature(resolve_client_spec).parameters)
-        assert parameters == {"directory", "store", "registry", "known_brains"}
+        assert parameters == {"directory", "store", "registry", "known_brains", "catalog"}
 
     def test_no_environment_variable_no_socket_and_no_provider_is_touched(
         self, tmp_path, monkeypatch

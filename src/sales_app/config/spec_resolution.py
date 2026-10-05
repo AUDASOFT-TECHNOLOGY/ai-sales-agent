@@ -37,6 +37,7 @@ from sales_app.config.normalize import NormalizationError, normalize
 from sales_app.config.resolution import CONFIG_FILENAME, check_document, read_wiring, where
 from sales_app.config_store import ConfigStore, ConfigStoreError
 from sales_app.config_store.models import CLIENT_ID_PATTERN
+from sales_app.model_catalog import ModelCatalog
 
 if TYPE_CHECKING:  # the registry is only imported when a check needs it
     from sales_app.wiring.providers import ProviderRegistry
@@ -69,6 +70,7 @@ def resolve_client_spec(
     store: ConfigStore | None = None,
     registry: "ProviderRegistry | None" = None,
     known_brains: Mapping[str, str] | None = None,
+    catalog: ModelCatalog | None = None,
 ) -> SpecResolution:
     """The canonical spec of the client in `directory`; pure of effects beyond reading its files.
 
@@ -116,7 +118,7 @@ def resolve_client_spec(
     return SpecResolution(
         spec=spec,
         env_fallbacks=dict(normalized.env_fallbacks),
-        provider_problems=tuple(f"{name}: {p}" for p in provider_problems(spec, registry)),
+        provider_problems=tuple(f"{name}: {p}" for p in provider_problems(spec, registry, catalog)),
         config_source="store" if version is not None else "file",
         config_version=version.version if version is not None else None,
         origin=normalized.origin,
@@ -149,7 +151,11 @@ def _normalization_errors(
 # ---- providers ---------------------------------------------------------------------------------
 
 
-def provider_problems(spec: ClientSpec, registry: "ProviderRegistry | None" = None) -> list[str]:
+def provider_problems(
+    spec: ClientSpec,
+    registry: "ProviderRegistry | None" = None,
+    catalog: ModelCatalog | None = None,
+) -> list[str]:
     """What the provider registry says about the providers a spec names.
 
     Nothing is built and nothing is called: only what each descriptor declares is read. A provider
@@ -211,7 +217,33 @@ def provider_problems(spec: ClientSpec, registry: "ProviderRegistry | None" = No
 
     if spec.llm.legacy is not None:
         provider("llm.legacy", spec.llm.legacy.provider, ProviderKind.LLM, None)
+    if spec.llm.model is not None:
+        problems.extend(_model_problems(spec, registry, catalog))
     return problems
+
+
+def _model_problems(spec: ClientSpec, registry: Any, catalog: ModelCatalog | None) -> list[str]:
+    """A model named by key must exist, belong to a model provider, and agree with `llm.legacy`.
+    That it has an upstream id is a question of running it, answered when the runtime is built."""
+    from sales_app.wiring.providers import ProviderKind
+
+    catalog = catalog if catalog is not None else ModelCatalog.from_registry(registry)
+    key = spec.llm.model
+    model = catalog.find(key)
+    if model is None:
+        return [f"llm.model: unknown model {key!r}"]
+    descriptor = registry.get(model.provider)
+    if descriptor is None or not descriptor.plays(ProviderKind.LLM):
+        return [f"llm.model: the provider {model.provider!r} of {key!r} is not a model provider"]
+    legacy = spec.llm.legacy
+    if legacy is not None and legacy.provider != model.provider:
+        return [
+            (
+                f"llm.legacy.provider: {legacy.provider!r} is not {model.provider!r}, "
+                f"the provider of {key!r}"
+            )
+        ]
+    return []
 
 
 __all__ = ["SpecResolution", "provider_problems", "resolve_client_spec"]

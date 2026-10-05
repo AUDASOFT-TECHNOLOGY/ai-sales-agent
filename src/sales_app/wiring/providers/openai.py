@@ -1,8 +1,8 @@
 """The OpenAI provider: the models Revansa offers under it (GPT Lune, GPT Sol).
 
-The model catalogue is not declared here: which models exist, and their upstream ids, are data
-managed in Admin Settings. This module declares only the provider: its credentials, its optional
-account settings and how to build its client.
+This module declares the provider (its credentials, its optional account settings, how to build its
+client) and the models it serves by Revansa's key. Their upstream ids are not here: they are
+deployment data given to the model catalog (`sales_app.model_catalog`).
 """
 
 import re
@@ -14,6 +14,7 @@ from sales_app.config.secrets import (
     OPENAI_ORGANIZATION,
     OPENAI_PROJECT,
 )
+from sales_app.model_catalog import ModelDescriptor
 from sales_app.secret_store import ScopeKind
 from sales_app.wiring.providers.types import (
     CredentialDeclaration,
@@ -84,5 +85,9 @@ DESCRIPTOR = ProviderDescriptor(
     ),
     connection_keys=(OPENAI_API_KEY, OPENAI_ORGANIZATION, OPENAI_PROJECT, OPENAI_BASE_URL),
     capabilities={"structured_output": "json_schema"},
+    models=(
+        ModelDescriptor("gpt-lune", KEY, "GPT Lune"),
+        ModelDescriptor("gpt-sol", KEY, "GPT Sol"),
+    ),
     build=build_provider,
 )

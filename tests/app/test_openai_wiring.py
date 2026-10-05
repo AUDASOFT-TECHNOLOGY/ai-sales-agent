@@ -135,11 +135,17 @@ def shipped_files():
         yield path
 
 
+# Revansa's own catalogue keys, declared by the provider that serves them. They are not upstream
+# ids (those are deployment data), so they are the one thing allowed to look like a model name.
+CATALOGUE_KEYS = {"src/sales_app/wiring/providers/openai.py": {"gpt-lune", "gpt-sol"}}
+
+
 def test_no_openai_model_id_is_written_into_the_shipped_code_or_client_files():
     found = [
         f"{path.relative_to(ROOT)}: {match.group()}"
         for path in shipped_files()
         for match in MODEL_ID.finditer(path.read_text(encoding="utf-8"))
+        if match.group() not in CATALOGUE_KEYS.get(path.relative_to(ROOT).as_posix(), ())
     ]
     assert not found, found
 

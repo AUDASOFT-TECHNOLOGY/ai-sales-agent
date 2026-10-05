@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from sales_app.model_catalog import ModelDescriptor
 from sales_app.secret_store import ScopeKind
 
 PROVIDER_KEY = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
@@ -109,6 +110,8 @@ class ProviderDescriptor:
     - `connection_keys` are the credentials that together make a connection to the provider (the
       ones a connection check needs). Some credentials are not among them because they prove
       themselves only when the provider calls Revansa (a webhook secret, a verify token).
+    - `models` are the models it serves (key, label); their upstream ids are deployment data, not
+      declared here (see `sales_app.model_catalog`).
     - `build` makes the thing the runtime uses (a repository, a channel, a model client). A provider
       with no `build` is known but cannot be run yet.
     """
@@ -126,6 +129,7 @@ class ProviderDescriptor:
     can_host_store: bool = False
     build: Callable[[Any], Any] | None = None
     channel: ChannelSupport | None = None
+    models: tuple[ModelDescriptor, ...] = ()  # the models it serves, by Revansa's stable key
 
     def __post_init__(self) -> None:
         if not PROVIDER_KEY.match(self.key):
@@ -144,6 +148,11 @@ class ProviderDescriptor:
         undeclared = [key for key in self.connection_keys if key not in keys]
         if undeclared:
             raise ValueError(f"{self.key}: connection keys that are not declared: {undeclared}")
+        if self.models and ProviderKind.LLM not in roles:
+            raise ValueError(f"{self.key}: only a model provider declares models")
+        stray = [m.key for m in self.models if m.provider != self.key]
+        if stray:
+            raise ValueError(f"{self.key}: models that name another provider: {stray}")
         object.__setattr__(self, "roles", roles)
         object.__setattr__(self, "settings_models", MappingProxyType(dict(self.settings_models)))
         object.__setattr__(self, "capabilities", MappingProxyType(dict(self.capabilities)))

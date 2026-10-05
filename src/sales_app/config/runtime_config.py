@@ -11,8 +11,8 @@ shape runs through the very same wiring as a legacy one:
   (`complete_client_config`: the Brain's own rules, the mode, the credentials, the model allow-list).
   Nothing of that resolution is written twice.
 - What the runtime cannot run yet is refused, in words, instead of being half-run: a store kept
-  apart from the source, a model named only by a catalogue key (there is no catalogue yet), settings
-  a provider's runtime does not understand yet.
+  apart from the source, a model whose upstream id is not configured, settings a provider's runtime
+  does not understand yet.
 - Exactly one enabled channel is run. None: the client is not ready. Several: the configuration is
   refused. Which provider the channel is comes from the spec, never from a legacy section name
   (`channel_provider_key`).
@@ -41,6 +41,7 @@ from sales_app.config.secrets import (
     WHATSAPP_PHONE_NUMBER_ID,
 )
 from sales_app.config.spec_resolution import SpecResolution, resolve_client_spec
+from sales_app.model_catalog import ModelCatalog, ModelNotConfiguredError
 from sales_app.secret_store import SecretStore
 from sales_core.approval import ApprovalMode
 
@@ -106,13 +107,16 @@ def legacy_file_from_spec(
     brains: BrainRegistry | None = None,
     *,
     allow_legacy_factory: bool = False,
+    catalog: ModelCatalog | None = None,
 ) -> ClientFile:
     """The `ClientFile` a canonical spec stands for, or `NotRunnableError`.
 
     `env_fallbacks` are the legacy `*_env` names (they never lived in the spec). A Brain named by
     `agent` stays a key: it is checked against `brains` (default: those installed) and handed on
     as a key, never turned into a path. A `legacy_factory` is a Python path, so it is only carried
-    over when the caller says it comes from the operator's own legacy wiring.
+    over when the caller says it comes from the operator's own legacy wiring. A model named by key
+    is resolved by `catalog` (default: the models the providers declare, with no upstream id) to
+    its provider and upstream id; one with no upstream id configured cannot run.
     """
     names = env_fallbacks or {}
     data = spec.model_dump(mode="json")
@@ -143,12 +147,7 @@ def legacy_file_from_spec(
             f"column_mapping: {sorted(shared)} is mapped by both the source and the store"
         )
 
-    llm = data["llm"]
-    if llm["legacy"] is None:
-        problems.append(
-            f"llm.model: {llm['model']!r} is a catalogue key, and the model catalogue is not "
-            "available to the runtime yet"
-        )
+    llm_provider, llm_model = _resolve_model(data["llm"], catalog, problems)
 
     brain = data["brain"]
     if brain["legacy_factory"] is not None:
@@ -215,8 +214,8 @@ def legacy_file_from_spec(
             ),
         },
         "llm": {
-            "provider": llm["legacy"]["provider"],
-            "model": llm["legacy"]["model_id"],
+            "provider": llm_provider,
+            "model": llm_model,
             **_present(api_key_env=names.get(OPENAI_API_KEY)),
         },
         "whatsapp": whatsapp,
@@ -227,6 +226,43 @@ def legacy_file_from_spec(
         return ClientFile.model_validate(candidate)
     except ValidationError as error:
         raise NotRunnableError([where(p) for p in error.errors()]) from error
+
+
+def _resolve_model(
+    llm: Mapping[str, Any], catalog: ModelCatalog | None, problems: list[str]
+) -> tuple[str | None, str | None]:
+    """The provider and upstream id the runtime builds the model client with.
+
+    A key goes through the catalog: `key -> provider + upstream id`, never to a name written here.
+    Beside an older reference, a key whose upstream id is not configured keeps running on that
+    reference (as before the catalog existed); a reference naming another provider than the key's
+    is a contradiction. The older reference alone runs as it always did."""
+    legacy, key = llm["legacy"], llm["model"]
+    if key is None:
+        return legacy["provider"], legacy["model_id"]
+    if catalog is None:
+        from sales_app.wiring.providers import default_registry
+
+        catalog = ModelCatalog.from_registry(default_registry())
+    model = catalog.find(key)
+    if model is None:
+        problems.append(f"llm.model: unknown model {key!r}")
+        return None, None
+    if legacy is not None and legacy["provider"] != model.provider:
+        problems.append(
+            f"llm.legacy.provider: {legacy['provider']!r} is not {model.provider!r}, "
+            f"the provider of {key!r}"
+        )
+        return None, None
+    if model.upstream_id is not None:
+        return model.provider, model.upstream_id
+    if legacy is not None:
+        return legacy["provider"], legacy["model_id"]
+    try:
+        catalog.runnable(key)
+    except ModelNotConfiguredError as error:
+        problems.append(f"llm.model: {error}")
+    return None, None
 
 
 def _unknown(path: str, settings: Mapping[str, Any], understood: tuple[str, ...]) -> list[str]:
@@ -252,6 +288,7 @@ def client_config_from_spec(
     llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
     secret_store: SecretStore | None = None,
     brains: BrainRegistry | None = None,
+    catalog: ModelCatalog | None = None,
 ) -> Resolution:
     """The `Resolution` (a config, "disabled", or problems) for a resolved canonical spec.
 
@@ -282,6 +319,7 @@ def client_config_from_spec(
             brains,
             # A client.yaml written in the canonical shape is the client's: it may not name a path.
             allow_legacy_factory=resolution.origin == "legacy",
+            catalog=catalog,
         )
     except NotRunnableError as error:
         return Resolution(errors=tuple(f"{name}: {problem}" for problem in error.problems))
@@ -325,6 +363,7 @@ def resolve_canonical_client_config(
     registry: Any = None,
     known_brains: Mapping[str, str] | None = None,
     brains: BrainRegistry | None = None,
+    catalog: ModelCatalog | None = None,
     llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
     secret_store: SecretStore | None = None,
 ) -> Resolution:
@@ -333,7 +372,7 @@ def resolve_canonical_client_config(
     only for the legacy normaliser, which then names a Brain by its key; the Brain itself is found
     in `brains` (default: the installed ones), never by a path."""
     resolved = resolve_client_spec(
-        directory, store=store, registry=registry, known_brains=known_brains
+        directory, store=store, registry=registry, known_brains=known_brains, catalog=catalog
     )
     return client_config_from_spec(
         resolved,
@@ -343,4 +382,5 @@ def resolve_canonical_client_config(
         llm_registry=llm_registry,
         secret_store=secret_store,
         brains=brains,
+        catalog=catalog,
     )

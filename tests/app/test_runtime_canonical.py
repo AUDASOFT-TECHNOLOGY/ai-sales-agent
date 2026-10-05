@@ -396,7 +396,7 @@ class TestWhatTheRuntimeCannotRunYet:
             spec["llm"] = {"model": "muse-spark"}
 
         (error,) = self.refuse(tmp_path, mutate)
-        assert "'muse-spark' is a catalogue key" in error and "catalogue is not available" in error
+        assert "'muse-spark' (meta) has no upstream id configured" in error
 
     def test_a_key_beside_the_older_reference_runs_on_the_older_reference(self, tmp_path):
         spec = canonical_spec(minimal())

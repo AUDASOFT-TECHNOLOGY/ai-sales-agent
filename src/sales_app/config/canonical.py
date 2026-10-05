@@ -34,6 +34,7 @@ from pydantic import (
 from sales_app.brain_registry import BRAIN_KEY_PATTERN
 from sales_app.config.schema import DEFAULT_DAYS, InboundSection, Weekday
 from sales_app.config_store.models import CLIENT_ID_PATTERN, freeze_document, thaw_document
+from sales_app.model_catalog import MODEL_KEY_PATTERN
 from sales_core.approval import ApprovalMode
 
 SCHEMA_VERSION = 3
@@ -44,7 +45,7 @@ NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)
 # dot, colon or slash, so a Python path or a URL can never be one.
 ProviderKey = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,31}$")]
 ChannelId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,31}$")]
-ModelKey = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9-]{1,63}$")]
+ModelKey = Annotated[str, StringConstraints(pattern=MODEL_KEY_PATTERN)]
 AgentKey = Annotated[str, StringConstraints(pattern=BRAIN_KEY_PATTERN)]
 
 _FACTORY = re.compile(r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$")

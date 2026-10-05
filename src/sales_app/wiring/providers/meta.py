@@ -12,6 +12,7 @@ of the adapter's errors, which names its provider. No call to Meta is made anywh
 
 import re
 
+from sales_app.model_catalog import ModelDescriptor
 from sales_app.secret_store import ScopeKind
 from sales_app.wiring.providers.types import (
     CredentialDeclaration,
@@ -53,5 +54,6 @@ DESCRIPTOR = ProviderDescriptor(
     ),
     connection_keys=(META_API_KEY, META_BASE_URL),
     capabilities={"structured_output": "unverified"},
+    models=(ModelDescriptor("muse-spark", KEY, "Muse Spark"),),
     build=None,
 )

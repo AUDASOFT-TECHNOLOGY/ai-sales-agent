@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # Empty (default): no restriction, so today's clients and tests keep working unchanged.
     # Set as JSON, e.g. SALES_AGENT_ALLOWED_LLM_MODELS='{"openai": ["<model-id>"]}'.
     allowed_llm_models: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    # Upstream ids of the models Revansa knows by key (see sales_app.model_catalog): the identifier
+    # each provider's API wants. Deployment data, never code; a model without one cannot run.
+    # Set as JSON, e.g. SALES_AGENT_MODEL_UPSTREAM_IDS='{"<model-key>": "<upstream-id>"}'.
+    model_upstream_ids: dict[str, str] = Field(default_factory=dict)
     lock_file: Path = Path(".sales-agent.lock")
     host: str = "127.0.0.1"
     port: int = 8000
