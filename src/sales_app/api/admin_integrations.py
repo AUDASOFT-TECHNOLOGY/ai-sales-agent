@@ -10,7 +10,7 @@ echoes the rejected input, which here would be the secret. Errors below describe
 broken, never the value, and responses are marked `no-store`.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -21,15 +21,19 @@ from sales_app.admin_auth import AdminRole, AdminUser
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency, require_role
 from sales_app.bootstrap import Application
 from sales_app.config.resolution import CONFIG_FILENAME
+from sales_app.config.secrets import OPENAI_MODELS
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_app.connection_tests import (
+    INFERENCE_MAX_TOKENS,
     ConnectionResult,
     HttpClientFactory,
     check_openai,
+    check_openai_inference,
     check_whatsapp_client,
     default_http_client,
 )
-from sales_app.llm_models import stored_models
+from sales_app.llm_models import ModelTest, foreign_model_keys, record_test, stored_models
+from sales_app.model_usage import impact_of_credential_write
 from sales_app.secret_store import (
     GLOBAL_SCOPE,
     CredentialStatus,
@@ -41,6 +45,7 @@ from sales_app.secret_store import (
     UnknownCredentialError,
     client_scope,
 )
+from sales_app.secret_store.catalog import normalize_value, spec_for
 from sales_integrations.whatsapp.channel import DEFAULT_API_VERSION
 
 _BODY_SCHEMA: dict[str, Any] = {
@@ -89,6 +94,21 @@ class ConnectionTestResponse(BaseModel):
     ok: bool
     message: str
     details: dict[str, str] = {}
+
+
+class ModelTestResponse(BaseModel):
+    """The outcome of a real request to one model. Never carries a credential."""
+
+    ok: bool  # the model answered: it is usable with the stored credentials
+    outcome: str  # usable | no_api_key | invalid_api_key | model_not_found | invalid_parameters |
+    #               quota_exceeded | timeout | unreachable | service_error | unexpected_response
+    message: str
+    model_id: str  # exactly the Model ID that was sent
+    details: dict[str, str] = {}  # the service's error code, tokens used: never a credential
+    request_sent: bool  # a real request went out (it may be billed); False: none did
+    max_tokens: int  # the most the request could generate
+    tested_at: str | None = None  # None: nothing was sent, so nothing was tested
+    recorded: bool = False  # whether the outcome is kept with the model (the catalog shows it)
 
 
 def _test_response(result: ConnectionResult) -> ConnectionTestResponse:
@@ -167,6 +187,38 @@ def create_admin_integrations_router(
         except (SecretStoreError, UnknownCredentialError) as error:
             raise _http_error(error) from None
 
+    def guard_model_lists(key: str, value: str | None) -> None:
+        """A model list is changed through its own routes, which tell who is affected. Writing it
+        here must not take a model away from the clients that use it, nor switch it off: refused
+        with 409, naming them. Any other credential is not concerned."""
+        if value is not None:
+            try:
+                value = normalize_value(spec_for(GLOBAL_SCOPE, key), value)
+            except (UnknownCredentialError, InvalidCredentialError):
+                return  # the save below reports it, as it always has
+        effect = impact_of_credential_write(application, key, value)
+        if effect.removed or effect.deactivated:
+            affected = {**effect.removed, **effect.deactivated}
+            raise HTTPException(
+                409,
+                {
+                    "message": (
+                        "clients use a model this change would remove or switch off: change the "
+                        "model list through its own routes, after giving them another model"
+                    ),
+                    "client_ids": sorted({c for clients in affected.values() for c in clients}),
+                    "models": {model: list(clients) for model, clients in affected.items()},
+                },
+            )
+
+    def save_global(key: str, value: str, admin: AdminUser) -> CredentialResponse:
+        guard_model_lists(key, value)
+        return save(GLOBAL_SCOPE, ScopeKind.GLOBAL, key, value, admin)
+
+    def remove_global(key: str, admin: AdminUser) -> CredentialResponse:
+        guard_model_lists(key, None)
+        return remove(GLOBAL_SCOPE, ScopeKind.GLOBAL, key, admin)
+
     def require_confirmation(confirm: bool) -> None:
         if not confirm:
             raise HTTPException(400, "removal must be confirmed: pass confirm=true")
@@ -186,14 +238,14 @@ def create_admin_integrations_router(
         key: str, request: Request, admin: AdminUser = Depends(require_owner)
     ) -> CredentialResponse:
         value = await _read_value(request)
-        return await run_in_threadpool(save, GLOBAL_SCOPE, ScopeKind.GLOBAL, key, value, admin)
+        return await run_in_threadpool(save_global, key, value, admin)
 
     @router.delete("/settings/integrations/{key}", response_model=CredentialResponse)
     def delete_global(
         key: str, confirm: bool = False, admin: AdminUser = Depends(require_owner)
     ) -> CredentialResponse:
         require_confirmation(confirm)
-        return remove(GLOBAL_SCOPE, ScopeKind.GLOBAL, key, admin)
+        return remove_global(key, admin)
 
     def stored(scope: str, key: str) -> str | None:
         return credentials.reveal(scope, key)
@@ -210,6 +262,56 @@ def create_admin_integrations_router(
                 models={m.name: m.id for m in stored_models(credentials) or [] if m.active},
                 http=http,
             )
+        )
+
+    @router.post("/settings/openai/models/{model_id}/test", response_model=ModelTestResponse)
+    def test_openai_model(
+        model_id: str, confirm: bool = False, admin: AdminUser = Depends(require_owner)
+    ) -> ModelTestResponse:
+        """Asks one model of the Settings list, by its exact Model ID, for a few tokens.
+
+        Unlike the connection test (`/settings/integrations/openai/test`, which only lists what the
+        account sees and is free) this is a real request that the account may be billed for, so it
+        needs `confirm=true`. The model may be switched off: testing it does not switch it on. How
+        the test ended is kept with the model, and the catalog of `/settings/llm` shows it."""
+        if all(m.id != model_id for m in stored_models(credentials) or []):
+            raise HTTPException(404, "no such model")
+        if not confirm:
+            raise HTTPException(
+                400,
+                "this sends a real request to OpenAI (at most "
+                f"{INFERENCE_MAX_TOKENS} tokens of output) and the account may be billed for it: "
+                "pass confirm=true to go ahead",
+            )
+        result = check_openai_inference(
+            api_key=stored(GLOBAL_SCOPE, "openai.api_key"),
+            organization=stored(GLOBAL_SCOPE, "openai.organization"),
+            project=stored(GLOBAL_SCOPE, "openai.project"),
+            base_url=stored(GLOBAL_SCOPE, "openai.base_url"),
+            model_id=model_id,
+            http=http,
+        )
+        tested_at = None
+        recorded = False
+        if result.sent_a_request:
+            tested_at = application.clock.now().astimezone(UTC).isoformat(timespec="seconds")
+            recorded = record_test(
+                credentials,
+                model_id,
+                ModelTest(result.outcome.value, tested_at),
+                actor=admin.username,
+                reserved=foreign_model_keys(application.provider_registry, OPENAI_MODELS),
+            )
+        return ModelTestResponse(
+            ok=result.ok,
+            outcome=result.outcome.value,
+            message=result.message,
+            model_id=model_id,
+            details=result.details,
+            request_sent=result.sent_a_request,
+            max_tokens=INFERENCE_MAX_TOKENS,
+            tested_at=tested_at,
+            recorded=recorded,
         )
 
     # ---- are the clients running on them -----------------------------------------------

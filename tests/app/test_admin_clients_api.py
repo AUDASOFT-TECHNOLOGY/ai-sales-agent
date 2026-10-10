@@ -9,7 +9,14 @@ secret value, only the names of the environment variables that hold one.
 from datetime import UTC, datetime
 
 import pytest
-from app_support import InlineExecutor, env_for, fake_builders, make_settings, write_client
+from app_support import (
+    InlineExecutor,
+    declare_models,
+    env_for,
+    fake_builders,
+    make_settings,
+    write_client,
+)
 from fastapi.testclient import TestClient
 
 from sales_app.admin_auth import (
@@ -22,6 +29,7 @@ from sales_app.admin_auth.passwords import hash_password
 from sales_app.api import create_app
 from sales_app.bootstrap import build_application
 from sales_app.client_profiles import InMemoryClientProfileStore
+from sales_app.secret_store import generate_master_key
 from sales_integrations.fakes import FakeClock
 
 NOW = datetime(2026, 5, 1, 9, 30, tzinfo=UTC)
@@ -33,6 +41,9 @@ def build(tmp_path, *client_ids, users=None, sessions=None, clock=None, **settin
     for cid in client_ids:
         write_client(tmp_path, cid)
     builders, made = fake_builders(clock)
+    # A model is assigned only if it is configured in Settings, which needs the credential store.
+    settings_kw.setdefault("secrets_dir", tmp_path / "_secrets")
+    settings_kw.setdefault("secrets_key", generate_master_key())
     application = build_application(
         make_settings(tmp_path, **settings_kw),
         env=env_for(*client_ids),
@@ -43,6 +54,8 @@ def build(tmp_path, *client_ids, users=None, sessions=None, clock=None, **settin
         admin_session_store=sessions if sessions is not None else InMemoryAdminSessionStore(),
         client_profile_store=InMemoryClientProfileStore(),
     )
+    # The Model IDs these tests assign (the clients themselves are written with "test-model").
+    declare_models(application.credentials, "test-model", "gpt-4o", "gpt-4o-mini")
     return application, made
 
 
@@ -116,8 +129,6 @@ def fx(tmp_path):
 @pytest.fixture
 def fx_secrets(tmp_path):
     """Like `fx`, with an enabled credential store (key + directory) to hold Meta credentials."""
-    from sales_app.secret_store import generate_master_key
-
     fixture = Fixture(
         tmp_path,
         "alpha",

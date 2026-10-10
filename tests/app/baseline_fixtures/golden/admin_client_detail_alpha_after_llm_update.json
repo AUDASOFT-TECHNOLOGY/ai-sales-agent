@@ -14,7 +14,7 @@
       "daily_action_limit": 12,
       "display_name": "Alpha Legacy",
       "llm": {
-        "model": "gpt-upstream-1",
+        "model": "gpt-upstream-2",
         "provider": "openai"
       },
       "max_attempts": 4,
@@ -54,10 +54,10 @@
       },
       "llm": {
         "api_key_env": "OPENAI_API_KEY",
-        "model": "gpt-upstream-1",
+        "model": "gpt-upstream-2",
         "provider": "openai"
       },
-      "llm_model": "gpt-upstream-1",
+      "llm_model": "gpt-upstream-2",
       "max_attempts": 4,
       "meta": {
         "credentials_stored": false,
@@ -121,7 +121,7 @@
           "last_runs": {},
           "status": "ready"
         },
-        "llm_model": "gpt-upstream-1",
+        "llm_model": "gpt-upstream-2",
         "mode": "approval",
         "providers": {
           "llm": "openai",

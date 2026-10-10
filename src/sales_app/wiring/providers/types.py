@@ -97,6 +97,22 @@ class ChannelSupport:
     build_parser: Callable[[Mapping[str, str], str | None], Any]
 
 
+@dataclass(frozen=True, slots=True)
+class ModelList:
+    """Where the Admin keeps the models of a provider: the credential that holds the list (a JSON
+    array of `{name, id, active, key}`), and the older credentials that stand in for it until the
+    list is first saved (credential key -> the model's name)."""
+
+    key: str
+    legacy_keys: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for key in (self.key, *self.legacy_keys):
+            if not _CREDENTIAL_KEY.match(key):
+                raise ValueError(f"model list key {key!r} must look like 'provider.name'")
+        object.__setattr__(self, "legacy_keys", MappingProxyType(dict(self.legacy_keys)))
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ProviderDescriptor:
     """Everything the application knows about one provider.
@@ -112,6 +128,8 @@ class ProviderDescriptor:
       themselves only when the provider calls Revansa (a webhook secret, a verify token).
     - `models` are the models it serves (key, label); their upstream ids are deployment data, not
       declared here (see `sales_app.model_catalog`).
+    - `model_list` says where the Admin keeps the models it adds in Settings; they complete the
+      declared ones, and give them their upstream ids.
     - `build` makes the thing the runtime uses (a repository, a channel, a model client). A provider
       with no `build` is known but cannot be run yet.
     """
@@ -130,6 +148,7 @@ class ProviderDescriptor:
     build: Callable[[Any], Any] | None = None
     channel: ChannelSupport | None = None
     models: tuple[ModelDescriptor, ...] = ()  # the models it serves, by Revansa's stable key
+    model_list: ModelList | None = None  # where the Admin keeps its models (Settings), if it can
 
     def __post_init__(self) -> None:
         if not PROVIDER_KEY.match(self.key):
@@ -150,6 +169,8 @@ class ProviderDescriptor:
             raise ValueError(f"{self.key}: connection keys that are not declared: {undeclared}")
         if self.models and ProviderKind.LLM not in roles:
             raise ValueError(f"{self.key}: only a model provider declares models")
+        if self.model_list is not None and ProviderKind.LLM not in roles:
+            raise ValueError(f"{self.key}: only a model provider keeps a model list")
         stray = [m.key for m in self.models if m.provider != self.key]
         if stray:
             raise ValueError(f"{self.key}: models that name another provider: {stray}")

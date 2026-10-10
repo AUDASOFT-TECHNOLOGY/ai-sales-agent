@@ -70,7 +70,11 @@ class CredentialService:
         never be placed in an API response; `describe` and `status` are what an admin sees."""
         return self._store.get(scope, spec_for(scope, key).key)
 
-    def save(self, scope: str, key: str, value: str, *, actor: str) -> CredentialStatus:
+    def save(
+        self, scope: str, key: str, value: str, *, actor: str, apply: bool = True
+    ) -> CredentialStatus:
+        """Stores `value`. `apply=False` is for a value no running client reads (the record of
+        a model test): the change is not handed to the runtime, so nothing is rebuilt."""
         spec = spec_for(scope, key)
         try:
             cleaned = normalize_value(spec, value)
@@ -86,7 +90,8 @@ class CredentialService:
             self._log(actor, "set", scope, key, "rejected", "unavailable")
             raise
         self._log(actor, "set", scope, key, "stored")
-        self._changed(scope, key)
+        if apply:
+            self._changed(scope, key)
         return self._status(scope, spec)
 
     def remove(self, scope: str, key: str, *, actor: str) -> CredentialStatus:

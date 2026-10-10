@@ -11,7 +11,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from app_support import InlineExecutor, env_for, fake_builders, make_settings, write_client
+from app_support import (
+    InlineExecutor,
+    declare_models,
+    env_for,
+    fake_builders,
+    make_settings,
+    write_client,
+)
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -42,6 +49,7 @@ from sales_app.persistence.tables import (
     clients,
     config_versions,
 )
+from sales_app.secret_store import generate_master_key
 from sales_integrations.fakes import FakeClock
 
 NOW = datetime(2026, 5, 1, 9, 30, tzinfo=UTC)
@@ -475,12 +483,12 @@ def database_settings(tmp_path):
     return url
 
 
-def boot(tmp_path, *client_ids):
+def boot(tmp_path, *client_ids, **settings):
     for cid in client_ids:
         write_client(tmp_path, cid)
     builders, _made = fake_builders(FakeClock(NOW))
     return build_application(
-        make_settings(tmp_path, database_url=database_settings(tmp_path)),
+        make_settings(tmp_path, database_url=database_settings(tmp_path), **settings),
         env=env_for(*client_ids),
         builders=builders,
         clock=FakeClock(NOW),
@@ -528,7 +536,14 @@ class TestApplicationOnTheDatabase:
         engine = create_database_engine(database_settings(tmp_path))
         upgrade_database(engine)
         engine.dispose()
-        application = boot(tmp_path, "alpha")
+        # A model is assigned only if Settings holds it, which needs the credential store.
+        application = boot(
+            tmp_path,
+            "alpha",
+            secrets_dir=tmp_path / "_secrets",
+            secrets_key=generate_master_key(),
+        )
+        declare_models(application.credentials, "gpt-4o")
         try:
             application.account_stores.admin_users.create(
                 account("root", frozenset(), AdminRole.OWNER)

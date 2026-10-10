@@ -24,6 +24,7 @@ from sales_app.admin_auth import AdminUser
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency
 from sales_app.bootstrap import Application
 from sales_app.config import ClientConfig, read_wiring
+from sales_app.config.published import published_name
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 
 AgentStatus = Literal["active", "disabled"]
@@ -173,11 +174,25 @@ def _disabled_client_ids(application: Application) -> list[str]:
     )
 
 
+def _with_published_name[M: (AgentSummaryResponse, AgentDetailResponse)](
+    application: Application, shown: M
+) -> M:
+    """`shown` with the newest published name: a client renames itself without its agent being
+    rebuilt, and the Admin sees the name the client sees (as in `sales_app.api.admin_clients`)."""
+    name = published_name(application.config_store, shown.client_id)
+    if name is None or name == shown.display_name:
+        return shown
+    return shown.model_copy(update={"display_name": name})
+
+
 def _all_summaries(application: Application) -> list[AgentSummaryResponse]:
-    summaries = [_summary_from_config(config) for config in application.registry.configs()]
+    summaries = [
+        _with_published_name(application, _summary_from_config(config))
+        for config in application.registry.configs()
+    ]
     for client_id in _disabled_client_ids(application):
         raw, _problem = read_wiring(application.settings.clients_dir / client_id)
-        summaries.append(_summary_from_raw(client_id, raw or {}))
+        summaries.append(_with_published_name(application, _summary_from_raw(client_id, raw or {})))
     return sorted(summaries, key=lambda s: s.agent_id)
 
 
@@ -185,7 +200,7 @@ def _find_detail(application: Application, agent_id: str) -> AgentDetailResponse
     # agent_id == client_id today (see module docstring).
     config = application.registry.get_config(agent_id)
     if config is not None:
-        return _detail_from_config(config)
+        return _with_published_name(application, _detail_from_config(config))
     if not CLIENT_ID_PATTERN.match(agent_id):
         return None
     directory = application.settings.clients_dir / agent_id
@@ -194,7 +209,7 @@ def _find_detail(application: Application, agent_id: str) -> AgentDetailResponse
     raw, _problem = read_wiring(directory)
     if raw is None or raw.get("enabled", True) is not False:
         return None  # anything that isn't an active runtime or a genuinely disabled client: 404
-    return _detail_from_raw(agent_id, raw)
+    return _with_published_name(application, _detail_from_raw(agent_id, raw))
 
 
 def create_admin_agents_router(application: Application) -> APIRouter:

@@ -10,6 +10,8 @@ import yaml
 from factories import NOW
 
 from sales_app.bootstrap import Application, build_application
+from sales_app.config.offered_models import OfferedModel
+from sales_app.llm_models import save_models, stored_models
 from sales_app.settings import Settings
 from sales_app.wiring import ChannelProvider, IntegrationBuilders
 from sales_core.approval import ApprovalMode
@@ -85,6 +87,20 @@ def write_client(
     text = raw if raw is not None else yaml.safe_dump(client_yaml(cid, **overrides))
     (directory / "client.yaml").write_text(text, encoding="utf-8")
     return directory
+
+
+def declare_models(credentials: Any, *model_ids: str, active: bool = True) -> None:
+    """Have the Admin's model list in Settings hold these Model IDs, besides those it already holds.
+
+    What an Admin assignment is checked against: a model can be given to a client only if it is
+    configured there (and on). Needs a credential store, so the application under test must have
+    been given a secrets directory and key. The name of each model is its id."""
+    current = list(stored_models(credentials) or [])
+    held = {m.id for m in current}
+    added = [
+        OfferedModel(model_id, model_id, active) for model_id in model_ids if model_id not in held
+    ]
+    save_models(credentials, [*current, *added], actor="tests")
 
 
 def make_settings(root: Path, **kw: Any) -> Settings:

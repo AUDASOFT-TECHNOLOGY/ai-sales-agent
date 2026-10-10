@@ -43,6 +43,8 @@ class ModelDescriptor:
     provider: str  # the provider's key in the provider registry
     label: str
     upstream_id: str | None = None  # deployment data; a descriptor in code declares none
+    # Whether the Admin keeps it switched on (Settings data). A descriptor in code declares it on.
+    active: bool = True
 
     def __post_init__(self) -> None:
         if not _KEY.match(self.key):

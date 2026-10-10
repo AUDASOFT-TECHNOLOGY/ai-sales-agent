@@ -239,6 +239,31 @@ describe("AdminSettingsPage", () => {
     expect(await openai.findByText("No OpenAI models configured.")).toBeInTheDocument();
   });
 
+  it("tells which clients use a model that cannot be deleted", async () => {
+    vi.stubGlobal("confirm", () => true);
+    stubFetch({
+      models: [LUNA],
+      routes: {
+        "DELETE /admin/v1/settings/openai/models/model-luna": () =>
+          jsonResponse(409, {
+            detail: {
+              message: "clients use this model: assign them another model first",
+              client_ids: ["alpha", "beta"],
+              models: { "model-luna": ["alpha", "beta"] },
+            },
+          }),
+      },
+    });
+    renderApp();
+    const user = userEvent.setup();
+    const openai = await section("OpenAI API");
+    await user.click(await openai.findByRole("button", { name: "Delete Luna" }));
+    expect(
+      await openai.findByText(/assign them another model first \(clients: alpha, beta\)/),
+    ).toBeInTheDocument();
+    expect(openai.getByText("Luna")).toBeInTheDocument(); // the model is still listed
+  });
+
   it("saves a secret through the credential endpoint and clears the field", async () => {
     const saved = cred("openai.api_key", "OpenAI API key", { configured: true });
     const fetchMock = stubFetch({ routes: { "PUT /admin/v1/settings/integrations/openai.api_key": () => jsonResponse(200, saved) } });

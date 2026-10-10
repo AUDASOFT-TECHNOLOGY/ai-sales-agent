@@ -203,6 +203,20 @@ describe("AdminClientDetailPage LLM model", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
+  it.each(["operator", "editor"])("lets only an owner assign a model: not a %s", async (role) => {
+    // The server refuses PUT /clients/:id/llm to every role but an owner; the form says so up front.
+    stubFetch({ role });
+    renderApp();
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("lets an owner pick another model", async () => {
+    stubFetch({ role: "owner" });
+    renderApp();
+    await waitFor(() => expect(screen.getByLabelText("Modèle LLM")).toBeEnabled());
+  });
+
   it("never asks for or displays an API key value", async () => {
     stubFetch();
     renderApp();

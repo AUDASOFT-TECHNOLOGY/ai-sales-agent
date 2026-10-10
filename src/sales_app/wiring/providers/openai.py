@@ -8,9 +8,11 @@ deployment data given to the model catalog (`sales_app.model_catalog`).
 import re
 
 from sales_app.config import ClientConfig
+from sales_app.config.offered_models import LEGACY_OPENAI_MODELS
 from sales_app.config.secrets import (
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
+    OPENAI_MODELS,
     OPENAI_ORGANIZATION,
     OPENAI_PROJECT,
 )
@@ -19,6 +21,7 @@ from sales_app.secret_store import ScopeKind
 from sales_app.wiring.providers.types import (
     CredentialDeclaration,
     EmptySettings,
+    ModelList,
     ProviderDescriptor,
     ProviderKind,
     Requirement,
@@ -89,5 +92,6 @@ DESCRIPTOR = ProviderDescriptor(
         ModelDescriptor("gpt-lune", KEY, "GPT Lune"),
         ModelDescriptor("gpt-sol", KEY, "GPT Sol"),
     ),
+    model_list=ModelList(OPENAI_MODELS, LEGACY_OPENAI_MODELS),
     build=build_provider,
 )

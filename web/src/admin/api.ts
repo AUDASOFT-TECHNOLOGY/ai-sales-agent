@@ -40,12 +40,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * What the server said went wrong. `detail` is a sentence, or, when a change is refused because
+ * clients use something (a model in use: 409), an object `{ message, client_ids }`: the message is
+ * shown with the clients it names, so the Admin knows who is affected.
+ */
+export function detailText(detail: unknown): string | null {
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object") {
+    const { message, client_ids: clientIds } = detail as { message?: unknown; client_ids?: unknown };
+    if (typeof message === "string") {
+      const clients = Array.isArray(clientIds) ? clientIds.filter((id): id is string => typeof id === "string") : [];
+      return clients.length > 0 ? `${message} (clients: ${clients.join(", ")})` : message;
+    }
+  }
+  return null;
+}
+
 async function errorDetail(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json();
-    if (body && typeof body === "object" && typeof (body as { detail?: unknown }).detail === "string") {
-      return (body as { detail: string }).detail;
-    }
+    const text = body && typeof body === "object" ? detailText((body as { detail?: unknown }).detail) : null;
+    if (text !== null) return text;
   } catch {
     /* not JSON, or no `detail` field: fall through to the generic message below */
   }
@@ -212,8 +228,9 @@ export interface UpdateClientLLMRequest {
   model: string;
 }
 
-// PUT /admin/v1/clients/:clientId/llm (see src/sales_app/api/admin_clients.py). Requires owner,
-// operator or editor; a viewer gets 403. Never send an API key here -- there is no field for one.
+// PUT /admin/v1/clients/:clientId/llm (see src/sales_app/api/admin_clients.py). Requires an owner:
+// only an owner assigns a model; any other role gets 403. Never send an API key here -- there is
+// no field for one.
 export function adminUpdateClientLLM(clientId: string, body: UpdateClientLLMRequest): Promise<ClientLLM> {
   return request<ClientLLM>(`/clients/${encodeURIComponent(clientId)}/llm`, {
     method: "PUT",

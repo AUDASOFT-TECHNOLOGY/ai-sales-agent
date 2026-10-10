@@ -2,9 +2,11 @@
 
 Status: **the decisions in section E are approved; the `ConfigStore` and the `config` CLI are
 implemented (section F), and so are the Brain settings schema and the document schema 2 (section
-F.1).** `ContactPolicy`, the CEO report, runtime refresh, the Admin API and the Web Admin are still
-proposals. The current YAML keeps working
-unchanged.
+F.1).** `ContactPolicy` and the CEO report are still proposals. The runtime refresh and the Admin
+API now exist for what they cover (credentials, the models, and a client's name, quota and LLM):
+sections 6 and F were written before them and are corrected where they say otherwise. **Section G
+documents the LLM models, their Model IDs and how an Admin assigns one.** The current YAML keeps
+working unchanged.
 
 Scope note: this document covers the **Configuration** module of the future Web Admin. The overall
 product direction (Configuration + CRM + Dashboard, MVP versus future, shared KPI source, Admin API
@@ -75,7 +77,7 @@ Engine from it.
 | Products/offers, objectives, strategy, target audience, languages, tone and style | 3 | yes | settings document, `brain.settings` |
 | Qualification rules, objection handling, message and prompt fragments | 3 | yes | settings document, `brain.settings` |
 | Follow-up cadence, no-response rule, stop conditions, human-handoff rules | 3 | yes | settings document, `brain.settings` |
-| LLM provider and model choice | 3 | yes, provider limited to what's wired, model from an operator-allowed list per provider | settings document |
+| LLM provider and model | 1 (assigned by the Admin) | **never by the client.** The Admin assigns one of the models configured in Settings, under a provider that is wired (section G) | settings document (`llm`) |
 | Opt-out and status enforcement, `SENDING` guard, idempotency keys, one outreach per prospect per day, approval gating, `dry_run` cannot send, replies bypass the quota, planner tier order, client isolation, single writer, signature checks | 4 | no | code |
 
 ## 3. Core invariants and guardrails
@@ -93,7 +95,7 @@ values inside them and can only tighten:
 | Maximum touches per prospect | ceiling | anything at or below it | `min` |
 | Sending window (earliest/latest local time) | allowed window | a window inside it | intersection |
 | Mode | ceiling | requested mode | safer of the two (already built) |
-| LLM model | allowed list | one of the list | must be in the list |
+| LLM model | allowed list (optional) | nothing: the Admin picks | must be configured and on in Settings, and in the allowed list if one is set (section G.3) |
 
 Today only the mode ceiling and a fixed range for the daily limit exist. The minimum gap, maximum
 touches and sending window are **new Core work** (a small `ContactPolicy` used by the planner and
@@ -229,7 +231,8 @@ new version is invalid, the current one keeps running and the failure is reporte
 
 | Change | Effect |
 |---|---|
-| Schedule, daily limit, report, opt-out words, Brain settings, LLM model | next tick / next action (cheap runtime rebuild) |
+| Schedule, daily limit, report, opt-out words, Brain settings | next tick / next action (cheap runtime rebuild) |
+| LLM model | at once when the Admin assigns it (section G.4); a version published with the CLI waits for the next refresh or start |
 | Sheet, mode, Brain package | full rebuild of that client's runtime, connection test first |
 | Pause | immediate |
 | Lowering the mode | immediate; raising it needs operator approval and the ceiling |
@@ -411,7 +414,7 @@ same key names as `client.yaml`:
 ```
 schema_version, display_name, timezone, mode, daily_action_limit, opt_out_keywords,
 sheets{spreadsheet_id, prospects_tab, actions_tab, messages_tab, log_tab, column_mapping},
-llm{model}, schedule{daily_at, days}, brain{settings}
+llm{provider, model}, schedule{daily_at, days}, brain{settings}
 ```
 
 Everything else stays in `client.yaml` (operator wiring): `client_id`, `enabled`, `brain.factory`,
@@ -449,8 +452,11 @@ rolls back.
 **Prepared, not built.** Runtime refresh: `Application.config_store` is kept, the resolver is a pure
 function, and configs are immutable and versioned, so a later refresh loop can call the resolver,
 build a new runtime beside the old one, and swap only on success (section 6). Nothing polls the
-store yet, so a new version takes effect at the next start. Also not built: `ConfigService`, the
-Admin API, the Web Admin, `config_version` in Engine audit events.
+store yet, so a new version takes effect at the next start. *Update:* the refresh now exists
+(`RuntimeManager`, section G.4), triggered by what the Admin API writes and by credential changes,
+not by polling: a version published with the CLI is still only picked up at the next refresh of
+that client or at the next start. Not built: `ConfigService`, `config_version` in Engine audit
+events.
 
 ### F.1 Document schema 2 and Brain settings
 
@@ -470,3 +476,176 @@ Implemented after the ConfigStore; details in [brain-settings.md](brain-settings
   normalised latest version is what is stored and passed to the Brain. A Brain without a spec keeps
   opaque settings. Invalid Brain settings are never written, and never disturb a running
   configuration.
+
+## G. Implemented: LLM models and their assignment
+
+Code: `src/sales_app/model_catalog.py`, `llm_models.py`, `model_usage.py`, `connection_tests.py`,
+`config/offered_models.py`, `config/published.py`, `wiring/providers/` (descriptors),
+`api/admin_settings.py`, `api/admin_integrations.py`, `api/admin_clients.py`. `sales_core`,
+`sales_brain_kit` and the Brains are untouched and name no model. Tests: `test_admin_model_catalog`,
+`test_model_assignment_rules`, `test_model_protection`, `test_admin_client_apply`,
+`test_openai_model_test`, `test_client_cannot_choose_model`, `test_model_assignment_end_to_end`.
+
+### G.1 The rule: only an Admin assigns a model
+
+The Client API (`/client/v1`: login, logout, `auth/me`, `profile` read and update, password) has no
+route and no field for a provider or a model, and its responses do not show one. `PATCH /profile`
+accepts only `name`, `login` and `whatsapp_number`; any other field, `llm` or `model` included, is
+refused with **422**. The login and password bodies ignore unknown fields without reading them. A
+Client session opens nothing under `/admin/v1`. The tests pin the list of Client routes and scan the
+generated OpenAPI contract, so a new route or field has to be reviewed.
+
+On the Admin side, **only the OWNER role assigns a model**: `PUT /clients/{id}/llm`, `PATCH
+/clients/{id}` and `POST /clients` require it, and so do the routes that write the model list and
+the credentials. The role is checked first, so an operator or an editor gets 403 whatever the
+client, and learns nothing about clients outside its scope. They can still read a client and its
+model; reading is open to any admin. Later, a subscription plan is meant to assign the model
+automatically; that is **not implemented**.
+
+### G.2 Provider, catalog, Model ID, assignment: four separate things
+
+- **Provider and credentials.** A provider is a descriptor (`wiring/providers/`). The OpenAI API key,
+  organization, project and base URL are stored by the Admin in Settings (credential store, global
+  scope), with the environment variable named by `llm.api_key_env` as a fallback for the key.
+- **Model list.** A descriptor declares the models it serves by *key* and *label* only (OpenAI:
+  `gpt-lune`, `gpt-sol`; Meta: `muse-spark`) and, with `model_list`, where the Admin keeps its own
+  models. For OpenAI that is the credential `openai.models`, a JSON list of `{name, id, active, key}`
+  (plus `last_test`, G.6), managed with `/admin/v1/settings/openai/models`. Until it is first saved,
+  the older `openai.model_sol` and `openai.model_lune` ids stand in for it. No Model ID is written in
+  the shipped code (a test enforces it).
+- **Model ID.** The `id` of an entry is **the exact identifier OpenAI is called with**. It is what a
+  client's `llm.model` holds and what `OpenAIProvider` receives; nothing translates it on the way.
+  A new compatible model is added by an Admin in Settings (name and Model ID): no change to the Core,
+  a Brain or the code.
+- **Catalog and key.** Each entry has a stable **key**, derived from its name when the entry is
+  first saved ("Big Model 2" becomes `big-model-2`), kept when the name or the id changes, unique,
+  and never one of another provider's keys. An entry whose key is a declared model's gives it its
+  Model ID; any other entry is a model of its own. The key is Revansa's name for the model and is
+  **never sent to a provider**. The catalog is built at each request from the descriptors and
+  Settings (`settings_catalog`) and shown in `GET /admin/v1/settings/llm`, section `catalog`: per
+  provider (wired or not), each model with `key`, `label`, `configured`, `active`, `runnable` and
+  `last_test`. The `providers` section of the same response is unchanged, and Meta is not in it.
+  Clients are still assigned by **Model ID**, not by key; assignment by key is not implemented.
+- **Assignment.** An Admin gives a client a provider and a Model ID (G.3). It is written to the
+  client's settings document (`llm`), or to its `client.yaml` for a client created and not yet
+  configured.
+
+`SALES_AGENT_MODEL_UPSTREAM_IDS` (introduced for an earlier catalog) is **deprecated and ignored**: a
+warning is logged at startup. The Model IDs have a single source, Settings.
+
+### G.3 What an Admin may assign
+
+The same rule, `check_model`, for `PUT /clients/{id}/llm`, `PATCH /clients/{id}` and the creation of
+a client. For `PUT`, the order is: provider, then the client exists (404), then the model.
+
+| Case | Answer |
+|---|---|
+| provider not wired here | 400 `llm.provider 'x' is not wired in this deployment`; a provider Revansa knows but cannot run (Meta) adds `(it is known, but no adapter can run it yet)` |
+| outside `SALES_AGENT_ALLOWED_LLM_MODELS` (when set) | 400 `llm.model 'x' is not allowed for provider 'p'` (or `llm.provider 'p' is not on the deployment's allowed list`), checked before Settings |
+| no model configured for the provider in Settings (no list, or an empty one) | 400 `no model is configured for provider 'p' in Settings: add one there before assigning a model to a client` |
+| Model ID not in the list | 400 `llm.model 'x' is not configured in Settings for provider 'p'` |
+| in the list but switched off | 400 `llm.model 'x' is switched off in Settings for provider 'p': switch it on, or choose another model` |
+| in the list and on | accepted |
+| OpenAI API key not set | **accepted**; the client is not ready (see G.4) |
+
+A provider with no list in Settings is bound by the allow-list alone. A refusal publishes and writes
+nothing. A deployment without a credential store cannot hold a list, so an Admin cannot assign a
+model there (clients are then configured with files or the CLI).
+
+**Loading is not strict.** The check applies when an Admin assigns, never when a configuration is
+loaded: a client whose `client.yaml` or published version names a model nobody configured keeps
+running. One loading rule does exist: as soon as Settings holds an OpenAI list (or the older ids
+that stand in for it), a client whose model is not on in it is **not ready** (`LLM model 'x' is not active in Settings`) and takes no work. Add
+the models of the existing clients before the first new one.
+
+### G.4 A change is in force at once
+
+After `PUT /clients/{id}/llm` and `PATCH /clients/{id}` (model, name, quota) publish a version, the
+running client is refreshed with the same `RuntimeManager` refresh a changed credential triggers: it is resolved again, a new Engine is built beside the old
+one and replaces it when no job uses it (the process of section 6). The request waits up to
+5 seconds (`REFRESH_WAIT_SECONDS`); it succeeds either way. Whether the change is in force is read at
+`GET /admin/v1/clients/{id}/runtime-status` (`applying`, `applied`, `pending`, `not_ready`,
+`failed`, with reasons). If the refresh fails, the previous runtime keeps running and the Admin
+shows what really runs.
+
+- What the Admin shows for a client with a runtime is its running configuration (its name
+  excepted, see below); for a client
+  without one (disabled, not started), its `client.yaml` with the newest published version laid over
+  it.
+- **A client renaming itself does not refresh its agent.** The new name is published and the Client
+  API and every Admin screen that names the client (client list and details, agent list and
+  details) show it at once, but no Engine is rebuilt: a client could otherwise repeat the rename
+  and rebuild its agent, on the one worker every client's refresh shares, as often as it likes.
+  The running agent keeps the previous name until the next refresh of that client (any change the
+  Admin publishes for it, or a credential change) or the next start. Only the name is read from
+  what is published: everything else the Admin shows for a running client is what runs.
+- **Every new version is built on the newest published document**, not on the running configuration,
+  which may lag. Otherwise the next change, an Admin's quota edit or the client renaming itself,
+  would silently undo an assignment that had not caught up.
+- Editing or deleting a model, or the OpenAI credentials, refreshes all clients. Recording a test
+  result (G.6) refreshes none.
+- Nothing polls the config store: a version written with the CLI is applied at the next refresh of
+  that client or at the next start. `PATCH status` (enabling a client) still needs a restart.
+
+### G.5 A model that clients use is protected
+
+A client uses a model when its published version, its `client.yaml` or its running configuration
+names it, disabled clients included.
+
+- **Delete a model, or change its Model ID:** refused with **409**; `detail` is an object with
+  `message`, `client_ids` and `models`. Nothing is saved. The Web Admin shows the message followed
+  by the clients (`web/src/admin/api.ts`, `detailText`).
+- **Switch it off:** allowed. The `PUT` answer carries `impacted_clients` and `warning`; those clients
+  become not ready (G.3) until it is switched on again or they get another model. Changing only a
+  model's name is free.
+- **The generic credential routes** (`PUT` and `DELETE /settings/integrations/{key}` on
+  `openai.models` and the older `openai.model_*`) apply the same protection but are stricter: they
+  refuse (409) any write that would remove **or switch off** a model in use, since they cannot carry
+  a warning. Other credentials are not concerned.
+- Not atomic: the check and the write are two steps, so two Admin requests at the same moment could
+  both pass. These rules guard the Admin API only: `sales-agent config publish` and a hand-edited
+  `client.yaml` are not subject to the Settings rules of G.3 or to this protection.
+
+### G.6 Testing a model for real
+
+The existing connection test, `POST /admin/v1/settings/integrations/openai/test`, only lists what
+the account can see; it is free and unchanged. **`POST
+/admin/v1/settings/openai/models/{model_id}/test?confirm=true`** (OWNER) is different: it asks the
+model, by its exact Model ID, for a few tokens and says whether it is really usable.
+
+- Without `confirm=true` nothing is sent: 400, with a message saying the request is real and may be
+  billed. An unknown Model ID is a 404. A switched-off model can be tested and stays off.
+- One request, `max_completion_tokens` = **16** (the parameter the OpenAI adapter sends at run
+  time), 30 seconds at most, with the stored key, organization, project and base URL.
+- The answer says `outcome`: `usable`, `no_api_key` (nothing sent), `invalid_api_key` (401, 403),
+  `model_not_found`, `invalid_parameters` (400, 422), `quota_exceeded` (429: no quota left or rate
+  limit, told apart in the message), `timeout`, `unreachable`, `service_error`,
+  `unexpected_response`; with `request_sent`, `tested_at`, `recorded` and, from the service, only its
+  error code, the tokens used and the model that answered. Messages are fixed sentences: no key and
+  no text from the service is repeated. A reasoning model that stops at the 16-token limit still
+  counts as `usable`.
+- **Never tested:** how the last test ended (`outcome` and time, nothing else) is kept with the model
+  and shown as `last_test` in the catalog; `null` means never tested. It follows the model through
+  renames and on/off changes and is dropped when the Model ID changes. It is not invalidated when the
+  key, organization or base URL change.
+- Tests of the code never call OpenAI: the HTTP transport and the SDK are replaced.
+
+### G.7 Known limits
+
+- **`SALES_AGENT_ALLOWED_LLM_MODELS`** stays a hard guardrail on top of Settings. When it is set, a
+  model added in Settings must also be listed there or its assignment is refused. A published
+  version or `client.yaml` naming a model outside it fails that client's configuration: at startup
+  the application does not start; at refresh the change is reported `failed`.
+- **Existing clients** are not migrated and keep running as before (G.3); only an Admin assignment is
+  strict. The loading rule on a model missing from the OpenAI list applies once a list exists.
+- **Meta and Muse Spark are not runnable.** `muse-spark` is declared by the `meta` descriptor and
+  appears in the catalog with `runnable: false`. The descriptor has no `build`, so Meta is not in the
+  wired providers and cannot be assigned. Meta has no list in Settings and no credential in the
+  credential store catalog, and no call to Meta is made anywhere. Its descriptor names the
+  `openai_compatible` adapter family, but its structured-output behaviour is declared unverified
+  (`capabilities`), so it is not claimed to work. OpenAI and Meta stay two providers.
+- **Still OpenAI-only:** the routes under `/settings/openai/models`, the `openai.*` credential keys,
+  the loading rule of G.3 and the `providers` projection of `GET /settings/llm`. They move to
+  descriptors when a second provider gets a model list.
+- **Not implemented:** assignment by plan and assignment by catalog key. The Web Admin does not show
+  the `warning` and `impacted_clients` returned when a model is switched off.

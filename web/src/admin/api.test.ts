@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AdminApiError, adminLogin, adminLogout, adminMe, adminUpdateClientLLM } from "./api";
+import { AdminApiError, adminDeleteOpenAIModel, adminLogin, adminLogout, adminMe, adminUpdateClientLLM, detailText } from "./api";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -7,6 +7,27 @@ function jsonResponse(status: number, body: unknown): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("detailText", () => {
+  it("keeps a sentence as it is", () => {
+    expect(detailText("no such client")).toBe("no such client");
+  });
+
+  it("gives the message alone when no client is named", () => {
+    expect(detailText({ message: "refused" })).toBe("refused");
+    expect(detailText({ message: "refused", client_ids: [] })).toBe("refused");
+  });
+
+  it("ignores what is not a client id", () => {
+    expect(detailText({ message: "refused", client_ids: ["alpha", 3, null] })).toBe("refused (clients: alpha)");
+  });
+
+  it("has nothing to say about a body it does not know", () => {
+    expect(detailText(undefined)).toBeNull();
+    expect(detailText([{ msg: "field required" }])).toBeNull(); // a validation error list
+    expect(detailText({ client_ids: ["alpha"] })).toBeNull();
+  });
 });
 
 describe("adminMe", () => {
@@ -22,6 +43,27 @@ describe("adminMe", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(401, { detail: "session expired or invalid" })));
     await expect(adminMe()).rejects.toMatchObject(
       new AdminApiError(401, "session expired or invalid"),
+    );
+  });
+
+  it("shows a refusal that names clients with the message and the clients", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(409, {
+          detail: {
+            message: "clients use this model: assign them another model first",
+            client_ids: ["alpha", "beta"],
+            models: { "model-x": ["alpha", "beta"] },
+          },
+        }),
+      ),
+    );
+    const error = await adminDeleteOpenAIModel("model-x").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AdminApiError);
+    expect((error as AdminApiError).status).toBe(409);
+    expect((error as AdminApiError).message).toBe(
+      "clients use this model: assign them another model first (clients: alpha, beta)",
     );
   });
 

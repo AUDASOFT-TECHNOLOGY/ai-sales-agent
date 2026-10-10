@@ -1,7 +1,7 @@
 {
   "inactive": {
     "body": {
-      "detail": "llm.model 'gpt-upstream-sol' is not configured in Settings for provider 'openai'"
+      "detail": "llm.model 'gpt-upstream-sol' is switched off in Settings for provider 'openai': switch it on, or choose another model"
     },
     "status": 400
   },

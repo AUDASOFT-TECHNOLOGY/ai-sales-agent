@@ -15,13 +15,15 @@ never touched by this module.
 The LLM update below writes through `ConfigStore.publish` (the same versioned store the CLI's
 `sales-agent config publish` uses), never a raw file write, and is gated by the same guardrails
 `resolve_client_config` enforces at load time: `provider` must be wired (`Application.llm_providers`)
-and `provider`/`model` must be allowed by the deployment's `LLMRegistry`. Like any other stored
-settings change (see `sales_app.config.resolution`), it takes effect on the client's next runtime
-rebuild, not instantly.
+and `provider`/`model` must be allowed by the deployment's `LLMRegistry`. Every settings change
+published here (the model, the name, the quota) is applied to the running client at once, through the
+same `RuntimeManager` refresh a changed credential triggers; a client with no runtime yet (disabled,
+or not started) is shown from its published settings and picks them up when it starts.
 """
 
 import base64
 import binascii
+import contextlib
 import re
 import shutil
 from dataclasses import replace
@@ -44,13 +46,17 @@ from sales_app.config import (
     read_wiring,
     validate_settings_document,
 )
+from sales_app.config.published import published_document, published_name, published_view
 from sales_app.config_store import ConfigConflictError
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_app.llm_models import check_model
 from sales_app.secret_store import client_scope
 from sales_app.wiring import ClientRuntime
+from sales_app.wiring.providers import ProviderKind
 
-WRITE_ROLES = (AdminRole.OWNER, AdminRole.OPERATOR, AdminRole.EDITOR)
+# How long a request waits for the running client to take a published change. The refresh goes on
+# in the background after that; `GET /clients/{id}/runtime-status` says how it ended.
+REFRESH_WAIT_SECONDS = 5.0
 
 ClientStatus = Literal["active", "disabled"]
 
@@ -472,21 +478,36 @@ def _disabled_client_ids(application: Application) -> list[str]:
     )
 
 
+def _with_published_name[M: (ClientSummaryResponse, ClientDetailResponse)](
+    application: Application, shown: M
+) -> M:
+    """`shown` for a running client, with the newest published name. Everything else shown is
+    what runs; the name is the one thing a client changes for itself without its agent being
+    rebuilt (`rename_client`), and the Admin must see it at once, as the client does."""
+    name = published_name(application.config_store, shown.client_id)
+    if name is None or name == shown.display_name:
+        return shown
+    return shown.model_copy(update={"display_name": name})
+
+
 def _all_summaries(application: Application) -> list[ClientSummaryResponse]:
     summaries = [
-        _summary_from_config(config, _health_for(application, config))
+        _with_published_name(
+            application, _summary_from_config(config, _health_for(application, config))
+        )
         for config in application.registry.configs()
     ]
     for client_id in _disabled_client_ids(application):
         raw, _problem = read_wiring(application.settings.clients_dir / client_id)
-        summaries.append(_summary_from_raw(client_id, raw or {}))
+        summaries.append(_summary_from_raw(client_id, _published_view(application, client_id, raw)))
     return sorted(summaries, key=lambda s: s.client_id)
 
 
 def _find_detail(application: Application, client_id: str) -> ClientDetailResponse | None:
     config = application.registry.get_config(client_id)
     if config is not None:
-        return _detail_from_config(config, _health_for(application, config))
+        detail = _detail_from_config(config, _health_for(application, config))
+        return _with_published_name(application, detail)
     if not CLIENT_ID_PATTERN.match(client_id):
         return None
     directory = application.settings.clients_dir / client_id
@@ -495,19 +516,28 @@ def _find_detail(application: Application, client_id: str) -> ClientDetailRespon
     raw, _problem = read_wiring(directory)
     if raw is None:
         return None  # not a client directory: 404
-    return _detail_from_raw(client_id, raw)  # disabled, or activated and awaiting a restart
+    # Disabled, or activated and awaiting a restart: what it will run on is its published settings.
+    return _detail_from_raw(client_id, _published_view(application, client_id, raw))
 
 
 def _wiring_and_base_document(application: Application, client_id: str) -> tuple[dict, dict] | None:
     """The raw `client.yaml` plus the current settings document to build a new version on top of
     (so every other setting survives), for any client the Admin API can see (same existence rules
-    as `_find_detail`). None if there is no such client."""
+    as `_find_detail`). None if there is no such client.
+
+    The document is the newest one published for the client; only with none published is it read
+    from the running configuration (or, with no runtime, from `client.yaml`). A running client can
+    lag behind what was published (a refresh still going, or one that failed), and a new version
+    built from it would silently undo the change that has not caught up: the model the Admin
+    assigned, above all, whoever makes the next change (the Admin's PATCH, or the client renaming
+    itself)."""
     config = application.registry.get_config(client_id)
     if config is not None:
         raw, _problem = read_wiring(config.directory)
         if raw is None:
             return None
-        return raw, extract_document(config.spec)
+        published = published_document(application.config_store, client_id)
+        return raw, published if published is not None else extract_document(config.spec)
     if not CLIENT_ID_PATTERN.match(client_id):
         return None
     directory = application.settings.clients_dir / client_id
@@ -516,10 +546,66 @@ def _wiring_and_base_document(application: Application, client_id: str) -> tuple
     raw, _problem = read_wiring(directory)
     if raw is None:
         return None
+    published = published_document(application.config_store, client_id)
+    if published is not None:
+        return raw, published
     seeded = import_document(client_id, raw)
     if seeded.errors or seeded.document is None:
         return None  # a disabled client whose client.yaml is itself invalid
     return raw, seeded.document
+
+
+def _published_view(application: Application, client_id: str, raw: dict | None) -> dict:
+    """What a client without a runtime will run on: its `client.yaml` with the settings version
+    published for it laid over (see `sales_app.config.published`)."""
+    return published_view(application.config_store, client_id, raw)
+
+
+def _provider_problem(application: Application, provider: str) -> str | None:
+    """Why the Admin may not give a client this provider, or None: it must be wired here."""
+    if provider in application.llm_providers:
+        return None
+    known = application.provider_registry.get(provider)
+    note = (
+        " (it is known, but no adapter can run it yet)"
+        if known is not None and known.plays(ProviderKind.LLM)
+        else ""
+    )
+    return f"llm.provider {provider!r} is not wired in this deployment{note}"
+
+
+def _model_problem(application: Application, provider: str, model: str) -> str | None:
+    """Why the Admin may not give a client this model under a wired provider, or None: the
+    deployment's allow-list, then the models configured in Settings (see `check_model`)."""
+    return check_model(
+        build_llm_registry(application.settings.allowed_llm_models),
+        application.credentials,
+        application.provider_registry,
+        provider,
+        model,
+    )
+
+
+def _assignment_problem(application: Application, provider: str, model: str) -> str | None:
+    """The one rule for every route that assigns a model (creation, `PATCH`, `PUT .../llm`): the
+    provider must be wired here, then the model must be one the Admin may assign."""
+    return _provider_problem(application, provider) or _model_problem(application, provider, model)
+
+
+def _apply_now(application: Application, client_id: str) -> None:
+    """Have the running client take the settings just published for it, without a restart.
+
+    The same refresh a changed credential triggers: the client is resolved again, a new Engine is
+    built beside the running one, and it replaces it once no job is using it. Waits a few seconds so
+    the change is usually in force when the request returns; if not, it finishes in the background.
+    Never fails the request: the settings are already published, and `runtime-status` reports how
+    the refresh ended. A client with no runtime and no config in the registry (disabled, or not
+    started) has nothing to refresh."""
+    if application.registry.get_config(client_id) is None:
+        return
+    future = application.runtime_manager.refresh_client(client_id)
+    with contextlib.suppress(Exception):  # still applying, or failed: the status says which
+        future.result(timeout=REFRESH_WAIT_SECONDS)
 
 
 _ENABLED_LINE = re.compile(r"^enabled:.*$", re.MULTILINE)
@@ -580,7 +666,13 @@ def rename_client(application: Application, client_id: str, name: str, *, author
     """Change a client's business name where every other writer changes it (the versioned settings,
     or the skeleton `client.yaml` of a client without a Brain yet), so there is never a second copy
     of the name. Also used by the Client API when a client renames itself: this module stays the
-    only API layer that publishes settings."""
+    only API layer that publishes settings.
+
+    It does not refresh the running client. A rename from the Client API is the client's own and
+    could be repeated at will, each time rebuilding an Engine on the one worker every client's
+    refresh shares; the Client API reads the published name, so the client sees it at once. The
+    running agent takes the new name at the next refresh of that client (any change the Admin
+    publishes or a credential change) or at the next start."""
     found = _wiring_and_base_document(application, client_id)
     raw = found[0] if found is not None else _unvalidated_wiring(application, client_id)
     if raw is None:
@@ -606,7 +698,6 @@ def rename_client(application: Application, client_id: str, name: str, *, author
 
 def create_admin_clients_router(application: Application) -> APIRouter:
     get_current_admin = make_current_admin_dependency(application.admin_auth)
-    require_write_admin = require_role(get_current_admin, *WRITE_ROLES)
     require_owner = require_role(get_current_admin, AdminRole.OWNER)
     router = APIRouter(prefix="/admin/v1", tags=["admin"])
 
@@ -707,18 +798,9 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             raise HTTPException(400, "llm_provider and llm_model must be sent together")
         if body.llm_provider is not None and body.llm_model is not None:
             provider, model = body.llm_provider.strip(), body.llm_model.strip()
-            if provider not in application.llm_providers:
-                raise HTTPException(
-                    400, f"llm.provider {provider!r} is not wired in this deployment"
-                )
-            reason = check_model(
-                build_llm_registry(application.settings.allowed_llm_models),
-                application.credentials,
-                provider,
-                model,
-            )
-            if reason is not None:
-                raise HTTPException(400, reason)
+            problem = _assignment_problem(application, provider, model)
+            if problem is not None:
+                raise HTTPException(400, problem)
             document_changes["llm"] = {"provider": provider, "model": model}
         if body.daily_action_limit is not None:
             document_changes["daily_action_limit"] = body.daily_action_limit
@@ -761,6 +843,7 @@ def create_admin_clients_router(application: Application) -> APIRouter:
                 )
             except ConfigConflictError as error:
                 raise HTTPException(409, str(error)) from error
+            _apply_now(application, client_id)
         if changes:
             try:
                 if profile is None:  # first account for a client that only had a client.yaml
@@ -800,16 +883,9 @@ def create_admin_clients_router(application: Application) -> APIRouter:
                 "a new client cannot be active yet: its Brain, Google Sheet and WhatsApp are "
                 "not configured. Create it as inactive.",
             )
-        if provider not in application.llm_providers:
-            raise HTTPException(400, f"llm.provider {provider!r} is not wired in this deployment")
-        reason = check_model(
-            build_llm_registry(application.settings.allowed_llm_models),
-            application.credentials,
-            provider,
-            model,
-        )
-        if reason is not None:
-            raise HTTPException(400, reason)
+        problem = _assignment_problem(application, provider, model)
+        if problem is not None:
+            raise HTTPException(400, problem)
         if body.logo is not None:
             _check_logo(body.logo)
         whatsapp_number = _clean_whatsapp_number(body.whatsapp_number)
@@ -856,21 +932,21 @@ def create_admin_clients_router(application: Application) -> APIRouter:
     def update_client_llm(
         client_id: str,
         body: UpdateClientLLMRequest,
-        admin: AdminUser = Depends(require_write_admin),
+        admin: AdminUser = Depends(require_owner),  # only an owner assigns a model
     ) -> ClientLLMResponse:
         ensure_client_access(admin, client_id)  # 404 before existence is even checked
         provider, model = body.provider.strip(), body.model.strip()
 
-        if provider not in application.llm_providers:
-            raise HTTPException(400, f"llm.provider {provider!r} is not wired in this deployment")
-        registry = build_llm_registry(application.settings.allowed_llm_models)
-        reason = check_model(registry, application.credentials, provider, model)
-        if reason is not None:
-            raise HTTPException(400, reason)
+        problem = _provider_problem(application, provider)
+        if problem is not None:
+            raise HTTPException(400, problem)
 
         found = _wiring_and_base_document(application, client_id)
         if found is None:
-            raise HTTPException(404, "no such client")
+            raise HTTPException(404, "no such client")  # before the model: the URL comes first
+        problem = _model_problem(application, provider, model)
+        if problem is not None:
+            raise HTTPException(400, problem)
         raw, base_document = found
         document = {**base_document, "llm": {"provider": provider, "model": model}}
 
@@ -889,6 +965,7 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             )
         except ConfigConflictError as error:
             raise HTTPException(409, str(error)) from error
+        _apply_now(application, client_id)
 
         return ClientLLMResponse(
             provider=check.spec.llm.provider,

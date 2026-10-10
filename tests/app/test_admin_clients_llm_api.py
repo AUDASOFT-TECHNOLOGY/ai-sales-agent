@@ -9,7 +9,14 @@ secret value, and that every other client setting is preserved.
 from datetime import UTC, datetime
 
 import pytest
-from app_support import InlineExecutor, env_for, fake_builders, make_settings, write_client
+from app_support import (
+    InlineExecutor,
+    declare_models,
+    env_for,
+    fake_builders,
+    make_settings,
+    write_client,
+)
 from fastapi.testclient import TestClient
 
 from sales_app.admin_auth import (
@@ -21,6 +28,7 @@ from sales_app.admin_auth import (
 from sales_app.admin_auth.passwords import hash_password
 from sales_app.api import create_app
 from sales_app.bootstrap import build_application
+from sales_app.secret_store import generate_master_key
 from sales_app.wiring import IntegrationBuilders
 from sales_integrations.fakes import FakeClock
 
@@ -46,7 +54,13 @@ def _settings(tmp_path, **kw):
     # loader skips those when discovering clients (see loader.py), the same trick "_template" uses
     # in test_admin_clients_api.py.
     kw.setdefault("config_dir", tmp_path / "_config")
+    # A model is assigned only if it is configured in Settings, which needs the credential store.
+    kw.setdefault("secrets_dir", tmp_path / "_secrets")
     return make_settings(tmp_path, **kw)
+
+
+# The Model IDs these tests assign (the clients themselves are written with "test-model").
+MODELS = ("test-model", "gpt-5", "gpt-6", "new-model", "not-allowed")
 
 
 def build(
@@ -103,6 +117,7 @@ class Fixture:
         self.users = users if users is not None else InMemoryAdminUserStore()
         self.sessions = InMemoryAdminSessionStore()
         self.clock = clock or FakeClock(NOW)
+        settings_kw.setdefault("secrets_key", generate_master_key())  # one key, kept for rebuild()
         self.settings_kw = settings_kw
         self.with_anthropic = with_anthropic
         self.application, self.made = build(
@@ -114,6 +129,7 @@ class Fixture:
             with_anthropic=with_anthropic,
             **settings_kw,
         )
+        declare_models(self.application.credentials, *MODELS)
         self.client = TestClient(
             create_app(self.application, run_scheduler=False), base_url="https://testserver"
         )
@@ -181,21 +197,39 @@ class TestPermissions:
         )
         assert response.status_code == 403
 
-    def test_an_editor_can_update_llm(self, fx):
-        client = as_alice(fx)
+    def test_an_owner_can_update_llm(self, fx):
+        client = as_root(fx)
         response = client.put(
             "/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "new-model"}
         )
         assert response.status_code == 200
 
-    def test_a_scoped_editor_gets_404_outside_its_scope(self, tmp_path):
+    @pytest.mark.parametrize("role", [AdminRole.OPERATOR, AdminRole.EDITOR])
+    def test_only_an_owner_assigns_a_model(self, fx, role):
+        # An operator or an editor of the client reads it but does not choose its model.
+        fx.users.create(user("nora", role, client_ids=frozenset({"alpha"})))
+        fx.login("nora")
+        response = fx.client.put(
+            "/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "new-model"}
+        )
+        assert response.status_code == 403
+        assert fx.application.config_store.current("alpha") is None
+        assert fx.application.registry.get_config("alpha").spec.llm.model == "test-model"
+        assert fx.client.get("/admin/v1/clients/alpha").status_code == 200  # still readable
+
+    def test_a_non_owner_gets_the_same_answer_whatever_the_client(self, tmp_path):
+        # The role is checked first: nothing is learned about clients outside its scope.
         fixture = Fixture(tmp_path, "alpha", "beta")
         fixture.users.create(user("alice", AdminRole.EDITOR, client_ids=frozenset({"alpha"})))
         fixture.login()
-        response = fixture.client.put(
-            "/admin/v1/clients/beta/llm", json={"provider": "openai", "model": "new-model"}
-        )
-        assert response.status_code == 404
+        answers = {
+            client_id: fixture.client.put(
+                f"/admin/v1/clients/{client_id}/llm",
+                json={"provider": "openai", "model": "new-model"},
+            ).status_code
+            for client_id in ("alpha", "beta", "nobody")
+        }
+        assert answers == {"alpha": 403, "beta": 403, "nobody": 403}
 
 
 class TestUpdateProviderAndModel:
@@ -241,12 +275,11 @@ class TestPersistsThroughConfigStore:
         assert [v.version for v in history] == [1, 2]
         assert history[-1].document["llm"] == {"provider": "openai", "model": "gpt-6"}
 
-    def test_takes_effect_on_the_next_application_build_not_immediately(self, fx):
-        # No hot reload exists yet (see docs/client-configuration-design.md section 6): the
-        # already-running registry keeps serving the old runtime until the process rebuilds.
+    def test_takes_effect_at_once_and_still_after_a_rebuild(self, fx):
         client = as_root(fx)
         client.put("/admin/v1/clients/alpha/llm", json={"provider": "openai", "model": "gpt-5"})
-        assert client.get("/admin/v1/clients/alpha").json()["llm"]["model"] == "test-model"
+        assert client.get("/admin/v1/clients/alpha").json()["llm"]["model"] == "gpt-5"
+        assert fx.application.registry.get("alpha").config.spec.llm.model == "gpt-5"
         rebuilt = fx.rebuild()
         assert rebuilt.registry.get("alpha").config.spec.llm.model == "gpt-5"
 

@@ -18,10 +18,10 @@
       },
       "llm": {
         "api_key_env": "OPENAI_API_KEY",
-        "model": "gpt-upstream-1",
-        "provider": "openai"
+        "model": "claude-x",
+        "provider": "anthropic"
       },
-      "llm_model": "gpt-upstream-1",
+      "llm_model": "claude-x",
       "max_attempts": 4,
       "meta": {
         "credentials_stored": false,
@@ -34,7 +34,7 @@
       ],
       "prospects_contacted": 0,
       "providers": {
-        "llm": "openai",
+        "llm": "anthropic",
         "sheets": "google_sheets",
         "whatsapp": "whatsapp"
       },

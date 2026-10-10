@@ -1,9 +1,10 @@
 """Composition root: the one place where Core, Brains and integrations are wired together."""
 
+import logging
 import os
 from collections.abc import Mapping
 from concurrent.futures import Executor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
@@ -31,9 +32,12 @@ from sales_app.secret_store import (
 )
 from sales_app.settings import Settings
 from sales_app.wiring import IntegrationBuilders, default_builders
+from sales_app.wiring.providers import ProviderRegistry, default_registry
 from sales_core.approval import ApprovalMode
 from sales_core.ports import Clock
 from sales_integrations.system import SystemClock
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -57,6 +61,10 @@ class Application:
     # secrets), so a future Admin can list what is actually wired without holding the builders
     # table itself. See sales_app.wiring.integrations.IntegrationBuilders.
     llm_providers: tuple[str, ...] = ()
+    # The providers Revansa knows, with the models they declare. The model catalog is built from
+    # them and from the Admin's models in Settings (see `sales_app.llm_models.settings_catalog`),
+    # each time it is asked for, so a model the Admin adds shows up at once.
+    provider_registry: ProviderRegistry = field(default_factory=default_registry)
     # The database connection pool, when accounts and settings live in SQL (None: file fallback).
     account_stores: AccountStores | None = None
 
@@ -202,6 +210,11 @@ def _assemble(
     )
 
     llm_registry = build_llm_registry(settings.allowed_llm_models)
+    if settings.model_upstream_ids:
+        log.warning(
+            "SALES_AGENT_MODEL_UPSTREAM_IDS is ignored: the Model IDs are the ones the Admin "
+            "configures in Settings"
+        )
     loaded = load_client_configs(
         settings.clients_dir,
         env=environment,
@@ -251,6 +264,7 @@ def _assemble(
         credentials=credentials,
         runtime_manager=manager,
         llm_providers=tuple(sorted(builders.llms)),
+        provider_registry=default_registry(),
         account_stores=account_stores,
     )
 

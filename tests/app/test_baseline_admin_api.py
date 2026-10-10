@@ -42,6 +42,36 @@ def _with_anthropic(clock: FakeClock):
     )
 
 
+# What an Admin assignment is checked against: a model is given to a client only if Settings holds
+# it. These are the Model IDs the update tests assign, plus the one the clients are written with
+# (so none of them becomes not-ready) and the two ids ("m", "TODO") the refusal cases send to reach
+# the rule they are about (a client that does not exist, a placeholder) past the Settings rule.
+ASSIGNABLE_MODELS = [
+    (model_id, model_id, True)
+    for model_id in (
+        "test-model",
+        "gpt-upstream-1",
+        "gpt-upstream-2",
+        "gpt-upstream-3",
+        "same-model",
+        "m",
+        "TODO",
+    )
+]
+
+
+def _assigning_harness(tmp_path, **settings_kw):
+    """The usual harness, with Settings holding the models the tests assign."""
+    _write_clients(tmp_path)
+    return AdminHarness(
+        tmp_path,
+        env=_env(),
+        config_dir=tmp_path / "_config",
+        secret_store=settings_secret_store(ASSIGNABLE_MODELS),
+        **settings_kw,
+    )
+
+
 @pytest.fixture
 def harness(tmp_path):
     _write_clients(tmp_path)
@@ -63,8 +93,9 @@ class TestReads:
     def test_agent_detail(self, harness, agent_id):
         assert_golden(f"admin_agent_detail_{agent_id}", harness.get(f"/agents/{agent_id}"))
 
-    def test_a_published_settings_document_shows_in_the_client_detail(self, harness):
-        """The newest published version, read before the running config catches up."""
+    def test_a_published_settings_document_shows_in_the_client_detail(self, tmp_path):
+        """A published change is in force at once: detail, list and agent show the new model."""
+        harness = _assigning_harness(tmp_path)
         harness.put("/clients/alpha/llm", {"provider": "openai", "model": "gpt-upstream-2"})
         assert_golden(
             "admin_client_detail_alpha_after_llm_update",
@@ -84,6 +115,10 @@ class TestReads:
 
 
 class TestUpdateLlm:
+    @pytest.fixture
+    def harness(self, tmp_path):
+        return _assigning_harness(tmp_path)
+
     def test_a_successful_update(self, harness):
         before = harness.current_version("alpha")
         result = harness.put(
@@ -142,11 +177,8 @@ class TestUpdateLlm:
 
     def test_a_model_off_the_deployment_allow_list_is_refused(self, tmp_path):
         _write_clients(tmp_path)
-        h = AdminHarness(
-            tmp_path,
-            env=_env(),
-            config_dir=tmp_path / "_config",
-            allowed_llm_models={"openai": ("gpt-upstream-1", "test-model")},
+        h = _assigning_harness(
+            tmp_path, allowed_llm_models={"openai": ("gpt-upstream-1", "test-model")}
         )
         allowed = h.put("/clients/alpha/llm", {"provider": "openai", "model": "gpt-upstream-1"})
         refused = h.put("/clients/alpha/llm", {"provider": "openai", "model": "gpt-upstream-2"})

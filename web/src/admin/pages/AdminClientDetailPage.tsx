@@ -26,9 +26,9 @@ import {
   type UpdateClientRequest,
 } from "../api";
 
-// Mirrors WRITE_ROLES in src/sales_app/api/admin_clients.py: owner, operator and editor may
-// change a client's LLM configuration; a viewer may only look at it.
-const CAN_EDIT_LLM_ROLES = new Set(["owner", "operator", "editor"]);
+// Mirrors require_owner on PUT /clients/:id/llm in src/sales_app/api/admin_clients.py: only an
+// owner assigns a client's LLM model; any other role may only look at it.
+const CAN_EDIT_LLM_ROLES = new Set(["owner"]);
 
 // Mirrors require_owner on PATCH /clients/:id: only an owner may edit a client's profile.
 const CAN_EDIT_CLIENT_ROLES = new Set(["owner"]);
@@ -484,7 +484,7 @@ function LLMModelForm({
         disabled={!chosen || !dirty}
         disabledReason={
           !canEdit
-            ? "You do not have permission to edit this client's LLM model."
+            ? "Only an owner can assign a model to a client."
             : undefined
         }
         onClick={onSave}
