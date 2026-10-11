@@ -56,6 +56,7 @@ from sales_app.config.resolution import (
 from sales_app.config_store import ConfigConflictError, ConfigVersion
 from sales_app.config_store.models import CLIENT_ID_PATTERN, thaw_document
 from sales_app.llm_models import check_model
+from sales_app.logs import client_logger
 from sales_app.secret_store import client_scope
 from sales_app.wiring import ClientRuntime
 from sales_app.wiring.providers import ProviderKind
@@ -996,8 +997,27 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             enabled = body.status == "active"
             if _stored_enabled(application, client_id) is not enabled:
                 # Disabled then enabled again, an agent restarts only when its client says so.
-                _pause_client_switch(application, client_id, f"admin:{admin.username}")
-            _write_enabled(application, client_id, enabled)
+                by = f"admin:{admin.username}"
+                if enabled:
+                    # Pause first: if the switch cannot be written, the client must not come back
+                    # on an old "started" decision, so the change is refused.
+                    try:
+                        _pause_client_switch(application, client_id, by)
+                    except Exception:  # noqa: BLE001 - any store failure means the same
+                        raise HTTPException(503, "the agent switch is unavailable") from None
+                    _write_enabled(application, client_id, enabled)
+                else:
+                    # Disabling never depends on the client's switch: `enabled` alone stops the
+                    # work, so it is written first and a store failure cannot get in the way.
+                    _write_enabled(application, client_id, enabled)
+                    try:
+                        _pause_client_switch(application, client_id, by)
+                    except Exception:  # noqa: BLE001 - the client is disabled whatever happens here
+                        client_logger(__name__, client_id).warning(
+                            "the agent switch could not be paused; the client is disabled anyway"
+                        )
+            else:
+                _write_enabled(application, client_id, enabled)
 
         return detail_response(client_id)
 

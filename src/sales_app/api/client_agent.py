@@ -20,14 +20,16 @@ id supplied by the browser can reach another client's settings or switch.
 """
 
 import contextlib
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.exc import SQLAlchemyError
 
+from sales_app.agent_state import AgentStateStoreCorruptError
 from sales_app.api.admin_clients import (
     client_wiring_and_document,
     publish_client_settings,
@@ -163,6 +165,16 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
     )
 
 
+@contextlib.contextmanager
+def _switch_available() -> Iterator[None]:
+    """Every read or write of the agent switch answers the same 503 when its store is down or
+    unreadable, whichever store it is, and names nothing of the cause."""
+    try:
+        yield
+    except (AgentStateStoreCorruptError, SQLAlchemyError):
+        raise HTTPException(503, "the agent switch is temporarily unavailable") from None
+
+
 def _responses(checks: tuple[_Check, ...]) -> list[CheckResponse]:
     return [CheckResponse(id=c.id, ok=c.ok, message=None if c.ok else c.message) for c in checks]
 
@@ -246,10 +258,15 @@ def create_client_agent_router(application: Application) -> APIRouter:
 
     @router.get("/agent", response_model=AgentResponse)
     def get_agent(client: ClientProfile = Depends(get_current_client)) -> AgentResponse:
-        return agent_response(client)
+        with _switch_available():
+            return agent_response(client)
 
     @router.post("/agent/start", response_model=AgentResponse)
     def start_agent(client: ClientProfile = Depends(get_current_client)) -> AgentResponse:
+        with _switch_available():
+            return _start(client)
+
+    def _start(client: ClientProfile) -> AgentResponse:
         stored = application.agent_state.get(client.client_id)
         if stored is not None and stored.running:
             return agent_response(client)  # already started: nothing to check or change
@@ -272,6 +289,10 @@ def create_client_agent_router(application: Application) -> APIRouter:
 
     @router.post("/agent/pause", response_model=AgentResponse)
     def pause_agent(client: ClientProfile = Depends(get_current_client)) -> AgentResponse:
+        with _switch_available():
+            return _pause(client)
+
+    def _pause(client: ClientProfile) -> AgentResponse:
         stored = application.agent_state.get(client.client_id)
         if stored is not None and stored.running:  # a pause of what never ran changes nothing
             application.agent_state.set(

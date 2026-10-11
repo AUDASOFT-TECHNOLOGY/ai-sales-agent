@@ -965,3 +965,71 @@ def test_no_response_carries_a_secret_a_credential_name_or_another_clients_data(
     )
     for private in ("ALPHA_TOKEN", "token-alpha", "app_secret", "password", "beta", "Beta"):
         assert private not in text
+
+
+# ---- a failing switch store: 503 for the Client, never a block on the Admin ----------------------
+
+
+@pytest.fixture(params=["corrupt_file", "sql_table_missing"])
+def broken_store(request, tmp_path):
+    if request.param == "corrupt_file":
+        path = tmp_path / "broken" / "agent_state.json"
+        path.parent.mkdir()
+        path.write_text("{not json", encoding="utf-8")
+        yield FileAgentStateStore(path)
+        return
+    engine = create_database_engine(f"sqlite:///{(tmp_path / 'broken.db').as_posix()}")
+    upgrade_database(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE client_agent_state")
+    yield SqlAgentStateStore(engine)
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("method", "url"),
+    [("get", AGENT), ("post", START), ("post", PAUSE)],
+    ids=["get", "start", "pause"],
+)
+def test_an_unavailable_switch_store_answers_503_on_the_agent_routes(
+    world, alpha, broken_store, method, url
+):
+    world.application.agent_state = broken_store
+    response = getattr(alpha, method)(url)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "the agent switch is temporarily unavailable"}
+
+
+def test_an_unavailable_switch_store_stops_all_work_but_not_the_other_client_routes(
+    world, alpha, broken_store
+):
+    world.application.agent_state = broken_store
+    assert alpha.get(SETTINGS).status_code == 200
+    assert alpha.get(READINESS).status_code == 200
+    assert world.application.agent_may_work("alpha") is False
+
+
+def test_the_admin_can_disable_a_client_whose_switch_store_is_unavailable(
+    world, alpha, broken_store
+):
+    world.application.agent_state = broken_store
+    set_status(world.admin(), "alpha", "inactive")  # 200: not blocked by the store
+    assert (
+        yaml.safe_load((world.tmp_path / "alpha" / "client.yaml").read_text("utf-8"))["enabled"]
+        is False
+    )
+    assert world.application.agent_may_work("alpha") is False
+
+
+def test_the_admin_cannot_enable_again_on_a_switch_store_that_cannot_be_paused(
+    world, alpha, broken_store
+):
+    admin = world.admin()
+    set_status(admin, "alpha", "inactive")
+    world.application.agent_state = broken_store
+    response = admin.patch("/admin/v1/clients/alpha", json={"status": "active"})
+    assert response.status_code == 503  # an old "started" decision must not come back to life
+    assert (
+        yaml.safe_load((world.tmp_path / "alpha" / "client.yaml").read_text("utf-8"))["enabled"]
+        is False
+    )
