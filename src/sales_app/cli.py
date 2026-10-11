@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from sales_app.admin_cli import add_admin_parser, run_admin
 from sales_app.bootstrap import Application, build_application, describe_modes
 from sales_app.config_cli import add_config_parser, run_config
+from sales_app.consent_cli import add_consent_parser, run_consent
 from sales_app.db_cli import add_db_parser, run_db
 from sales_app.errors import ConfigurationError
 from sales_app.lockfile import InstanceAlreadyRunningError, InstanceLock
@@ -47,6 +48,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_db(settings, args)
         if args.command == "secrets":
             return run_secrets(args)
+        if args.command == "consent":
+            return run_consent(settings, args)
         return _run(settings, args)
     except ConfigurationError as error:
         _print_errors(error)
@@ -62,6 +65,7 @@ def _parser() -> argparse.ArgumentParser:
     add_admin_parser(commands)
     add_secrets_parser(commands)
     add_db_parser(commands)
+    add_consent_parser(commands)
     run = commands.add_parser("run", help="run one job for one client, once")
     run.add_argument("--client", required=True)
     run.add_argument("--job", required=True, choices=[j.value for j in Job])

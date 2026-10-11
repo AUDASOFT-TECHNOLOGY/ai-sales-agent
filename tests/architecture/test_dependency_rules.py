@@ -82,11 +82,19 @@ COMMERCIAL_VOCABULARY = {
     "DecisionType", "BrainDecision", "ProspectStatus", "SalesActionType", "ActionStatus",
     "MessageDraft", "ActionPriority", "Scheduling", "Prospect", "SalesAction",
 }  # fmt: skip
+# The one exception inside the app: `sales_app/sourcing` composes a client's prospect source and
+# operational store into the repository the Core asks for, so it must name the Core's prospect
+# contracts. It may use exactly these names and no other commercial vocabulary (no decisions, no
+# messages, no priorities, no action types); nothing else in the app may use any.
+SOURCING = SRC / "sales_app" / "sourcing"
+SOURCING_VOCABULARY = {"Prospect", "ProspectStatus", "Scheduling", "SalesAction", "ActionStatus"}
 
 
-def _identifiers(package_dir: Path) -> set[str]:
+def _identifiers(package_dir: Path, *, exclude: Path | None = None) -> set[str]:
     names: set[str] = set()
     for py in package_dir.rglob("*.py"):
+        if exclude is not None and py.is_relative_to(exclude):
+            continue
         for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Name):
                 names.add(node.id)
@@ -160,7 +168,13 @@ def test_no_credential_is_stored_in_the_database_schema():
 
 
 def test_the_app_uses_no_commercial_vocabulary():
-    assert not _identifiers(SRC / "sales_app") & COMMERCIAL_VOCABULARY
+    assert not _identifiers(SRC / "sales_app", exclude=SOURCING) & COMMERCIAL_VOCABULARY
+
+
+def test_the_sourcing_package_uses_only_the_commercial_vocabulary_it_needs():
+    assert SOURCING.is_dir()
+    used = _identifiers(SOURCING) & COMMERCIAL_VOCABULARY
+    assert used <= SOURCING_VOCABULARY, sorted(used - SOURCING_VOCABULARY)
 
 
 def test_no_client_names_appear_in_the_app_or_the_core():
@@ -462,6 +476,7 @@ def test_only_the_engine_records_facts_and_only_through_the_writer_port():
         "sales_core/engine/engine.py",
         "sales_core/payments/confirmation.py",
         "sales_core/ports/facts.py",
+        "sales_app/sourcing/composite.py",
         "sales_integrations/fakes/fake_sales_repository.py",
         "sales_integrations/google_sheets/repository.py",
     }
