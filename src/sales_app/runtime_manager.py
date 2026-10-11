@@ -105,6 +105,8 @@ class RuntimeManager:
         self._wait = apply_wait_seconds
         self._statuses: dict[str, RefreshStatus] = {}
         self._lock = threading.Lock()
+        # Refreshes of one client queued and not started yet: asking again joins the queued one.
+        self._queued: dict[str, Future[None]] = {}
 
     # ---- what the rest of the application calls ------------------------------------------
 
@@ -117,7 +119,34 @@ class RuntimeManager:
         return self.refresh_all()
 
     def refresh_client(self, client_id: str) -> Future[None]:
-        return self._executor.submit(self._refresh, [client_id])
+        """Apply this client's current configuration. The worker is one thread shared by every
+        client, and each refresh may wait for the client's running work, so several requests made
+        while one is still queued are served by that one: a refresh resolves the newest
+        configuration when it starts, whatever it was when it was asked for. One that is already
+        running is not joined (it may have read an older configuration): a new one is queued."""
+        with self._lock:
+            queued = self._queued.get(client_id)
+            if queued is not None:
+                return queued
+            future: Future[None] = Future()
+            self._queued[client_id] = future
+
+        def run() -> None:
+            with self._lock:
+                self._queued.pop(client_id, None)  # from now on, a new request queues its own
+            try:
+                self._refresh([client_id])
+                future.set_result(None)
+            except BaseException as error:  # noqa: BLE001 - handed to whoever waits on the future
+                future.set_exception(error)
+
+        try:
+            self._executor.submit(run)
+        except BaseException:
+            with self._lock:
+                self._queued.pop(client_id, None)
+            raise
+        return future
 
     def refresh_all(self) -> Future[None]:
         return self._executor.submit(self._refresh, self._known_client_ids())

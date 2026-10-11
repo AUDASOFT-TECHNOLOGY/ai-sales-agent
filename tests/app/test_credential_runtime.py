@@ -32,6 +32,7 @@ from test_admin_integrations_api import PASSWORD, user
 from test_app_api import payload, post
 
 from sales_app.admin_auth import AdminRole, InMemoryAdminSessionStore, InMemoryAdminUserStore
+from sales_app.agent_state import InMemoryAgentStateStore
 from sales_app.api import create_app
 from sales_app.bootstrap import build_application
 from sales_app.cli import _validate
@@ -107,7 +108,10 @@ class World:
             secret_store=self.store,
             secret_audit=InMemorySecretAudit(),
             refresh_executor=self.refresh_executor,
+            agent_state_store=InMemoryAgentStateStore(),
         )
+        for cid in ids:  # every client has started its agent: these tests are about credentials
+            self.application.agent_state.set(cid, running=True, by="tests", at=NOW)
         self.registry = self.application.registry
         self.manager = self.application.runtime_manager
         self.credentials = self.application.credentials

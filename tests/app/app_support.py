@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 from factories import NOW
 
+from sales_app.agent_state import InMemoryAgentStateStore
 from sales_app.bootstrap import Application, build_application
 from sales_app.config.offered_models import OfferedModel
 from sales_app.llm_models import save_models, stored_models
@@ -181,7 +182,10 @@ def build_test_application(
         clock=clock,
         executor=InlineExecutor(),
         mode_ceiling=ceiling,
+        agent_state_store=InMemoryAgentStateStore(),
     )
+    for cid in client_ids:  # each client has started its agent: the scheduler may work for it
+        application.agent_state.set(cid, running=True, by="tests", at=clock.now())
     return application, made, clock
 
 

@@ -6,9 +6,11 @@ from collections.abc import Mapping
 from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from sales_app.admin_auth import AdminAuthService, AdminSessionStore, AdminUserStore
+from sales_app.agent_state import AgentStateStore, InMemoryAgentStateStore
 from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore
 from sales_app.config import build_llm_registry, clamp_mode, load_client_configs
@@ -67,6 +69,16 @@ class Application:
     provider_registry: ProviderRegistry = field(default_factory=default_registry)
     # The database connection pool, when accounts and settings live in SQL (None: file fallback).
     account_stores: AccountStores | None = None
+    # The Client's own switch for its agent. An agent runs only if the Admin enabled it AND its
+    # client started it: no record means it was never started.
+    agent_state: AgentStateStore = field(default_factory=InMemoryAgentStateStore)
+
+    def agent_may_work(self, client_id: str) -> bool:
+        """`_may_work`, failing closed: if either switch cannot be read, the answer is no."""
+        try:
+            return _may_work(self.agent_state, self.settings.clients_dir, client_id)
+        except Exception:  # noqa: BLE001 - an unreadable switch must never mean "go"
+            return False
 
     def close(self) -> None:
         self.runtime_manager.shutdown()  # first: a refresh may be waiting for a job to end
@@ -92,6 +104,7 @@ def build_application(
     secret_store: SecretStore | None = None,
     secret_audit: SecretAudit | None = None,
     refresh_executor: Executor | None = None,
+    agent_state_store: AgentStateStore | None = None,
 ) -> Application:
     """Load, validate and wire everything, or raise a ConfigurationError listing every problem.
 
@@ -132,6 +145,11 @@ def build_application(
         client_sessions = (
             client_session_store if client_session_store is not None else defaults.client_sessions
         )
+        agent_state = (
+            agent_state_store
+            if agent_state_store is not None
+            else (defaults.agent_state if defaults is not None else InMemoryAgentStateStore())
+        )
         return _assemble(
             settings,
             environment,
@@ -149,6 +167,7 @@ def build_application(
             client_profiles,
             client_sessions,
             defaults,
+            agent_state,
         )
     except BaseException:
         if defaults is not None:
@@ -173,6 +192,7 @@ def _assemble(
     client_profiles: ClientProfileStore,
     client_sessions: AdminSessionStore,
     account_stores: AccountStores | None,
+    agent_state: AgentStateStore,
 ) -> Application:
     client_auth = ClientAuthService(
         client_profiles,
@@ -258,7 +278,12 @@ def _assemble(
         admin_auth=admin_auth,
         client_profiles=client_profiles,
         client_auth=client_auth,
-        scheduler=Scheduler(registry, clock, executor=executor),
+        scheduler=Scheduler(
+            registry,
+            clock,
+            executor=executor,
+            may_run=lambda client_id: _may_work(agent_state, settings.clients_dir, client_id),
+        ),
         parsers=parsers,
         clock=clock,
         credentials=credentials,
@@ -266,7 +291,16 @@ def _assemble(
         llm_providers=tuple(sorted(builders.llms)),
         provider_registry=default_registry(),
         account_stores=account_stores,
+        agent_state=agent_state,
     )
+
+
+def _may_work(store: AgentStateStore, clients_dir: Path, client_id: str) -> bool:
+    """Whether a client's agent may take work now: the Admin's `enabled` as it is stored (read each
+    time, so disabling a client stops its work without a restart) **and** the client's own decision
+    (started, not paused). Either alone is not enough."""
+    state = store.get(client_id)
+    return state is not None and state.running and is_client_active(clients_dir, client_id)
 
 
 def describe_modes(application: Application) -> list[dict[str, Any]]:

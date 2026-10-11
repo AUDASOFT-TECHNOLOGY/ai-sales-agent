@@ -20,6 +20,7 @@ from sales_app.api.admin_clients import create_admin_clients_router
 from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.api.client import create_client_router
+from sales_app.api.client_agent import create_client_agent_router
 from sales_app.bootstrap import Application
 from sales_app.connection_tests import HttpClientFactory, default_http_client
 from sales_app.errors import ClientNotReadyError
@@ -66,6 +67,7 @@ def create_app(
     app.include_router(create_admin_settings_router(application))
     app.include_router(create_admin_integrations_router(application, connection_http))
     app.include_router(create_client_router(application))
+    app.include_router(create_client_agent_router(application))
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -121,7 +123,10 @@ def create_app(
                     500
                 ) from None  # the provider redelivers; the Engine de-duplicates
             _report(runtime, "inbound", receipt.errors, application)
-            background.add_task(_process, runtime, receipt, application)
+            if application.agent_may_work(runtime.client_id):
+                background.add_task(_process, runtime, receipt, application)
+            # else: the message is stored; the reply waits (recover_pending_replies) until the
+            # client has started its agent again, or the Admin has enabled the client again.
             handled += 1
         return {"received": handled}
 

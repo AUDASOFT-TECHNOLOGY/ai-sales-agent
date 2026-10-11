@@ -34,6 +34,14 @@ CLIENT_ROUTES = {
     ("GET", "/client/v1/profile"),
     ("PATCH", "/client/v1/profile"),
     ("POST", "/client/v1/profile/password"),
+    # Lot A: the client's own commercial settings and its agent's switch. Checked below: no field
+    # of any of them is a provider, a model or a Brain (the Brain's document travels as `commercial`).
+    ("GET", "/client/v1/settings"),
+    ("PUT", "/client/v1/settings"),
+    ("GET", "/client/v1/readiness"),
+    ("GET", "/client/v1/agent"),
+    ("POST", "/client/v1/agent/start"),
+    ("POST", "/client/v1/agent/pause"),
 }
 
 

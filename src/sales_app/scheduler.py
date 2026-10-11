@@ -8,7 +8,7 @@ state) can at worst repeat work that the Core turns into a no-op.
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -49,9 +49,11 @@ class Scheduler:
         clock: Clock,
         *,
         executor: Executor | None = None,
+        may_run: Callable[[str], bool] | None = None,
     ) -> None:
         self._registry = registry
         self._clock = clock
+        self._may_run = may_run  # the client's own switch; None: nothing to ask
         self._executor = executor
         self._owns_executor = executor is None
 
@@ -92,6 +94,8 @@ class Scheduler:
         moment = now if now is not None else self._clock.now()
         futures: list[Future[list[JobResult]]] = []
         for runtime in self._registry.runtimes():
+            if not self._allowed(runtime.client_id):
+                continue
             jobs = self.due_jobs(runtime, moment)
             if jobs and runtime.state.try_begin():  # never overlap two jobs of one client
                 futures.append(self._pool().submit(self._run_jobs, runtime, jobs, moment))
@@ -114,6 +118,19 @@ class Scheduler:
                 await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
             except TimeoutError:
                 pass
+
+    def _allowed(self, client_id: str) -> bool:
+        """Whether the client's own switch lets its agent work. Fails closed: if the switch cannot
+        be read, nothing starts for that client this tick (a job already running is not stopped)."""
+        if self._may_run is None:
+            return True
+        try:
+            return self._may_run(client_id)
+        except Exception:  # noqa: BLE001 - an unreadable switch must never mean "go"
+            client_logger(__name__, client_id).warning(
+                "the agent switch is unreadable; not starting"
+            )
+            return False
 
     def shutdown(self) -> None:
         """Wait for running jobs to finish."""

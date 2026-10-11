@@ -10,6 +10,7 @@ operational data (the SalesRepository's).
 """
 
 from sales_app.persistence.admin_stores import SqlAdminSessionStore, SqlAdminUserStore
+from sales_app.persistence.agent_state_store import SqlAgentStateStore
 from sales_app.persistence.client_stores import SqlClientProfileStore, SqlClientSessionStore
 from sales_app.persistence.clients import seed_clients, table_counts
 from sales_app.persistence.database import create_database_engine
@@ -30,6 +31,7 @@ __all__ = [
     "SchemaNotReadyError",
     "SqlAdminSessionStore",
     "SqlAdminUserStore",
+    "SqlAgentStateStore",
     "SqlClientProfileStore",
     "SqlClientSessionStore",
     "SqlConfigStore",

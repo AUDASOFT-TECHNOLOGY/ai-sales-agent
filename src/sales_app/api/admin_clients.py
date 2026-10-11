@@ -26,8 +26,9 @@ import binascii
 import contextlib
 import re
 import shutil
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
@@ -47,8 +48,13 @@ from sales_app.config import (
     validate_settings_document,
 )
 from sales_app.config.published import published_document, published_name, published_view
-from sales_app.config_store import ConfigConflictError
-from sales_app.config_store.models import CLIENT_ID_PATTERN
+from sales_app.config.resolution import (
+    SETTINGS_SCHEMA_VERSION,
+    SETTINGS_SECTION_KEYS,
+    SETTINGS_TOP_KEYS,
+)
+from sales_app.config_store import ConfigConflictError, ConfigVersion
+from sales_app.config_store.models import CLIENT_ID_PATTERN, thaw_document
 from sales_app.llm_models import check_model
 from sales_app.secret_store import client_scope
 from sales_app.wiring import ClientRuntime
@@ -619,6 +625,15 @@ def _stored_enabled(application: Application, client_id: str) -> bool | None:
     return None if raw is None else raw.get("enabled", True) is not False
 
 
+def _pause_client_switch(application: Application, client_id: str, by: str) -> None:
+    """Stop the client's own switch (it never touches `enabled`): called whenever the Admin changes
+    a client's status, so that a client the Admin disabled and enabled again is not started by an
+    old decision. A client that never started its agent has nothing to pause."""
+    state = application.agent_state.get(client_id)
+    if state is not None and state.running:
+        application.agent_state.set(client_id, running=False, by=by, at=application.clock.now())
+
+
 def _write_enabled(application: Application, client_id: str, enabled: bool) -> None:
     """Flip only the `enabled` line, so the operator's comments and layout in client.yaml survive."""
     path = application.settings.clients_dir / client_id / "client.yaml"
@@ -694,6 +709,124 @@ def rename_client(application: Application, client_id: str, name: str, *, author
         )
     except ConfigConflictError as error:
         raise HTTPException(409, str(error)) from error
+
+
+# ---- the settings a client may edit itself -------------------------------------------------------
+
+# A stored settings document holds more than a client may touch: the model (the Admin's), the source
+# (its own route), the mode, the quota and the inbound policy (the platform's). The Client API reads and writes
+# exactly this part and nothing else; anything outside it is refused before it reaches a document.
+CLIENT_SETTINGS_TOP_KEYS = ("timezone", "opt_out_keywords")
+CLIENT_SETTINGS_SECTIONS: dict[str, tuple[str, ...]] = {
+    "schedule": ("daily_at", "days"),
+    "brain": ("settings",),
+}
+
+
+def _skeleton_document(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """The settings a `client.yaml` holds, as a document, without judging them: the starting point
+    of a client whose Brain settings are not written yet (a skeleton), which no validation of the
+    file alone could accept. The first complete settings it publishes replace it."""
+    document: dict[str, Any] = {"schema_version": SETTINGS_SCHEMA_VERSION}
+    for key in SETTINGS_TOP_KEYS:
+        if key in raw:
+            document[key] = thaw_document(raw[key])
+    for section, keys in SETTINGS_SECTION_KEYS.items():
+        found = raw.get(section)
+        if isinstance(found, Mapping):
+            kept = {k: thaw_document(found[k]) for k in keys if k in found}
+            if kept:
+                document[section] = kept
+    return document
+
+
+def client_wiring_and_document(
+    application: Application, client_id: str
+) -> tuple[dict, dict] | None:
+    """The operator wiring and the settings document a client's change is built on: what
+    `_wiring_and_base_document` gives, or, for a skeleton client whose `client.yaml` does not
+    validate yet, the settings that file holds. None only if there is no such client."""
+    found = _wiring_and_base_document(application, client_id)
+    if found is not None:
+        return found
+    raw = _unvalidated_wiring(application, client_id)
+    return None if raw is None else (raw, _skeleton_document(raw))
+
+
+def client_settings_part(document: Mapping[str, Any]) -> dict[str, Any]:
+    """What of a settings document a client may see and edit."""
+    part: dict[str, Any] = {k: document[k] for k in CLIENT_SETTINGS_TOP_KEYS if k in document}
+    for section, keys in CLIENT_SETTINGS_SECTIONS.items():
+        found = document.get(section)
+        if isinstance(found, Mapping):
+            kept = {k: found[k] for k in keys if k in found}
+            if kept:
+                part[section] = kept
+    return thaw_document(part)
+
+
+def read_client_settings(
+    application: Application, client_id: str
+) -> tuple[int | None, dict[str, Any], ConfigVersion | None]:
+    """The version in force (None: nothing published yet), the part a client may edit and the
+    version record. 404 for a client that does not exist."""
+    found = client_wiring_and_document(application, client_id)
+    if found is None:
+        raise HTTPException(404, "no such client")
+    current = application.config_store.current(client_id)
+    return (
+        current.version if current is not None else None,
+        client_settings_part(found[1]),
+        current,
+    )
+
+
+def publish_client_settings(
+    application: Application,
+    client_id: str,
+    changes: Mapping[str, Any],
+    *,
+    expected_version: int | None,
+    author: str,
+) -> ConfigVersion:
+    """Publish a client's own change on top of the settings in force, as a new version.
+
+    `changes` holds only keys a client may edit (the caller's model refuses the others); a missing
+    key keeps its value, so no other setting (the model, the source, the quota) can be lost. The
+    result is validated like every other publication, the Brain's rules included, and **nothing is
+    written** if it is not valid (422 with every problem) or if the settings moved since the client
+    loaded them (409). It does not rebuild the running agent: the caller decides when."""
+    found = client_wiring_and_document(application, client_id)
+    if found is None:
+        raise HTTPException(404, "no such client")
+    raw, base = found
+    current = application.config_store.current(client_id)
+    if (current.version if current is not None else None) != expected_version:
+        raise HTTPException(409, "the settings changed since they were loaded; reload and retry")
+    document = thaw_document(base)
+    for key in CLIENT_SETTINGS_TOP_KEYS:
+        if key in changes:
+            document[key] = changes[key]
+    for section, keys in CLIENT_SETTINGS_SECTIONS.items():
+        if section in changes:
+            merged = dict(document.get(section) or {})
+            merged.update({k: changes[section][k] for k in keys if k in changes[section]})
+            document[section] = merged
+    check = validate_settings_document(client_id, raw, document)
+    if check.errors or check.document is None:
+        raise HTTPException(422, detail=list(check.errors) or ["invalid settings"])
+    try:
+        return application.config_store.publish(
+            client_id,
+            check.document,
+            author=author,
+            note="client settings",
+            expected_parent=current.version if current is not None else None,
+        )
+    except ConfigConflictError as error:
+        raise HTTPException(
+            409, "the settings changed since they were loaded; reload and retry"
+        ) from error
 
 
 def create_admin_clients_router(application: Application) -> APIRouter:
@@ -860,7 +993,11 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             except ValueError as error:  # e.g. a concurrent request took the same login
                 raise HTTPException(409, str(error)) from error
         if body.status is not None:
-            _write_enabled(application, client_id, body.status == "active")
+            enabled = body.status == "active"
+            if _stored_enabled(application, client_id) is not enabled:
+                # Disabled then enabled again, an agent restarts only when its client says so.
+                _pause_client_switch(application, client_id, f"admin:{admin.username}")
+            _write_enabled(application, client_id, enabled)
 
         return detail_response(client_id)
 

@@ -70,6 +70,17 @@ client_profiles = Table(
     Column("updated_at", UtcDateTime),
 )
 
+# The Client's own switch for its agent (run or pause). Not the Admin's `enabled`, which stays in
+# `client.yaml`: the two are never one value.
+client_agent_state = Table(
+    "client_agent_state",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("running", Boolean, nullable=False),
+    Column("changed_at", UtcDateTime, nullable=False),
+    Column("changed_by", String(255), nullable=False),
+)
+
 client_sessions = Table(
     "client_sessions",
     metadata,

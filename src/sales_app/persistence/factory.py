@@ -14,10 +14,12 @@ from sales_app.admin_auth import (
     FileAdminSessionStore,
     FileAdminUserStore,
 )
+from sales_app.agent_state import AgentStateStore, FileAgentStateStore
 from sales_app.client_profiles import ClientProfileStore, FileClientProfileStore
 from sales_app.config_store import ConfigStore, FileConfigStore
 from sales_app.errors import ConfigurationError
 from sales_app.persistence.admin_stores import SqlAdminSessionStore, SqlAdminUserStore
+from sales_app.persistence.agent_state_store import SqlAgentStateStore
 from sales_app.persistence.client_stores import SqlClientProfileStore, SqlClientSessionStore
 from sales_app.persistence.clients import seed_clients
 from sales_app.persistence.database import create_database_engine
@@ -33,6 +35,7 @@ class AccountStores:
     client_profiles: ClientProfileStore
     client_sessions: AdminSessionStore
     config_store: ConfigStore
+    agent_state: AgentStateStore
     engine: Engine | None = None  # None: the file fallback
 
     def close(self) -> None:
@@ -55,6 +58,7 @@ def build_account_stores(settings: Settings) -> AccountStores:
             client_profiles=FileClientProfileStore(settings.profiles_dir / "profiles.json"),
             client_sessions=FileAdminSessionStore(settings.profiles_dir / "sessions"),
             config_store=FileConfigStore(settings.config_dir),
+            agent_state=FileAgentStateStore(settings.profiles_dir / "agent_state.json"),
         )
     try:
         ensure_schema_current(engine)
@@ -74,5 +78,6 @@ def build_account_stores(settings: Settings) -> AccountStores:
         client_profiles=SqlClientProfileStore(engine),
         client_sessions=SqlClientSessionStore(engine),
         config_store=SqlConfigStore(engine),
+        agent_state=SqlAgentStateStore(engine),
         engine=engine,
     )
