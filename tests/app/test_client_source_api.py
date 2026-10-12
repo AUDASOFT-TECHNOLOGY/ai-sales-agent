@@ -186,7 +186,7 @@ def test_a_client_that_never_chose_uses_the_store_provider_google_sheets(world, 
     }
     assert {o["key"]: o["runnable"] for o in body["options"]} == {
         "google_sheets": True,
-        "hubspot": False,
+        "hubspot": True,
     }
     assert body["updated_at"] is None and body["updated_by"] is None
 
@@ -220,7 +220,7 @@ def test_choosing_hubspot_publishes_a_new_version_and_keeps_everything_else(worl
     response = choose(alpha, "hubspot")
     assert response.status_code == 200, response.text
     body = response.json()
-    assert (body["version"], body["source"], body["runnable"]) == (1, "hubspot", False)
+    assert (body["version"], body["source"], body["runnable"]) == (1, "hubspot", True)
     assert body["google_sheets"] is None and body["updated_by"] == "client"
     assert body["credential"] == {
         "label": "HubSpot access token",
@@ -431,13 +431,16 @@ def test_a_switch_that_cannot_be_paused_changes_nothing(world, alpha, monkeypatc
     assert response.status_code == 503 and not history(world)
 
 
-def test_a_running_client_keeps_its_old_runtime_and_the_failure_is_reported(world, alpha):
+def test_a_running_client_that_chose_hubspot_stops_and_is_never_run_on_sheets(world, alpha):
     choose(alpha, "hubspot")
     config = world.application.registry.get_config("alpha")
-    assert config.spec.source_apart_from_store is False  # the old settings are still in force
+    assert config.spec.source_apart_from_store is True  # the new choice is in force...
+    assert config.missing_credentials  # ...and without its token the client takes no work
+    assert world.application.registry.get("alpha").suspended
+    save_token(alpha)  # this deployment's test builders cannot build a HubSpot source
     status = world.application.runtime_manager.status("alpha")
-    assert status.state != "idle" or status.errors  # the refresh was tried and said no
     assert any("cannot be run yet" in e for e in status.errors)
+    assert world.application.registry.get("alpha").suspended
 
 
 # ---- the token ----------------------------------------------------------------------------------
@@ -714,7 +717,7 @@ def test_the_token_never_reaches_the_logs(world, alpha, caplog):
     assert TOKEN not in json.dumps([asdict(e) for e in world.audit.recent()], default=str)
 
 
-# ---- readiness: HubSpot is configurable but never runnable ------------------------------------
+# ---- readiness: HubSpot runs only if the runtime could build it ------------------------------------
 
 
 def test_google_sheets_clients_stay_ready(world, alpha):
@@ -722,17 +725,16 @@ def test_google_sheets_clients_stay_ready(world, alpha):
     assert body["ready"] is True and "source_connected" in check_ids(body, True)
 
 
-def test_hubspot_never_lets_the_agent_start_even_with_a_token_and_a_good_test(world, alpha):
+def test_hubspot_does_not_start_while_the_runtime_could_not_build_it(world, alpha):
     choose(alpha, "hubspot")
     save_token(alpha)
     assert alpha.post(TEST).json()["ok"] is True
     body = alpha.get(READINESS).json()
-    assert body["ready"] is False and check_ids(body, False) == {"source_connected"}
-    (message,) = [c["message"] for c in body["checks"] if c["id"] == "source_connected"]
-    assert "HubSpot cannot run your agent yet" in message and TOKEN not in message
+    assert body["ready"] is False and check_ids(body, False) == {"platform_connections"}
+    assert TOKEN not in json.dumps(body)
     start = alpha.post(START)
     assert start.status_code == 409
-    assert [r["id"] for r in start.json()["detail"]["reasons"]] == ["source_connected"]
+    assert [r["id"] for r in start.json()["detail"]["reasons"]] == ["platform_connections"]
     agent = alpha.get(AGENT).json()
     assert agent["state"] == "not_started" and agent["active"] is False
     assert world.agent_state.get("alpha") is None
@@ -896,7 +898,7 @@ def test_replacing_the_token_cancels_the_test_made_with_the_old_one(fresh):
     assert alpha.get(SOURCE).json()["last_test"]["current"] is False
 
 
-def test_hubspot_stays_unable_to_start_even_with_a_current_successful_test(fresh):
+def test_hubspot_with_a_current_successful_test_still_needs_a_runtime_that_built(fresh):
     alpha = fresh.browser("alpha")
     choose(alpha, "hubspot")
     save_token(alpha)
@@ -907,8 +909,8 @@ def test_hubspot_stays_unable_to_start_even_with_a_current_successful_test(fresh
         "current": True,
     }
     ready, failing, message = not_ready_because(alpha)
-    assert (ready, failing) == (False, {"source_connected"})
-    assert "HubSpot cannot run your agent yet" in message  # the connector, not the test, is missing
+    assert (ready, failing) == (False, {"platform_connections"})
+    assert not message or TOKEN not in message  # what is missing is the built runtime
     assert alpha.post(START).status_code == 409 and fresh.agent_state.get("alpha") is None
 
 

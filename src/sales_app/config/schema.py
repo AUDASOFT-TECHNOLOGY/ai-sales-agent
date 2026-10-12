@@ -102,11 +102,21 @@ class SourceSection(_Section):
     It is a section of its own, apart from `sheets`, so that a source and a store can be told apart
     later. Without it, the source is the store's provider (`sheets.provider`), as it has always been;
     with it, `sheets` still describes the spreadsheet that holds Revansa's own state (the store).
-    A source other than the store's provider cannot be run yet (the runtime refuses it); which
-    providers exist is the provider registry's business, not the schema's.
+    A source other than the store's provider is run only if that provider can be (the runtime
+    refuses the others, and never replaces it by the store's); which providers exist, and what
+    their `settings` mean, is the provider registry's business, not the schema's. `settings` holds
+    the operator's choices for that provider (never a secret) and is left out of a dump when empty.
     """
 
     provider: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,31}$")]
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _leave_out_empty_settings(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        if not data.get("settings"):
+            data.pop("settings", None)
+        return data
 
 
 class LLMSection(_Section):
@@ -260,8 +270,13 @@ class ClientFile(_Section):
         return self.source.provider if self.source is not None else self.sheets.provider
 
     @property
+    def source_settings(self) -> dict[str, Any]:
+        """The operator's settings for the chosen source provider (empty if there are none)."""
+        return dict(self.source.settings) if self.source is not None else {}
+
+    @property
     def source_apart_from_store(self) -> bool:
-        """Whether a source other than the store's provider was chosen (not runnable yet)."""
+        """Whether a source other than the store's provider was chosen."""
         return self.source_provider != self.sheets.provider
 
     @field_validator("client_id")

@@ -22,12 +22,13 @@ from sales_app.errors import RuntimeBuildError
 from sales_app.secret_store import InMemorySecretStore, client_scope
 from sales_app.wiring import build_runtime, default_builders
 from sales_app.wiring.providers import (
-    EmptySettings,
+    Product,
     ProviderKind,
     Requirement,
     default_registry,
     hubspot,
 )
+from sales_app.wiring.providers.hubspot import HubSpotSourceSettings
 from sales_core.approval import ApprovalMode
 from sales_integrations.fakes import FakeClock
 
@@ -84,7 +85,7 @@ class TestTheSchema:
 
 class TestTheStoredDocument:
     def test_the_source_is_a_setting_a_document_may_own_in_the_current_schema_only(self):
-        assert SETTINGS_SECTION_KEYS["source"] == ("provider",)
+        assert SETTINGS_SECTION_KEYS["source"] == ("provider", "settings")
         v1 = {**document_with({"provider": "hubspot"}), "schema_version": 1}
         assert any(e.startswith("source:") for e in check_document(v1))
 
@@ -146,13 +147,14 @@ class TestTheHubSpotDescriptor:
         assert not self.descriptor.can_host_store
         assert [d.key for d in default_registry().list(ProviderKind.STORE)] == ["google_sheets"]
 
-    def test_it_is_declared_but_cannot_be_run(self):
-        assert self.descriptor.build is None and not self.descriptor.runnable
+    def test_it_is_runnable_as_a_prospect_source_never_as_a_repository(self):
+        assert self.descriptor.runnable and self.descriptor.product is Product.PROSPECT_SOURCE
         builders = default_builders(make_settings("."))
         assert set(builders.repositories) == {"google_sheets"}
+        assert set(builders.sources) == {"hubspot"}
 
-    def test_it_declares_no_setting_yet(self):
-        assert self.descriptor.settings_models == {ProviderKind.SOURCE: EmptySettings}
+    def test_it_declares_the_operators_status_mapping(self):
+        assert self.descriptor.settings_models == {ProviderKind.SOURCE: HubSpotSourceSettings}
 
     def test_its_one_credential_is_the_clients_own_secret_and_unique(self):
         (credential,) = self.descriptor.credentials
@@ -218,9 +220,11 @@ class TestTheRuntimeNeverRunsAnUnrunnableSource:
             build()
         assert "alpha" in str(caught.value) and "hubspot" in str(caught.value)
 
-    def test_the_token_is_not_part_of_what_the_runtime_receives(self, tmp_path):
+    def test_the_token_reaches_only_the_client_that_chose_hubspot_and_never_a_repr(self, tmp_path):
         secrets = InMemorySecretStore()
         secrets.set(client_scope("alpha"), HUBSPOT_ACCESS_TOKEN, TOKEN, by="client:alpha")
         config, _ = self.build(tmp_path, {"provider": "hubspot"}, secret_store=secrets)
-        assert config.secrets.get_optional(HUBSPOT_ACCESS_TOKEN) is None
+        assert config.secrets.get_optional(HUBSPOT_ACCESS_TOKEN) == TOKEN
         assert TOKEN not in repr(config.secrets) and TOKEN not in repr(config.missing_credentials)
+        other, _ = self.build(tmp_path, {"provider": "google_sheets"}, secret_store=secrets)
+        assert other.secrets.get_optional(HUBSPOT_ACCESS_TOKEN) is None

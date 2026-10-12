@@ -59,7 +59,7 @@ SETTINGS_SECTION_KEYS: Mapping[str, tuple[str, ...]] = {
     "llm": ("provider", "model"),
     "brain": ("settings", "settings_version"),
     "inbound": ("spontaneous_conversations", "unknown_contacts", "limits"),
-    "source": ("provider",),
+    "source": ("provider", "settings"),
 }
 _SECTIONS_BY_VERSION = {1: _SECTIONS_V1, 2: SETTINGS_SECTION_KEYS}
 
@@ -179,6 +179,8 @@ def extract_document(spec: ClientFile) -> dict[str, Any]:
         # of a client that never chose one stays exactly what it was; leaving it out means "the
         # store's provider".
         document["source"] = {"provider": spec.source_provider}
+        if spec.source_settings:
+            document["source"]["settings"] = deepcopy(spec.source_settings)
     return document
 
 

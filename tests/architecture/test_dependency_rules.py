@@ -87,7 +87,11 @@ COMMERCIAL_VOCABULARY = {
 # contracts. It may use exactly these names and no other commercial vocabulary (no decisions, no
 # messages, no priorities, no action types); nothing else in the app may use any.
 SOURCING = SRC / "sales_app" / "sourcing"
-SOURCING_VOCABULARY = {"Prospect", "ProspectStatus", "Scheduling", "SalesAction", "ActionStatus"}
+SOURCING_VOCABULARY = {
+    "Prospect", "ProspectStatus", "Scheduling", "SalesAction", "ActionStatus",
+    # The SQL operational store keeps and rebuilds the actions it persists (type, draft, priority).
+    "MessageDraft", "ActionPriority", "SalesActionType",
+}  # fmt: skip
 
 
 def _identifiers(package_dir: Path, *, exclude: Path | None = None) -> set[str]:
@@ -477,6 +481,8 @@ def test_only_the_engine_records_facts_and_only_through_the_writer_port():
         "sales_core/payments/confirmation.py",
         "sales_core/ports/facts.py",
         "sales_app/sourcing/composite.py",
+        "sales_app/persistence/operational_rows.py",
+        "sales_app/sourcing/sql_store.py",
         "sales_integrations/fakes/fake_sales_repository.py",
         "sales_integrations/google_sheets/repository.py",
     }

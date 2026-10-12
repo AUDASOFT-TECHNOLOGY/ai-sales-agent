@@ -468,7 +468,7 @@ def create_client_source_router(
                 declaration.key,
                 value,
                 actor=f"client:{client_id}",
-                apply=False,  # no running agent reads it yet: nothing to rebuild
+                apply=True,  # the agent of a client on this source reads it: rebuild it
             )
         except InvalidCredentialError as error:
             raise HTTPException(422, str(error)) from None  # words the rule, never the value

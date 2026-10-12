@@ -10,12 +10,13 @@ new runtime is installed, with no table to keep in step.
 
 import threading
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from sales_app.brain_registry import BrainRegistry
 from sales_app.config import ClientConfig, LoadedConfig
 from sales_app.config.runtime_config import channel_provider_key
-from sales_app.errors import ConfigurationError, RuntimeBuildError
+from sales_app.errors import ClientUnavailableError, ConfigurationError, RuntimeBuildError
 from sales_app.wiring import ClientRuntime, IntegrationBuilders, build_runtime
 from sales_core.ports import Clock
 
@@ -67,6 +68,19 @@ class ClientRegistry:
                     stagger=timedelta(seconds=STAGGER_SECONDS * index),
                     brains=brains,
                 )
+            except ClientUnavailableError as error:
+                # Only this client is affected: it stays known, not ready and with the reason
+                # (shown in /health/clients); the others start. Never run without its registry.
+                not_ready.append(
+                    replace(
+                        config,
+                        missing_credentials=(
+                            *config.missing_credentials,
+                            config.secrets.redact(str(error)),
+                        ),
+                    )
+                )
+                continue
             except RuntimeBuildError as error:
                 errors.append(str(error))
                 continue

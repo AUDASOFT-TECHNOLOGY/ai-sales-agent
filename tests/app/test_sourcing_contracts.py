@@ -16,6 +16,7 @@ from sourcing_fakes import (
     default_capabilities,
     spreadsheet_capabilities,
 )
+from sql_store_support import SqlStoreUnderTest
 
 from sales_app.sourcing import (
     SOURCE_ONLY_FIELDS,
@@ -524,9 +525,12 @@ class TestWriting:
 # ---- OperationalStore ----------------------------------------------------------------------------
 
 
-@pytest.fixture
-def store():
-    return FakeOperationalStore(CLIENT)
+@pytest.fixture(params=["memory", "sql"])
+def store(request, sql_engine):
+    """Every store contract test runs on the in-memory fake and on the SQL store."""
+    if request.param == "memory":
+        return FakeOperationalStore(CLIENT)
+    return SqlStoreUnderTest(sql_engine, CLIENT)
 
 
 def act(aid, key=None, **kw):
@@ -846,8 +850,17 @@ class TestStoreErrorsAndIsolation:
             store.save_states([ProspectState(client_id=CLIENT, prospect_id=ProspectId("x"))])
         assert store.list_states() == {}
 
-    def test_two_clients_never_see_each_other(self):
+    def test_two_clients_never_see_each_other(self, sql_engine):
         mine, theirs = FakeOperationalStore(CLIENT), FakeOperationalStore(OTHER)
+        self._two_clients_never_see_each_other(mine, theirs)
+
+    def test_two_clients_of_one_database_never_see_each_other(self, sql_engine):
+        self._two_clients_never_see_each_other(
+            SqlStoreUnderTest(sql_engine, CLIENT), SqlStoreUnderTest(sql_engine, OTHER)
+        )
+
+    @staticmethod
+    def _two_clients_never_see_each_other(mine, theirs):
         mine.save_actions([act("a1")])
         mine.save_states([ProspectState(client_id=CLIENT, prospect_id=ProspectId("x"))])
         mine.create_local_prospects([local()])

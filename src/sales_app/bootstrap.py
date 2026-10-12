@@ -2,7 +2,7 @@
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -19,6 +19,7 @@ from sales_app.config_store import ConfigStore
 from sales_app.errors import ConfigurationError
 from sales_app.parsers import ParserTable, build_parsers
 from sales_app.persistence import AccountStores, build_account_stores
+from sales_app.persistence.operational_rows import SqlOperationalRows
 from sales_app.registry import ClientRegistry
 from sales_app.runtime_manager import RuntimeManager
 from sales_app.scheduler import Scheduler
@@ -34,6 +35,9 @@ from sales_app.secret_store import (
 )
 from sales_app.settings import Settings
 from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
+from sales_app.sourcing.consent.files import open_file_registry
+from sales_app.sourcing.ports import OperationalStore
+from sales_app.sourcing.sql_store import SqlOperationalStore
 from sales_app.wiring import IntegrationBuilders, default_builders
 from sales_app.wiring.providers import ProviderRegistry, default_registry
 from sales_core.approval import ApprovalMode
@@ -237,7 +241,12 @@ def _assemble(
     )
     credentials = CredentialService(secrets, audit, now=clock.now)
     builders = builders or default_builders(
-        settings, verify_token=lambda: secrets.get(GLOBAL_SCOPE, WHATSAPP_VERIFY_TOKEN)
+        settings,
+        verify_token=lambda: secrets.get(GLOBAL_SCOPE, WHATSAPP_VERIFY_TOKEN),
+        operational_stores=_operational_stores(account_stores),
+        consent=lambda client_id: open_file_registry(
+            settings.secrets_dir, secrets, audit, client_id
+        ),
     )
 
     llm_registry = build_llm_registry(settings.allowed_llm_models)
@@ -305,6 +314,17 @@ def _assemble(
         agent_state=agent_state,
         source_checks=source_checks,
     )
+
+
+def _operational_stores(
+    account_stores: AccountStores | None,
+) -> Callable[[str], OperationalStore] | None:
+    """One client's operational store in the deployment's database; None if it has no database
+    (a client whose source needs the store is then refused, never run on something else)."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None
+    return lambda client_id: SqlOperationalStore(SqlOperationalRows(engine, client_id))
 
 
 def _may_work(store: AgentStateStore, clients_dir: Path, client_id: str) -> bool:

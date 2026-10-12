@@ -654,8 +654,8 @@ model, by its exact Model ID, for a few tokens and says whether it is really usa
 
 A client's prospects come from **one source at a time**: `google_sheets` or `hubspot`. The Client
 chooses it, gives what that source needs from the client, and checks the connection, all from the
-Client API. Everything here is *configuration*: HubSpot can be chosen, given its token and tested,
-but **no agent runs on it yet** (its connector is a later increment).
+Client API. HubSpot can be chosen, given its token and tested, and an agent runs on it as described
+in section I (read-only connector, composed with the SQL operational store and the consent registry).
 
 ### H.1 What lives where
 
@@ -721,9 +721,9 @@ no-store`.
 
 `GET /client/v1/readiness` gains `source_connected`. It holds only when **all** of this is true: the
 source exists in the provider registry and **is runnable**, any secret it needs from the client is
-stored, and the client's **last real test succeeded for the configuration it has now**. HubSpot never
-passes (`HubSpot cannot run your agent yet`), so `POST /client/v1/agent/start` answers 409 with that
-reason and `active` stays false, whatever its tests say.
+stored, and the client's **last real test succeeded for the configuration it has now**. HubSpot
+passes like any runnable source; whether its runtime could be built (store, consent registry,
+settings) is reported by `platform_connections`.
 
 The outcome of each test is kept per client (`client_source_check`, migration `0003`; the file
 `source_checks.json` when there is no database; one record, replaced by the next test) with a
@@ -742,10 +742,9 @@ paused or never-started agent cannot be started before that test. No automatic m
 
 ### H.5 HubSpot descriptor
 
-`wiring/providers/hubspot.py` declares a source with no `build` (not runnable), no settings yet
-(`EmptySettings`), and one credential: `hubspot.access_token`, client scope, sensitive, required,
-unique. No runtime code reads it (an architecture test holds that); it is not part of a client's
-resolved secrets.
+`wiring/providers/hubspot.py`: a source with a `build` (it makes a read-only `ProspectSource`, `product =
+PROSPECT_SOURCE`), the operator's settings (`HubSpotSourceSettings`, section I.2) and one credential:
+`hubspot.access_token`, client scope, sensitive, required, unique.
 
 ### H.6 Known limits
 
@@ -757,5 +756,60 @@ resolved secrets.
 - Sheets access is the platform's single service account; per-client OAuth is not part of this.
 - The Admin can still write `hubspot.access_token` for a client through the integrations routes and
   sees only whether it is set.
-- Not implemented here: the HubSpot connector, a source and a store of different providers running
-  together, write-back to HubSpot, and the Web UI for these routes.
+- Not implemented here: write-back to HubSpot and the Web UI for these routes.
+
+## I. Implemented: running a client on HubSpot (lot C)
+
+### I.1 What runs
+
+`build_runtime` reads the client's chosen source. The store's own provider (Google Sheets) is used
+exactly as before. Any other source is built from the table `IntegrationBuilders.sources` and composed
+by `CompositeRepository` with the client's `OperationalStore` (SQL, `sales_app/sourcing/sql_store.py`)
+and its consent registry (`sourcing/consent`, files under the secrets directory, as `sales-agent
+consent` opens them). The Core, the Engine and the Brains are unchanged.
+
+**No silent fallback.** Each of these is a `RuntimeBuildError` naming the client and the stage, and the
+Sheets path is never built instead: a source the runtime cannot build; no operational store (no
+`SALES_AGENT_DATABASE_URL`); no consent registry, or one not initialised/healthy (run `sales-agent
+consent init`); a store that fails `verify()`; missing or invalid settings; a missing token (the
+client is *not ready*, takes no work, and `missing_credentials` says so). A source that is down or
+refuses the token fails each read with a `SourceError` (`SourceAuthError`, `SourceUnavailableError`,
+`SourceRateLimitedError`...); the scheduler records it in the client's health. No network call is
+made while building, so a HubSpot outage cannot stop the application from starting.
+
+### I.2 Configuration
+
+`source.settings` (a new optional key of the `source` section, versioned with the settings
+document; the Client route still changes only `source.provider`, and keeps the settings):
+
+| Key | Meaning |
+|---|---|
+| `status_mapping` (required) | CRM status value -> `new`, `paused`, `closed` or `opted_out` (never `active`). No default: an unlisted value leaves the contact out (`problems()`). |
+| `status_property` | contact property holding the status (default `hs_lead_status`). |
+| `do_not_contact_property` | property whose value, if anything but empty/`false`/`0`/`no`, forbids contact (default `hs_email_optout`). |
+| `locale_property` | optional property giving the prospect's language. |
+
+A client on HubSpot still carries a `sheets` section (the configuration schema requires it); it is not
+used, needs no Google credentials, and its spreadsheet id is left out of the cross-client check.
+The legacy `client.yaml` path is what runs; the canonical (v3) spec does not describe a source apart
+from its store yet.
+
+### I.3 The connector
+
+`sales_integrations/hubspot` (httpx, one `_request` method) only reads: `GET /crm/v3/objects/contacts`
+(paged, all or an error), `GET .../{id}`, and the contact search (a POST that changes nothing).
+Failures are fixed sentences; the token travels only in the `Authorization` header. The adapter
+cannot import `sales_app`, so it raises its own errors; the provider module translates them into
+`sourcing/errors.py` and `sourcing/crm_source.py` (`CrmProspectSource`) applies the source contract:
+read-only (`SourceReadOnlyError` before any request), ids as `hubspot:<id>`, status through the
+operator's mapping, and do-not-contact kept (on a kept record the status is `opted_out`; on a left-out
+one the contact reaches the consent registry through `refused_contacts()`).
+
+### I.4 Known limits
+
+- Lookup by phone number compares every contact (HubSpot cannot search a number whatever its spelling):
+  correct, but one full read per inbound message from a number not already known by e-mail. Fine for
+  small accounts; an index or cache is the next step for large ones.
+- No write-back to HubSpot: the source is read-only and the write-back syncer is not wired to it.
+- Rate limits are reported (`retry_after`), not retried.
+- The PostgreSQL migration `0004` is still to be verified before production; tests run on SQLite.

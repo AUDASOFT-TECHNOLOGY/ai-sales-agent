@@ -50,20 +50,17 @@ from sales_app.sourcing.consent import (
     ConsentError,
     ConsentNotAllowedError,
     ConsentRefusedError,
-    ConsentRegistry,
-    ConsentSecrets,
     ConsentUnavailableError,
-    FileConsentLog,
     Health,
     InitResult,
     ReasonCode,
     Report,
 )
 from sales_app.sourcing.consent.events import ACTOR, evidence_problem
+from sales_app.sourcing.consent.files import CONSENT_DIRNAME, open_file_registry  # noqa: F401
 from sales_core.contracts import ContactInfo
 
 EXIT_OK, EXIT_PROBLEM, EXIT_INVALID, EXIT_RUNNING, EXIT_INTEGRITY = 0, 1, 2, 3, 4
-CONSENT_DIRNAME = "consent"
 PROTECTION_NOTE = (
     "Note: the registry reveals edits to its log by anyone without the key. It does not protect "
     "against someone able to restore the log and the credential store together."
@@ -239,8 +236,7 @@ def _admin(
     settings: Settings, store: SecretStore, client_id: str, users: "AdminUserStore | _NoAccounts"
 ) -> ConsentAdmin:
     audit = FileSecretAudit(settings.secrets_dir / AUDIT_FILENAME)
-    log = FileConsentLog(settings.secrets_dir / CONSENT_DIRNAME / f"{client_id}.jsonl")
-    registry = ConsentRegistry(client_id, log, ConsentSecrets(store, audit, client_id))
+    registry = open_file_registry(settings.secrets_dir, store, audit, client_id)
     return ConsentAdmin(registry, users, audit)  # type: ignore[arg-type]
 
 

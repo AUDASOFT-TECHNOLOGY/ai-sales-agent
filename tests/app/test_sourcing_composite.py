@@ -74,7 +74,9 @@ class SpyConsent:
 
 
 class Setup:
-    def __init__(self, *, namespace="fake_crm", initialise=True, fail_record=False, **source_kw):
+    def __init__(
+        self, *, namespace="fake_crm", initialise=True, fail_record=False, store=None, **source_kw
+    ):
         capabilities = default_capabilities(id_namespace=namespace)
         self.source = FakeProspectSource(
             CLIENT, capabilities=capabilities, status_mapping=MAPPING, **source_kw

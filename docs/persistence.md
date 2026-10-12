@@ -16,11 +16,24 @@ PostgreSQL is the production target; SQLite is accepted for tests and local deve
 | `enabled`, Brain/Sheets/WhatsApp wiring, schedule polling | `clients/<id>/client.yaml` | - |
 | API keys, Meta token, phone number id, app secret | encrypted `SecretStore` (files) | `SecretStore` |
 | Prospects, actions, messages | Google Sheets | `SalesRepository` |
+| Actions, messages, audit, facts, per-prospect state, prospects created from unknown senders — of a client whose prospects live in another system | database (`op_*`, migration 0004) | `OperationalStore` |
 
 Never in the database: any credential. A test fails if a table or column names one.
 `enabled` stays in `client.yaml`; the `clients` table does not hold a second copy of a client's name or
 status. Agents, usage, quota, billing and revenue have no table yet: they will be modelled in the
 phases that need them.
+
+## Operational store (`op_*` tables)
+
+A client whose prospects are in a CRM keeps what Revansa itself does in seven tables, each row owned by one
+client (`client_id`, a foreign key to `clients`; every query filters on it): `op_actions` (unique idempotency key
+per client), `op_messages` and `op_audit` (append-only, in order), `op_facts` (idempotent by `fact_identity`),
+`op_prospect_states` (an optimistic `revision`: a stale save is refused), `op_local_prospects` and
+`op_local_contacts` (the database itself refuses two local prospects sharing a phone number or address).
+The full record is a JSON document; other columns are only what is queried or kept unique. The SQL is in
+`persistence/operational_rows.py` (it knows no Core type); `sourcing/sql_store.py` and `store_codec.py` turn the
+Core's objects into documents and implement the `OperationalStore` port. Nothing runs on it yet: wiring it to the
+runtime is the next increment. Sheets clients are untouched.
 
 ## Relations
 

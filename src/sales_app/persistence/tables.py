@@ -1,8 +1,8 @@
 """The schema, as SQLAlchemy Core tables. The Alembic migrations are the source of truth for what
 a deployed database looks like; these definitions are what the stores query with.
 
-Only account and configuration data lives here. No credential of any kind (see
-`sales_app.secret_store`) and no operational data (that is the SalesRepository's).
+Account and configuration data, and (the `op_*` tables) a client's operational data when its
+prospects live in another system. No credential of any kind (see `sales_app.secret_store`).
 """
 
 from datetime import UTC, datetime
@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import TypeDecorator
@@ -150,4 +151,92 @@ config_versions = Table(
     Column("created_at", UtcDateTime, nullable=False),
     Column("author", String(255), nullable=False),
     Column("note", Text, nullable=False),
+)
+
+# ---- a client's operational data (see `sales_app.persistence.operational_rows`) ------------------
+#
+# What Revansa does for one client when its prospects live elsewhere: actions, messages, the audit
+# trail, facts, and its own state for each prospect. Every row carries `client_id` (a foreign key to
+# `clients`) and every query filters on it. The full record is kept as a JSON `document`; the other
+# columns are only what is queried, ordered or kept unique. No credential is ever stored here.
+
+op_actions = Table(
+    "op_actions",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("action_id", String(128), primary_key=True),
+    Column("idempotency_key", String(255), nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    UniqueConstraint("client_id", "idempotency_key", name="uq_op_actions_idempotency_key"),
+    Index("ix_op_actions_status", "client_id", "status"),
+)
+
+op_messages = Table(
+    "op_messages",
+    metadata,
+    Column("seq", Integer, primary_key=True, autoincrement=True),  # append order
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("message_id", String(128), nullable=False),
+    Column("prospect_id", String(255), nullable=False),
+    Column("conversation_id", String(255), nullable=False),
+    Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    UniqueConstraint("client_id", "message_id", name="uq_op_messages_message_id"),
+    Index("ix_op_messages_prospect", "client_id", "prospect_id"),
+)
+
+op_audit = Table(
+    "op_audit",
+    metadata,
+    Column("seq", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("occurred_at", UtcDateTime, nullable=False),
+    Column("event_type", String(128), nullable=False),
+    Column("prospect_id", String(255)),
+    Column("action_id", String(128)),
+    Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    Index("ix_op_audit_prospect", "client_id", "prospect_id"),
+)
+
+op_facts = Table(
+    "op_facts",
+    metadata,
+    Column("seq", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("fact_id", String(64), nullable=False),  # `fact_identity`: a retry is ignored
+    Column("prospect_id", String(255), nullable=False),
+    Column("recorded_at", UtcDateTime, nullable=False),
+    Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    UniqueConstraint("client_id", "fact_id", name="uq_op_facts_fact_id"),
+    Index("ix_op_facts_prospect", "client_id", "prospect_id"),
+)
+
+op_prospect_states = Table(
+    "op_prospect_states",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("prospect_id", String(255), primary_key=True),
+    Column("revision", Integer, nullable=False),
+    Column("conversation_id", String(255)),
+    Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+)
+
+op_local_prospects = Table(
+    "op_local_prospects",
+    metadata,
+    Column("seq", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("prospect_id", String(255), nullable=False),
+    Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    UniqueConstraint("client_id", "prospect_id", name="uq_op_local_prospects_prospect_id"),
+)
+
+# One row per comparable contact key of a local prospect: the database itself refuses two local
+# prospects that share a phone number or an address.
+op_local_contacts = Table(
+    "op_local_contacts",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("contact_key", String(320), primary_key=True),
+    Column("prospect_id", String(255), nullable=False),
 )

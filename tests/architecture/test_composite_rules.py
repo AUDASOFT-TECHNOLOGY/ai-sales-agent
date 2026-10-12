@@ -84,7 +84,9 @@ def test_only_the_composite_records_facts_in_the_sourcing_package():
             if isinstance(n, ast.FunctionDef)
         }
     }
-    assert writers == {"composite.py"}
+    # `sql_store.py` implements the store's side of the port (it is the one that persists facts);
+    # the composite stays the only code in the package that *calls* it, which the test above checks.
+    assert writers == {"composite.py", "sql_store.py"}
 
 
 def test_the_registry_is_reached_only_through_the_writer_door():

@@ -33,6 +33,15 @@ class ProviderKind(StrEnum):
     LLM = "llm"
 
 
+class Product(StrEnum):
+    """What a source provider's `build` makes. A `REPOSITORY` plays source and store at once (a
+    spreadsheet) and is handed to the Core as it is; a `PROSPECT_SOURCE` only knows where the people
+    are, and the runtime composes it with an operational store and the consent registry."""
+
+    REPOSITORY = "repository"
+    PROSPECT_SOURCE = "prospect_source"
+
+
 class Requirement(StrEnum):
     """When a client cannot run without a credential."""
 
@@ -130,8 +139,9 @@ class ProviderDescriptor:
       declared here (see `sales_app.model_catalog`).
     - `model_list` says where the Admin keeps the models it adds in Settings; they complete the
       declared ones, and give them their upstream ids.
-    - `build` makes the thing the runtime uses (a repository, a channel, a model client). A provider
-      with no `build` is known but cannot be run yet.
+    - `build` makes the thing the runtime uses (a repository, a prospect source, a channel, a model
+      client; `product` says which, for a source). A provider with no `build` is known but cannot be
+      run yet.
     """
 
     key: str
@@ -146,6 +156,7 @@ class ProviderDescriptor:
     unique_across_clients: tuple[UniquenessRule, ...] = ()
     can_host_store: bool = False
     build: Callable[[Any], Any] | None = None
+    product: Product = Product.REPOSITORY  # what `build` makes, for a source provider
     channel: ChannelSupport | None = None
     models: tuple[ModelDescriptor, ...] = ()  # the models it serves, by Revansa's stable key
     model_list: ModelList | None = None  # where the Admin keeps its models (Settings), if it can

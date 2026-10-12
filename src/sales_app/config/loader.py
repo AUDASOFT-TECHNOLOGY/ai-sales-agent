@@ -31,6 +31,7 @@ from sales_app.config.secrets import (
     OPENAI_ORGANIZATION,
     OPENAI_PROJECT,
     SHEETS_CREDENTIALS_FILE,
+    SOURCE_CREDENTIALS,
     WHATSAPP_ACCESS_TOKEN,
     WHATSAPP_API_VERSION,
     WHATSAPP_APP_SECRET,
@@ -293,6 +294,10 @@ def _resolve_secrets(
         return (env.get(variable, "").strip() or None) if variable else None
 
     whatsapp = spec.whatsapp
+    # A client whose prospects live elsewhere does not use the spreadsheet, so it needs no Google
+    # access; it needs the credential its own source declares, from the credential store only.
+    sheets_used = not spec.source_apart_from_store
+    source_credential = SOURCE_CREDENTIALS.get(spec.source_provider) if not sheets_used else None
     wanted = [
         (OPENAI_API_KEY, "OpenAI API key", GLOBAL_SCOPE, spec.llm.api_key_env, True),
         (
@@ -300,7 +305,12 @@ def _resolve_secrets(
             "Google Sheets credentials file",
             None,
             spec.sheets.credentials_env,
-            True,
+            sheets_used,
+        ),
+        *(
+            [(source_credential[0], source_credential[1], client, None, True)]
+            if source_credential is not None
+            else []
         ),
         (WHATSAPP_ACCESS_TOKEN, "WhatsApp access token", client, whatsapp.token_env, live),
         (
@@ -345,7 +355,10 @@ def _cross_client_errors(clients: list[ClientConfig]) -> list[str]:
     """Two clients sharing an account is almost always a copy-paste mistake."""
     checks: list[tuple[str, Callable[[ClientConfig], str | None]]] = [
         ("WhatsApp phone_number_id", lambda c: c.phone_number_id),
-        ("spreadsheet_id", lambda c: c.spec.sheets.spreadsheet_id),
+        (  # a client whose prospects live elsewhere does not use its spreadsheet
+            "spreadsheet_id",
+            lambda c: None if c.spec.source_apart_from_store else c.spec.sheets.spreadsheet_id,
+        ),
         ("whatsapp.token_env", lambda c: c.spec.whatsapp.token_env),
         ("whatsapp.phone_number_id_env", lambda c: c.spec.whatsapp.phone_number_id_env),
     ]

@@ -15,13 +15,14 @@ from sales_app.config.runtime_config import (
     channel_provider_key,
 )
 from sales_app.config.schema import BrainSection
-from sales_app.errors import ClientNotReadyError, RuntimeBuildError
+from sales_app.errors import ClientNotReadyError, ClientUnavailableError, RuntimeBuildError
+from sales_app.sourcing.composite import CompositeRepository
 from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import ClientContext
 from sales_core.engine import Engine, EngineConfig, InboundPolicy, UnknownSenderPolicy
-from sales_core.ports import Brain, Clock, FactsReader, FactsWriter, LLMProvider
+from sales_core.ports import Brain, Clock, FactsReader, FactsWriter, LLMProvider, SalesRepository
 from sales_integrations.system import DisabledChannel
 
 log = logging.getLogger(__name__)
@@ -230,6 +231,64 @@ def _build_brain(section: BrainSection, llm: LLMProvider, brains: BrainRegistry 
     return load_brain(section.factory, llm, section.settings)
 
 
+def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> SalesRepository:
+    """What the Core reads and writes for this client, from the source it chose.
+
+    The store's own provider as the source (a spreadsheet that holds everything) is used as it
+    always was. Any other source is composed with the client's operational store and consent
+    registry. There is no third way: a source that cannot be run, a deployment without a store or a
+    registry, a registry that is not ready, a store that cannot be used: each is an explicit error,
+    and the client never silently keeps running on the store's own provider instead.
+    """
+    spec, client_id = config.spec, config.client_id
+    if not spec.source_apart_from_store:
+        return _stage(
+            client_id,
+            "repository",
+            lambda: _choose(client_id, builders.repositories, spec.sheets.provider, "sheets")(
+                config
+            ),
+        )
+
+    provider = spec.source_provider
+    build_source = builders.sources.get(provider)
+    if build_source is None:
+        raise RuntimeBuildError(
+            f"{client_id}: source: {provider!r} apart from the store "
+            f"({spec.sheets.provider!r}) cannot be run yet"
+        )
+    open_store, open_consent = builders.operational_stores, builders.consent
+    if open_store is None:
+        raise RuntimeBuildError(
+            f"{client_id}: operational store: source {provider!r} needs one, and this deployment "
+            "has none (set SALES_AGENT_DATABASE_URL)"
+        )
+    if open_consent is None:
+        raise ClientUnavailableError(
+            f"{client_id}: consent registry: source {provider!r} needs one, and this deployment "
+            "has none"
+        )
+
+    source = _stage(client_id, "source", lambda: build_source(config))
+    store = _stage(client_id, "operational store", lambda: open_store(client_id))
+    checked = _stage(client_id, "operational store", store.verify)
+    problems = [p for p in checked if not p.startswith("warning:")]
+    if problems:
+        raise RuntimeBuildError(f"{client_id}: operational store: {'; '.join(problems)}")
+    try:
+        consent = open_consent(client_id)
+        snapshot = consent.snapshot()
+    except Exception as error:
+        raise ClientUnavailableError(
+            f"{client_id}: consent registry: {error.__class__.__name__}"
+        ) from error
+    if not snapshot.healthy:  # it would block everyone: say so rather than run on nothing
+        raise ClientUnavailableError(
+            f"{client_id}: consent registry: not ready ({snapshot.reason or snapshot.health.value})"
+        )
+    return _stage(client_id, "repository", lambda: CompositeRepository(source, store, consent))
+
+
 def build_runtime(
     config: ClientConfig,
     builders: IntegrationBuilders,
@@ -241,19 +300,7 @@ def build_runtime(
     """Assemble one client's Engine. Everything here comes from that client's own config."""
     spec, client_id = config.spec, config.client_id
 
-    if spec.source_apart_from_store:
-        # A source apart from the store is configurable (the Client chooses it) but not run yet: a
-        # client must never silently keep running on the store's own provider instead.
-        raise RuntimeBuildError(
-            f"{client_id}: source: {spec.source_provider!r} apart from the store "
-            f"({spec.sheets.provider!r}) cannot be run yet"
-        )
-
-    repository = _stage(
-        client_id,
-        "repository",
-        lambda: _choose(client_id, builders.repositories, spec.sheets.provider, "sheets")(config),
-    )
+    repository = _build_repository(config, builders)
     llm = _stage(
         client_id,
         "llm",

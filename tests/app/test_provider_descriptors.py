@@ -427,11 +427,14 @@ class TestTheBuildersTheRuntimeUsesAreUnchanged:
     def builders(self, tmp_path=".") -> IntegrationBuilders:
         return default_builders(make_settings(tmp_path))
 
-    def test_the_integration_table_keeps_its_three_fields(self):
+    def test_the_integration_table_keeps_its_fields_and_adds_the_composed_source(self):
         assert [f.name for f in dataclasses.fields(IntegrationBuilders)] == [
             "repositories",
             "llms",
             "channels",
+            "sources",
+            "operational_stores",
+            "consent",
         ]
 
     def test_the_channel_provider_keeps_its_five_fields(self):

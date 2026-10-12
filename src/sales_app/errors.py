@@ -15,6 +15,12 @@ class RuntimeBuildError(Exception):
     """A client's runtime could not be assembled (bad Brain, unknown provider, adapter failure)."""
 
 
+class ClientUnavailableError(RuntimeBuildError):
+    """One client's runtime cannot be built because something only it depends on is unusable (its
+    consent registry). It concerns that client alone: at startup the others still start, and this
+    one is kept as not ready, with the reason, and takes no work."""
+
+
 class ClientNotReadyError(Exception):
     """The client is missing credentials: it takes no new work until they are set."""
 

@@ -103,9 +103,11 @@ def test_nothing_that_runs_an_agent_reads_the_hubspot_token():
     assert not readers, f"a later increment's business, not this one's: {sorted(readers)}"
 
 
-def test_the_core_and_the_adapters_know_no_crm():
+def test_the_core_and_the_adapters_other_than_hubspots_know_no_crm():
     for package in ("sales_core", "sales_integrations"):
         for path in (SRC / package).rglob("*.py"):
+            if "hubspot" in path.relative_to(SRC).parts:
+                continue
             assert not any("hubspot" in n.lower() for n in identifiers(path)), path.name
             assert not any("hubspot" in s.lower() for s in string_constants(path)), path.name
 
