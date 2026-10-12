@@ -33,6 +33,7 @@ from sales_app.secret_store import (
     build_secret_store,
 )
 from sales_app.settings import Settings
+from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
 from sales_app.wiring import IntegrationBuilders, default_builders
 from sales_app.wiring.providers import ProviderRegistry, default_registry
 from sales_core.approval import ApprovalMode
@@ -72,6 +73,8 @@ class Application:
     # The Client's own switch for its agent. An agent runs only if the Admin enabled it AND its
     # client started it: no record means it was never started.
     agent_state: AgentStateStore = field(default_factory=InMemoryAgentStateStore)
+    # The last real test of each client's prospect source, and what it was made for.
+    source_checks: SourceCheckStore = field(default_factory=InMemorySourceCheckStore)
 
     def agent_may_work(self, client_id: str) -> bool:
         """`_may_work`, failing closed: if either switch cannot be read, the answer is no."""
@@ -105,6 +108,7 @@ def build_application(
     secret_audit: SecretAudit | None = None,
     refresh_executor: Executor | None = None,
     agent_state_store: AgentStateStore | None = None,
+    source_check_store: SourceCheckStore | None = None,
 ) -> Application:
     """Load, validate and wire everything, or raise a ConfigurationError listing every problem.
 
@@ -150,6 +154,11 @@ def build_application(
             if agent_state_store is not None
             else (defaults.agent_state if defaults is not None else InMemoryAgentStateStore())
         )
+        source_checks = (
+            source_check_store
+            if source_check_store is not None
+            else (defaults.source_checks if defaults is not None else InMemorySourceCheckStore())
+        )
         return _assemble(
             settings,
             environment,
@@ -168,6 +177,7 @@ def build_application(
             client_sessions,
             defaults,
             agent_state,
+            source_checks,
         )
     except BaseException:
         if defaults is not None:
@@ -193,6 +203,7 @@ def _assemble(
     client_sessions: AdminSessionStore,
     account_stores: AccountStores | None,
     agent_state: AgentStateStore,
+    source_checks: SourceCheckStore,
 ) -> Application:
     client_auth = ClientAuthService(
         client_profiles,
@@ -292,6 +303,7 @@ def _assemble(
         provider_registry=default_registry(),
         account_stores=account_stores,
         agent_state=agent_state,
+        source_checks=source_checks,
     )
 
 

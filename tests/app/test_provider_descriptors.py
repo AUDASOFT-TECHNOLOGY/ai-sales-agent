@@ -61,11 +61,17 @@ CATALOG_BY_KEY = {spec.key: spec for spec in CATALOG}
 MODEL_LIST_KEYS = {"openai.model_sol", "openai.model_lune", "openai.models"}
 
 
-class TestTheRegistryHoldsTheFourProviders:
-    def test_the_four_descriptors(self):
-        assert [d.key for d in REGISTRY] == ["google_sheets", "meta", "openai", "whatsapp"]
-        assert len(REGISTRY) == 4
-        for key in ("google_sheets", "whatsapp", "openai", "meta"):
+class TestTheRegistryHoldsTheFiveProviders:
+    def test_the_five_descriptors(self):
+        assert [d.key for d in REGISTRY] == [
+            "google_sheets",
+            "hubspot",
+            "meta",
+            "openai",
+            "whatsapp",
+        ]
+        assert len(REGISTRY) == 5
+        for key in ("google_sheets", "hubspot", "whatsapp", "openai", "meta"):
             assert key in REGISTRY and REGISTRY.require(key).key == key
 
     def test_keys_are_unique(self):
@@ -78,7 +84,7 @@ class TestTheRegistryHoldsTheFourProviders:
         assert "only_here" in first and "only_here" not in second
 
     def test_providers_by_the_role_they_play(self):
-        assert [d.key for d in REGISTRY.list(SOURCE)] == ["google_sheets"]
+        assert [d.key for d in REGISTRY.list(SOURCE)] == ["google_sheets", "hubspot"]
         assert [d.key for d in REGISTRY.list(STORE)] == ["google_sheets"]
         assert [d.key for d in REGISTRY.list(CHANNEL)] == ["whatsapp"]
         assert [d.key for d in REGISTRY.list(LLM)] == ["meta", "openai"]

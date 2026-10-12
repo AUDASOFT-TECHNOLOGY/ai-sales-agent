@@ -340,8 +340,11 @@ class TestCatalog:
             "openai.models",
         }
 
-    def test_phone_number_id_is_unique_per_client(self):
-        assert {s.key for s in CATALOG if s.unique} == {"whatsapp.phone_number_id"}
+    def test_phone_number_id_and_hubspot_token_are_unique_per_client(self):
+        assert {s.key for s in CATALOG if s.unique} == {
+            "whatsapp.phone_number_id",
+            "hubspot.access_token",
+        }
 
     def test_no_provider_that_does_not_exist_is_listed(self):
         keys = {s.key for s in CATALOG}
@@ -366,6 +369,7 @@ class TestService:
         assert {s.key for s in svc.describe(client_scope("a"))} == {
             "whatsapp.access_token",
             "whatsapp.phone_number_id",
+            "hubspot.access_token",
         }
         assert not any(s.configured for s in svc.describe(GLOBAL_SCOPE))
 

@@ -59,6 +59,7 @@ SETTINGS_SECTION_KEYS: Mapping[str, tuple[str, ...]] = {
     "llm": ("provider", "model"),
     "brain": ("settings", "settings_version"),
     "inbound": ("spontaneous_conversations", "unknown_contacts", "limits"),
+    "source": ("provider",),
 }
 _SECTIONS_BY_VERSION = {1: _SECTIONS_V1, 2: SETTINGS_SECTION_KEYS}
 
@@ -150,7 +151,7 @@ def upgrade_document(document: Mapping[str, Any]) -> dict[str, Any]:
 
 def extract_document(spec: ClientFile) -> dict[str, Any]:
     """The settings-owned part of a validated spec, in the current schema, every value explicit."""
-    return {
+    document: dict[str, Any] = {
         "schema_version": SETTINGS_SCHEMA_VERSION,
         "display_name": spec.display_name,
         "timezone": spec.timezone,
@@ -173,6 +174,12 @@ def extract_document(spec: ClientFile) -> dict[str, Any]:
             "settings": deepcopy(dict(spec.brain.settings)),
         },
     }
+    if spec.source_apart_from_store:
+        # Written only when a source other than the store's provider is chosen, so every document
+        # of a client that never chose one stays exactly what it was; leaving it out means "the
+        # store's provider".
+        document["source"] = {"provider": spec.source_provider}
+    return document
 
 
 def check_document(document: object) -> list[str]:

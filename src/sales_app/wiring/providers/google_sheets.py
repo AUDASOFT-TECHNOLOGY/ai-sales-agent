@@ -5,6 +5,8 @@ spreadsheet is both, as it is today). This module is its only declaration: how t
 settings it accepts, the credential it needs and what two clients must never share.
 """
 
+import json
+from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -80,6 +82,34 @@ class SheetsStoreSettings(BaseModel):
     @classmethod
     def _store_columns(cls, value: dict[str, str]) -> dict[str, str]:
         return _check_mapping(value, STORE_TABS)
+
+
+def spreadsheet_id_of(text: str) -> str:
+    """The id inside a spreadsheet URL, or the bare id itself. ValueError, without echoing `text`,
+    when it is neither."""
+    try:
+        return extract_spreadsheet_id(text)
+    except ValueError:
+        raise ValueError("is neither a Google Sheets URL nor a spreadsheet id") from None
+
+
+def service_account_email(credentials_file: str | None) -> str | None:
+    """The address a client must share its spreadsheet with: the `client_email` of the platform's
+    service-account file. It is an identifier, not a secret; None when the file cannot be read."""
+    if not credentials_file:
+        return None
+    try:
+        email = json.loads(Path(credentials_file).read_text(encoding="utf-8")).get("client_email")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return email if isinstance(email, str) and "@" in email else None
+
+
+def open_probe(credentials_file: str, *, timeout_seconds: float) -> GoogleSheetsApi:
+    """The Sheets API for a connection check: one try, a bounded wait."""
+    return GoogleSheetsApi.from_service_account_file(
+        credentials_file, timeout_seconds=timeout_seconds, max_attempts=1
+    )
 
 
 def build_repository(config: ClientConfig) -> GoogleSheetsRepository:

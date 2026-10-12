@@ -253,7 +253,11 @@ class TestBodyHandling:
 class TestClientCredentials:
     def test_status_lists_the_client_keys(self, fx):
         body = fx.login("root").get("/admin/v1/clients/alpha/integrations").json()
-        assert {c["key"] for c in body} == {"whatsapp.access_token", "whatsapp.phone_number_id"}
+        assert {c["key"] for c in body} == {
+            "whatsapp.access_token",
+            "whatsapp.phone_number_id",
+            "hubspot.access_token",
+        }
         assert all(c["scope"] == "client" for c in body)
 
     def test_save_token_and_phone_number_id(self, fx):

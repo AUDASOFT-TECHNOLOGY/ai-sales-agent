@@ -68,14 +68,32 @@ class GoogleSheetsApi:
         self._max_attempts = max_attempts
 
     @classmethod
-    def from_service_account_file(cls, path: str) -> "GoogleSheetsApi":
+    def from_service_account_file(
+        cls,
+        path: str,
+        *,
+        timeout_seconds: float | None = None,
+        max_attempts: int = MAX_ATTEMPTS,
+    ) -> "GoogleSheetsApi":
+        """`timeout_seconds` bounds every request (without it, the library's own 60 seconds apply),
+        and `max_attempts` the tries of a transient failure: a caller that waits for the answer,
+        such as a connection check, asks for a short timeout and one try."""
         from google.oauth2 import service_account
 
         credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
             path, scopes=list(SCOPES)
         )
-        service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
-        return cls(service)
+        if timeout_seconds is None:
+            service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+        else:
+            import google_auth_httplib2
+            import httplib2
+
+            http = google_auth_httplib2.AuthorizedHttp(  # type: ignore[no-untyped-call]
+                credentials, http=httplib2.Http(timeout=timeout_seconds)
+            )
+            service = build("sheets", "v4", http=http, cache_discovery=False)
+        return cls(service, max_attempts=max_attempts)
 
     # ---- SheetsApi ------------------------------------------------------------------------
 

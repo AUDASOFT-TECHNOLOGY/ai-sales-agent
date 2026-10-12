@@ -21,6 +21,11 @@ from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
+from sales_app.api.client_source import (
+    SheetsProbeFactory,
+    create_client_source_router,
+    default_sheets_probe,
+)
 from sales_app.bootstrap import Application
 from sales_app.connection_tests import HttpClientFactory, default_http_client
 from sales_app.errors import ClientNotReadyError
@@ -38,6 +43,7 @@ def create_app(
     *,
     run_scheduler: bool = True,
     connection_http: HttpClientFactory = default_http_client,
+    sheets_probe: SheetsProbeFactory = default_sheets_probe,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -68,6 +74,7 @@ def create_app(
     app.include_router(create_admin_integrations_router(application, connection_http))
     app.include_router(create_client_router(application))
     app.include_router(create_client_agent_router(application))
+    app.include_router(create_client_source_router(application, connection_http, sheets_probe))
 
     @app.get("/health")
     def health() -> dict[str, str]:

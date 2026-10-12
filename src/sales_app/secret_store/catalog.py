@@ -54,6 +54,9 @@ class CredentialSpec:
 
 _OPENAI_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_HUBSPOT_TOKEN = re.compile(
+    r"^pat-[a-z]{2,4}\d{1,2}-[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$"
+)
 
 CATALOG: tuple[CredentialSpec, ...] = (
     # ---- Revansa (global) ---------------------------------------------------------------
@@ -123,6 +126,14 @@ CATALOG: tuple[CredentialSpec, ...] = (
         unique=True,
         pattern=re.compile(r"^\d{5,32}$"),
         rule="must be the numeric id Meta gives the phone number (digits only)",
+    ),
+    CredentialSpec(
+        "hubspot.access_token",
+        ScopeKind.CLIENT,
+        "HubSpot access token",
+        unique=True,
+        pattern=_HUBSPOT_TOKEN,
+        rule="must be a HubSpot Private App access token (it looks like pat-eu1-...)",
     ),
 )
 _BY_KEY = {spec.key: spec for spec in CATALOG}

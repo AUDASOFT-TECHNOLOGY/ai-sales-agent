@@ -42,6 +42,12 @@ CLIENT_ROUTES = {
     ("GET", "/client/v1/agent"),
     ("POST", "/client/v1/agent/start"),
     ("POST", "/client/v1/agent/pause"),
+    # Lot B: the prospect source (a CRM or a spreadsheet, never a model; the API field is `source`).
+    ("GET", "/client/v1/source"),
+    ("PUT", "/client/v1/source"),
+    ("PUT", "/client/v1/source/credentials"),
+    ("DELETE", "/client/v1/source/credentials"),
+    ("POST", "/client/v1/source/test"),
 }
 
 

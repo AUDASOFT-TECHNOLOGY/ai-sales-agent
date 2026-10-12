@@ -8,18 +8,25 @@ code the remote service returned.
 different: it asks one model for a few tokens, which is a real, billed request. Nothing here calls
 it by itself; the Admin API asks for an explicit confirmation first.
 
+`check_hubspot` reads at most one contact id with the client's own token, and `check_google_sheets`
+reads the spreadsheet's tab list with the platform's service account: both are read-only, bounded
+in time, and never return what they read.
+
 Not every credential can be checked on its own. The WhatsApp app secret and verify token only prove
 themselves when Meta calls Revansa's webhook, so no check exists for them and none is pretended.
 """
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any, Protocol
 
 import httpx
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_GRAPH_URL = "https://graph.facebook.com"
+DEFAULT_HUBSPOT_URL = "https://api.hubapi.com"
 DEFAULT_TIMEOUT_SECONDS = 15.0
 # A real request is allowed to take longer than a list: a model may be slow to start.
 INFERENCE_TIMEOUT_SECONDS = 30.0
@@ -282,3 +289,130 @@ def check_whatsapp_client(
     return ConnectionResult(
         True, "Meta accepted the access token for this phone number id.", details
     )
+
+
+class SheetsProbe(Protocol):
+    """The one thing a Sheets check needs of a spreadsheet service: its metadata (tab titles)."""
+
+    def metadata(self, spreadsheet_id: str) -> Any: ...
+
+
+_SHEETS_REFUSALS = {
+    400: "Google did not accept this spreadsheet id.",
+    401: "Google refused the platform's access: contact your administrator.",
+    403: (
+        "The spreadsheet is not shared with the platform's address, or the Google Sheets API "
+        "is disabled for the platform."
+    ),
+    404: "Spreadsheet not found: check the link or the id.",
+    429: "Google Sheets' rate limit is reached: try again in a moment.",
+}
+
+
+def check_google_sheets(
+    *, api: SheetsProbe | None, spreadsheet_id: str | None, prospects_tab: str | None
+) -> ConnectionResult:
+    """Reads the spreadsheet's tab list with the platform's service account and checks that the
+    prospects tab is there. Nothing is written and no cell is read. A failure never carries what
+    Google or the library said, only a fixed sentence (and the HTTP status when there is one)."""
+    if api is None:
+        return ConnectionResult(
+            False,
+            "The platform's Google Sheets access is not configured: contact your administrator.",
+        )
+    if not spreadsheet_id:
+        return ConnectionResult(False, "No spreadsheet is configured.")
+    try:
+        meta = api.metadata(spreadsheet_id)
+    except Exception as error:  # noqa: BLE001 - whatever failed, the answer is a fixed sentence
+        return _sheets_failure(error)
+    titles = getattr(meta, "titles", None)
+    if not isinstance(titles, (tuple, list)):
+        return ConnectionResult(False, "Google Sheets answered, but not with a list of tabs.")
+    if prospects_tab and prospects_tab not in titles:
+        return ConnectionResult(
+            False,
+            "The spreadsheet is reachable, but the prospects tab was not found in it.",
+            {"missing_tab": prospects_tab[:128]},
+        )
+    return ConnectionResult(
+        True, "Google Sheets gave the platform access to this spreadsheet and its prospects tab."
+    )
+
+
+def _sheets_failure(error: Exception) -> ConnectionResult:
+    status = getattr(error, "status", None)
+    if isinstance(status, int) and not isinstance(status, bool):
+        if status in _SHEETS_REFUSALS:
+            return ConnectionResult(False, _SHEETS_REFUSALS[status], {"status": str(status)})
+        if status >= 500:
+            return ConnectionResult(
+                False, "Google Sheets answered with an error.", {"status": str(status)}
+            )
+        return ConnectionResult(False, f"Google Sheets answered {status}.", {"status": str(status)})
+    if isinstance(error, TimeoutError):
+        return ConnectionResult(False, "Google Sheets did not answer in time.")
+    return ConnectionResult(False, f"Could not reach Google Sheets ({type(error).__name__}).")
+
+
+_HUBSPOT_CATEGORY = re.compile(r"^[A-Z][A-Z_]{0,63}$")
+
+
+def check_hubspot(
+    *,
+    access_token: str | None,
+    http: HttpClientFactory = default_http_client,
+    base_url: str = DEFAULT_HUBSPOT_URL,
+) -> ConnectionResult:
+    """Asks HubSpot for one contact id with the client's Private App token. It only succeeds when
+    the token is valid AND may read contacts, which the connector will need. The contact itself
+    is neither returned nor kept."""
+    if not access_token:
+        return ConnectionResult(False, "The HubSpot access token is not configured.")
+    url = f"{base_url.rstrip('/')}/crm/v3/objects/contacts"
+    try:
+        with http() as client:
+            response = client.get(
+                url,
+                params={"limit": 1, "properties": "hs_object_id"},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+    except httpx.TimeoutException:
+        return ConnectionResult(False, "HubSpot did not answer in time.")
+    except httpx.HTTPError as error:
+        return ConnectionResult(False, f"Could not reach HubSpot ({type(error).__name__}).")
+    status = response.status_code
+    details = {"status": str(status)}
+    if not response.is_success:
+        category = _hubspot_category(response)
+        if category:
+            details["code"] = category
+        if status == 401:
+            message = "HubSpot refused this access token."
+        elif status == 403:
+            message = (
+                "HubSpot accepted the token but it may not read contacts: give the Private App "
+                "the contacts read permission."
+            )
+        elif status == 429:
+            message = "HubSpot's rate limit is reached: try again in a moment."
+        elif status >= 500:
+            message = "HubSpot answered with an error."
+        else:
+            message = f"HubSpot answered {status}."
+        return ConnectionResult(False, message, details)
+    try:
+        usable = isinstance(response.json()["results"], list)
+    except Exception:  # noqa: BLE001 - not the shape the HubSpot API documents
+        usable = False
+    if not usable:
+        return ConnectionResult(False, "HubSpot answered, but not with a contact list.", details)
+    return ConnectionResult(True, "HubSpot accepted the access token and may read contacts.")
+
+
+def _hubspot_category(response: httpx.Response) -> str | None:
+    try:
+        category = response.json().get("category")
+    except Exception:  # noqa: BLE001 - an unreadable body just means no code
+        return None
+    return category if isinstance(category, str) and _HUBSPOT_CATEGORY.match(category) else None

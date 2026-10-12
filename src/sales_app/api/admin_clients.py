@@ -789,10 +789,15 @@ def publish_client_settings(
     *,
     expected_version: int | None,
     author: str,
+    note: str = "client settings",
+    top_keys: tuple[str, ...] = CLIENT_SETTINGS_TOP_KEYS,
+    sections: Mapping[str, tuple[str, ...]] = CLIENT_SETTINGS_SECTIONS,
 ) -> ConfigVersion:
     """Publish a client's own change on top of the settings in force, as a new version.
 
-    `changes` holds only keys a client may edit (the caller's model refuses the others); a missing
+    `top_keys` and `sections` are what this caller may change (by default the business settings);
+    another Client route, such as the source's, gives its own. `changes` holds only those keys (the
+    caller's model refuses the others); a missing
     key keeps its value, so no other setting (the model, the source, the quota) can be lost. The
     result is validated like every other publication, the Brain's rules included, and **nothing is
     written** if it is not valid (422 with every problem) or if the settings moved since the client
@@ -805,10 +810,10 @@ def publish_client_settings(
     if (current.version if current is not None else None) != expected_version:
         raise HTTPException(409, "the settings changed since they were loaded; reload and retry")
     document = thaw_document(base)
-    for key in CLIENT_SETTINGS_TOP_KEYS:
+    for key in top_keys:
         if key in changes:
             document[key] = changes[key]
-    for section, keys in CLIENT_SETTINGS_SECTIONS.items():
+    for section, keys in sections.items():
         if section in changes:
             merged = dict(document.get(section) or {})
             merged.update({k: changes[section][k] for k in keys if k in changes[section]})
@@ -821,7 +826,7 @@ def publish_client_settings(
             client_id,
             check.document,
             author=author,
-            note="client settings",
+            note=note,
             expected_parent=current.version if current is not None else None,
         )
     except ConfigConflictError as error:

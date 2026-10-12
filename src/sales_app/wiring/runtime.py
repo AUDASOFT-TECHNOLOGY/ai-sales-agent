@@ -241,6 +241,14 @@ def build_runtime(
     """Assemble one client's Engine. Everything here comes from that client's own config."""
     spec, client_id = config.spec, config.client_id
 
+    if spec.source_apart_from_store:
+        # A source apart from the store is configurable (the Client chooses it) but not run yet: a
+        # client must never silently keep running on the store's own provider instead.
+        raise RuntimeBuildError(
+            f"{client_id}: source: {spec.source_provider!r} apart from the store "
+            f"({spec.sheets.provider!r}) cannot be run yet"
+        )
+
     repository = _stage(
         client_id,
         "repository",

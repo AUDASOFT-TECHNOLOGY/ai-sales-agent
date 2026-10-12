@@ -68,6 +68,7 @@ EXPECTED = {
     "openai.organization": ("openai", ScopeKind.GLOBAL, False, Requirement.OPTIONAL, False),
     "openai.project": ("openai", ScopeKind.GLOBAL, False, Requirement.OPTIONAL, False),
     "openai.base_url": ("openai", ScopeKind.GLOBAL, False, Requirement.OPTIONAL, False),
+    "hubspot.access_token": ("hubspot", ScopeKind.CLIENT, True, Requirement.ALWAYS, True),
     "meta.api_key": ("meta", ScopeKind.GLOBAL, True, Requirement.ALWAYS, False),
     "meta.base_url": ("meta", ScopeKind.GLOBAL, False, Requirement.ALWAYS, False),
 }
@@ -84,6 +85,16 @@ VALUES = {
     "openai.base_url": (
         "https://api.openai.com/v1",
         ["http://api.openai.com/v1", "https://user:pw@host.com", "ftp://x", "https://a b.com"],
+    ),
+    "hubspot.access_token": (
+        "pat-eu1-12345678-1234-1234-1234-123456789abc",
+        [
+            "",
+            "pat-eu1-short",
+            "EAAB-token",
+            "pat-EU1-12345678-1234-1234-1234-123456789abc",
+            "x" * 40,
+        ],
     ),
     "meta.api_key": ("meta-key", [""]),
     "meta.base_url": (
@@ -146,9 +157,9 @@ class TestTheDeclarationsAreComplete:
             "meta.base_url",
         }
 
-    def test_only_the_whatsapp_phone_number_id_is_unique_among_stored_credentials(self):
+    def test_only_an_account_identifier_or_token_is_unique_among_stored_credentials(self):
         unique = {c.key for d in REGISTRY for c in d.credentials if c.unique}
-        assert unique == {"whatsapp.phone_number_id"}
+        assert unique == {"whatsapp.phone_number_id", "hubspot.access_token"}
 
     def test_the_environment_only_credential_cannot_be_stored_or_unique(self):
         _, credential = declaration("sheets.credentials_file")
@@ -572,6 +583,7 @@ class TestWhatClientsMustNotShare:
         assert rules == {
             ("google_sheets", "setting", "spreadsheet_id", "spreadsheet_id"),
             ("whatsapp", "credential", "whatsapp.phone_number_id", "WhatsApp phone_number_id"),
+            ("hubspot", "credential", "hubspot.access_token", "HubSpot token"),
         }
 
     def test_a_credential_rule_names_a_unique_declared_credential(self):

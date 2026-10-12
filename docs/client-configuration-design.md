@@ -649,3 +649,113 @@ model, by its exact Model ID, for a few tokens and says whether it is really usa
   descriptors when a second provider gets a model list.
 - **Not implemented:** assignment by plan and assignment by catalog key. The Web Admin does not show
   the `warning` and `impacted_clients` returned when a model is switched off.
+
+## H. Implemented: the prospect source a Client chooses
+
+A client's prospects come from **one source at a time**: `google_sheets` or `hubspot`. The Client
+chooses it, gives what that source needs from the client, and checks the connection, all from the
+Client API. Everything here is *configuration*: HubSpot can be chosen, given its token and tested,
+but **no agent runs on it yet** (its connector is a later increment).
+
+### H.1 What lives where
+
+| Value | Owner | Where | Seen by the Client |
+|---|---|---|---|
+| Which source (`source.provider`) | Client | the versioned settings document, written only when it differs from the store's provider | yes |
+| Spreadsheet (id, from a pasted link or id) and prospects tab | Client | the settings document (`sheets.spreadsheet_id`, `sheets.prospects_tab`) | yes |
+| The address to share the spreadsheet with | Platform | the `client_email` of the service-account file | yes (an address, never the file) |
+| HubSpot Private App token | Client | credential store, scope `client:<id>`, key `hubspot.access_token` | **no: write-only**, only "stored or not" |
+| Store tabs, column mapping, quota, mode, model, WhatsApp number and Meta credentials | Admin / platform | settings document and credential store | never changeable here |
+| Google service-account file | Platform | environment (`sheets.credentials_file`), unchanged | no |
+
+### H.2 The settings document
+
+`source` is a section of the current schema (version 2) holding only `provider`. A client that never
+chose has no `source` and its source is the store's provider, as it has always been: **every existing
+document, dump and configuration is unchanged**. `extract_document` writes `source` only when the
+source differs from the store's provider, so choosing Google Sheets again leaves no trace. `sheets`
+keeps describing the spreadsheet that holds Revansa's own state (the store), whatever the source is:
+the schema can later tell a source and a store apart (`ClientFile.source_provider`,
+`source_apart_from_store`), without that being implemented now.
+
+A source apart from the store is **refused wherever it would be run**: `build_runtime` raises
+`RuntimeBuildError` ("cannot be run yet"), so a client never keeps running on the store's provider
+instead; a refresh that hits it is reported `failed` and the settings in force stay as they were. The
+canonical normaliser refuses it too (`NormalizationError`) until it can be represented.
+
+### H.3 The Client routes
+
+No route takes a client id: it comes from the session cookie. All answers are `Cache-Control:
+no-store`.
+
+- `GET /client/v1/source`: `version`, `source` (its key; the Client API never has a field named
+  `provider`, a word reserved to the model: see the contract test), `runnable`, the `options` (key, label, `runnable`),
+  `google_sheets` (`spreadsheet_id`, `prospects_tab`, `share_with`) when that is the source, and
+  `credential` (`label`, `configured`, `updated_at`) when the source needs a secret from the client,
+  and `last_test` (`ok`, `checked_at`, `current`; `null` if never tested). `current` is false once the
+  result no longer applies (see H.4).
+- `PUT /client/v1/source` with `{expected_version, source, google_sheets?: {spreadsheet?,
+  prospects_tab?}}`. Any other key answers 422 and is not echoed. A stale version answers 409, an
+  invalid result 422 with every problem, and **nothing is written** on a refusal. Choosing what is
+  already chosen publishes nothing. Changing the provider **pauses a running agent** (the Client's
+  own switch): it is started again deliberately. If that switch cannot be written, nothing is
+  published (503).
+- `PUT /client/v1/source/credentials` with exactly `{"access_token": "..."}`, `DELETE` to remove it.
+  Only for a source that declares a client credential (HubSpot, once chosen; otherwise 409). The key
+  written is the one the chosen provider's descriptor declares, never one typed into a route. The
+  value is checked against its pattern (`pat-<region>-<uuid>`); a refusal says the rule, never the
+  value. A token already held by another client answers a generic 409 that names nobody. No response,
+  error, log or audit event carries the token.
+- `POST /client/v1/source/test` makes **one real, read-only call** to the chosen source and answers
+  `{source, ok, message, details, checked_at}` and **keeps the outcome** (H.4); calls are spaced (429 when repeated within 3 seconds).
+  - Google Sheets: reads the spreadsheet's tab list with the platform's service account and checks
+    that the prospects tab exists (one try, 15 s). Nothing is written and no cell is read.
+  - HubSpot: `GET /crm/v3/objects/contacts?limit=1&properties=hs_object_id` with the client's token.
+    It succeeds only when the token is valid **and** may read contacts; the contact is discarded.
+  - A success needs an answer of the documented shape; a failure is a fixed sentence plus the HTTP
+    status (and HubSpot's plain error category). Timeouts, unreachable services and unexpected
+    answers are failures, never successes. A success proves the access at that moment, for the
+    configuration tested, and nothing more.
+
+### H.4 Readiness
+
+`GET /client/v1/readiness` gains `source_connected`. It holds only when **all** of this is true: the
+source exists in the provider registry and **is runnable**, any secret it needs from the client is
+stored, and the client's **last real test succeeded for the configuration it has now**. HubSpot never
+passes (`HubSpot cannot run your agent yet`), so `POST /client/v1/agent/start` answers 409 with that
+reason and `active` stays false, whatever its tests say.
+
+The outcome of each test is kept per client (`client_source_check`, migration `0003`; the file
+`source_checks.json` when there is no database; one record, replaced by the next test) with a
+**fingerprint** of what it was made for: the source, and for Google Sheets the spreadsheet and the
+prospects tab; for a source with a client secret, the moment that secret was last written (never the
+secret). The fingerprint is a SHA-256: opaque, no secret, no identifier in the clear. Any change
+makes the stored result stop counting (`last_test.current` false) until a new test succeeds;
+changing back to exactly what was tested makes it count again. A failed test is kept and counts as
+failed. A store that cannot be read never counts as connected. The client can neither write nor
+forge a result: only the test route records one.
+
+**Migration note.** Existing clients have no test on record. Their agents that already run keep
+running (the scheduler reads the Client's switch and the Admin's `enabled`, not readiness), but
+readiness says `source_connected` is not met and `active` is false until they test once, and a
+paused or never-started agent cannot be started before that test. No automatic migration is done.
+
+### H.5 HubSpot descriptor
+
+`wiring/providers/hubspot.py` declares a source with no `build` (not runnable), no settings yet
+(`EmptySettings`), and one credential: `hubspot.access_token`, client scope, sensitive, required,
+unique. No runtime code reads it (an architecture test holds that); it is not part of a client's
+resolved secrets.
+
+### H.6 Known limits
+
+- A test result is not re-checked over time: it counts until the configuration it was made for
+  changes. A spreadsheet unshared later, or a token revoked, is seen at the next test or at runtime,
+  not by readiness.
+- A client edits the spreadsheet and the prospects tab only. The column mapping of the prospects and
+  the store's tabs stay the Admin's (they share one `column_mapping`).
+- Sheets access is the platform's single service account; per-client OAuth is not part of this.
+- The Admin can still write `hubspot.access_token` for a client through the integrations routes and
+  sees only whether it is set.
+- Not implemented here: the HubSpot connector, a source and a store of different providers running
+  together, write-back to HubSpot, and the Web UI for these routes.

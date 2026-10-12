@@ -24,8 +24,10 @@ from sales_app.persistence.client_stores import SqlClientProfileStore, SqlClient
 from sales_app.persistence.clients import seed_clients
 from sales_app.persistence.database import create_database_engine
 from sales_app.persistence.schema import SchemaNotReadyError, ensure_schema_current
+from sales_app.persistence.source_check_store import SqlSourceCheckStore
 from sales_app.persistence.sql_config_store import SqlConfigStore
 from sales_app.settings import Settings
+from sales_app.source_checks import FileSourceCheckStore, SourceCheckStore
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,7 @@ class AccountStores:
     client_sessions: AdminSessionStore
     config_store: ConfigStore
     agent_state: AgentStateStore
+    source_checks: SourceCheckStore
     engine: Engine | None = None  # None: the file fallback
 
     def close(self) -> None:
@@ -59,6 +62,7 @@ def build_account_stores(settings: Settings) -> AccountStores:
             client_sessions=FileAdminSessionStore(settings.profiles_dir / "sessions"),
             config_store=FileConfigStore(settings.config_dir),
             agent_state=FileAgentStateStore(settings.profiles_dir / "agent_state.json"),
+            source_checks=FileSourceCheckStore(settings.profiles_dir / "source_checks.json"),
         )
     try:
         ensure_schema_current(engine)
@@ -79,5 +83,6 @@ def build_account_stores(settings: Settings) -> AccountStores:
         client_sessions=SqlClientSessionStore(engine),
         config_store=SqlConfigStore(engine),
         agent_state=SqlAgentStateStore(engine),
+        source_checks=SqlSourceCheckStore(engine),
         engine=engine,
     )

@@ -45,7 +45,7 @@ from sales_app.api.admin_clients import (
     publish_client_settings,
     read_client_settings,
 )
-from sales_app.api.client_agent import evaluate_readiness
+from sales_app.api.client_agent import current_source_fingerprint, evaluate_readiness
 from sales_app.bootstrap import build_application
 from sales_app.client_profiles import ClientProfile, InMemoryClientProfileStore
 from sales_app.config_store import InMemoryConfigStore
@@ -85,11 +85,32 @@ def give_profile(application, cid, number, **kw):
     )
 
 
+def mark_source_tested(application, cid, *, ok=True):
+    """Record a test of the client's source as it is now, without going through the route."""
+    application.source_checks.set(
+        cid,
+        fingerprint=current_source_fingerprint(application, cid),
+        ok=ok,
+        at=NOW,
+    )
+
+
 class World:
     """alpha and beta are ready; gamma lacks its platform credentials; naga is disabled."""
 
-    def __init__(self, tmp_path, *, agent_state=None, config_store=None, refresh_executor=None):
+    def __init__(
+        self,
+        tmp_path,
+        *,
+        agent_state=None,
+        config_store=None,
+        refresh_executor=None,
+        secret_store=None,
+        secret_audit=None,
+        source_tested=True,
+    ):
         self.tmp_path = tmp_path
+        self.app_kwargs = {}  # what a test hands to `create_app` (connection checks' doubles)
         self.clock = FakeClock(NOW)
         self.users = InMemoryAdminUserStore()
         self.users.create(owner())
@@ -111,14 +132,20 @@ class World:
             client_session_store=InMemoryAdminSessionStore(),
             config_store=self.config_store,
             agent_state_store=self.agent_state,
+            secret_store=secret_store,
+            secret_audit=secret_audit,
             refresh_executor=refresh_executor if refresh_executor is not None else InlineExecutor(),
         )
         for index, cid in enumerate(("alpha", "beta", "gamma", "naga")):
             give_profile(self.application, cid, f"+216 20 000 00{index + 1}")
+        if source_tested:  # as if each client had already tested its source with success
+            for cid in ("alpha", "beta", "gamma"):
+                mark_source_tested(self.application, cid)
 
     def browser(self, cid) -> TestClient:
         client = TestClient(
-            create_app(self.application, run_scheduler=False), base_url="https://testserver"
+            create_app(self.application, run_scheduler=False, **self.app_kwargs),
+            base_url="https://testserver",
         )
         response = client.post(LOGIN, json={"login": f"{cid}.login", "password": PASSWORDS[cid]})
         assert response.status_code == 200, response.text
@@ -126,7 +153,8 @@ class World:
 
     def admin(self) -> TestClient:
         client = TestClient(
-            create_app(self.application, run_scheduler=False), base_url="https://testserver"
+            create_app(self.application, run_scheduler=False, **self.app_kwargs),
+            base_url="https://testserver",
         )
         response = client.post(
             "/admin/v1/auth/login", json={"username": "root", "password": PASSWORD}
@@ -136,7 +164,8 @@ class World:
 
     def anonymous(self) -> TestClient:
         return TestClient(
-            create_app(self.application, run_scheduler=False), base_url="https://testserver"
+            create_app(self.application, run_scheduler=False, **self.app_kwargs),
+            base_url="https://testserver",
         )
 
 
@@ -427,6 +456,7 @@ def test_a_complete_client_is_ready(world, alpha):
         "loaded_by_platform",
         "model_assigned",
         "settings_valid",
+        "source_connected",
         "platform_connections",
         "whatsapp_number",
     }
@@ -892,6 +922,7 @@ def test_the_started_agent_is_still_started_after_a_restart_with_files(tmp_path)
     first = boot(tmp_path, **folders)
     try:
         give_profile(first, "alpha", "+216 20 000 001")
+        mark_source_tested(first, "alpha")
         client = TestClient(create_app(first, run_scheduler=False), base_url="https://testserver")
         client.post(LOGIN, json={"login": "alpha.login", "password": PASSWORDS["alpha"]})
         assert client.post(START).status_code == 200
@@ -923,6 +954,7 @@ def test_the_started_agent_is_still_started_after_a_restart_with_the_database(tm
     first = boot(tmp_path, database_url=url)
     try:
         give_profile(first, "alpha", "+216 20 000 001")
+        mark_source_tested(first, "alpha")
         client = TestClient(create_app(first, run_scheduler=False), base_url="https://testserver")
         client.post(LOGIN, json={"login": "alpha.login", "password": PASSWORDS["alpha"]})
         assert client.post(START).status_code == 200

@@ -300,6 +300,11 @@ def _from_legacy(
     except ValidationError as error:
         problems.extend(where(p) for p in error.errors())
         legacy = None
+    if legacy is not None and legacy.source_apart_from_store:
+        problems.append(
+            f"source.provider: {legacy.source_provider!r} apart from the store "
+            f"({legacy.sheets.provider!r}) cannot be converted yet"
+        )
     if problems or legacy is None:
         raise NormalizationError(_unique(problems))
     return Normalized(

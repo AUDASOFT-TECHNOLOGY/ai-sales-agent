@@ -23,6 +23,9 @@ WHATSAPP_VERIFY_TOKEN = "whatsapp.verify_token"  # global; read when the parsers
 # Resolved from an environment variable only, and not in the credential store: the Google access
 # model is going to change (OAuth per client), so nothing is stored for it in the meantime.
 SHEETS_CREDENTIALS_FILE = "sheets.credentials_file"
+# A client's own HubSpot Private App token (client scope). Stored write-only; no runtime reads it
+# yet (the HubSpot connector is not built), so it is never part of a client's resolved secrets.
+HUBSPOT_ACCESS_TOKEN = "hubspot.access_token"
 
 _MIN_REDACTED_LENGTH = 8  # shorter values (an API version) would blank out ordinary words
 

@@ -93,6 +93,22 @@ class SheetsSection(_Section):
         return _reject_placeholder(value)
 
 
+DEFAULT_SOURCE = "google_sheets"
+
+
+class SourceSection(_Section):
+    """Which provider the client's prospects come from. Exactly one is active at a time.
+
+    It is a section of its own, apart from `sheets`, so that a source and a store can be told apart
+    later. Without it, the source is the store's provider (`sheets.provider`), as it has always been;
+    with it, `sheets` still describes the spreadsheet that holds Revansa's own state (the store).
+    A source other than the store's provider cannot be run yet (the runtime refuses it); which
+    providers exist is the provider registry's business, not the schema's.
+    """
+
+    provider: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,31}$")]
+
+
 class LLMSection(_Section):
     provider: NonEmpty = "openai"
     api_key_env: EnvName = "OPENAI_API_KEY"
@@ -224,10 +240,29 @@ class ClientFile(_Section):
     opt_out_keywords: tuple[NonEmpty, ...] = ("stop",)
     brain: BrainSection
     sheets: SheetsSection
+    source: SourceSection | None = None  # None: the source is the store's provider
     llm: LLMSection
     whatsapp: WhatsAppSection
     schedule: ScheduleSection = Field(default_factory=ScheduleSection)
     inbound: InboundSection = Field(default_factory=InboundSection)
+
+    @model_serializer(mode="wrap")
+    def _leave_out_an_unset_source(self, handler: Any) -> dict[str, Any]:
+        """A configuration that never chose a source dumps exactly as before sources existed."""
+        data = handler(self)
+        if data.get("source") is None:
+            data.pop("source", None)
+        return data
+
+    @property
+    def source_provider(self) -> str:
+        """The provider the prospects come from: the chosen one, else the store's own."""
+        return self.source.provider if self.source is not None else self.sheets.provider
+
+    @property
+    def source_apart_from_store(self) -> bool:
+        """Whether a source other than the store's provider was chosen (not runnable yet)."""
+        return self.source_provider != self.sheets.provider
 
     @field_validator("client_id")
     @classmethod

@@ -13,6 +13,10 @@ class AgentStateStoreCorruptError(RuntimeError):
     """Stored agent states cannot be trusted. The message names no value."""
 
 
+class AgentStateStoreUnavailableError(RuntimeError):
+    """The store cannot be reached (a database down, a missing table). Says nothing of the cause."""
+
+
 @dataclass(frozen=True, slots=True)
 class AgentState:
     client_id: str

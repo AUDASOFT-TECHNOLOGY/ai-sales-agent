@@ -81,6 +81,17 @@ client_agent_state = Table(
     Column("changed_by", String(255), nullable=False),
 )
 
+# The last real test of a client's prospect source, with a fingerprint of what it was made for: a
+# result counts only while the source and its connection parameters are still those.
+client_source_check = Table(
+    "client_source_check",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("fingerprint", String(64), nullable=False),
+    Column("ok", Boolean, nullable=False),
+    Column("checked_at", UtcDateTime, nullable=False),
+)
+
 client_sessions = Table(
     "client_sessions",
     metadata,

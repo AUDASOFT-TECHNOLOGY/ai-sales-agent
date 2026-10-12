@@ -4,9 +4,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import Engine, insert, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from sales_app.agent_state import AgentState
+from sales_app.agent_state import AgentState, AgentStateStoreUnavailableError
 from sales_app.persistence.clients import ensure_client
 from sales_app.persistence.tables import client_agent_state
 
@@ -17,19 +17,25 @@ class SqlAgentStateStore:
         self._now = now or (lambda: datetime.now(UTC))
 
     def get(self, client_id: str) -> AgentState | None:
-        with self._engine.connect() as connection:
-            row = connection.execute(
-                select(client_agent_state).where(client_agent_state.c.client_id == client_id)
-            ).first()
+        try:
+            with self._engine.connect() as connection:
+                row = connection.execute(
+                    select(client_agent_state).where(client_agent_state.c.client_id == client_id)
+                ).first()
+        except SQLAlchemyError:
+            raise AgentStateStoreUnavailableError("the agent state store is unavailable") from None
         return None if row is None else _state(row)
 
     def set(self, client_id: str, *, running: bool, by: str, at: datetime) -> AgentState:
         state = AgentState(client_id=client_id, running=running, changed_at=at, changed_by=by)
         values = {"running": running, "changed_at": at, "changed_by": by}
         try:
-            self._write(client_id, values)
-        except IntegrityError:  # two first writes raced: the second one now updates
-            self._write(client_id, values)
+            try:
+                self._write(client_id, values)
+            except IntegrityError:  # two first writes raced: the second one now updates
+                self._write(client_id, values)
+        except SQLAlchemyError:
+            raise AgentStateStoreUnavailableError("the agent state store is unavailable") from None
         return state
 
     def _write(self, client_id: str, values: dict) -> None:

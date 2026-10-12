@@ -23,6 +23,7 @@ from sales_app.persistence.schema import (
     head_revision,
     upgrade_database,
 )
+from sales_app.persistence.source_check_store import SqlSourceCheckStore
 from sales_app.persistence.sql_config_store import SqlConfigStore
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "SqlClientProfileStore",
     "SqlClientSessionStore",
     "SqlConfigStore",
+    "SqlSourceCheckStore",
     "build_account_stores",
     "create_database_engine",
     "current_revision",

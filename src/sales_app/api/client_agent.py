@@ -20,6 +20,8 @@ id supplied by the browser can reach another client's settings or switch.
 """
 
 import contextlib
+import hashlib
+import json
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,9 +29,8 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.exc import SQLAlchemyError
 
-from sales_app.agent_state import AgentStateStoreCorruptError
+from sales_app.agent_state import AgentStateStoreCorruptError, AgentStateStoreUnavailableError
 from sales_app.api.admin_clients import (
     client_wiring_and_document,
     publish_client_settings,
@@ -40,7 +41,12 @@ from sales_app.bootstrap import Application
 from sales_app.client_auth import is_client_active
 from sales_app.client_profiles import ClientProfile
 from sales_app.config import validate_settings_document
+from sales_app.config.schema import DEFAULT_SOURCE
 from sales_app.config_store import ConfigStoreError
+from sales_app.secret_store import ScopeKind, SecretStoreError, client_scope
+from sales_app.source_checks import SourceCheckStoreCorruptError, SourceCheckStoreUnavailableError
+from sales_app.wiring.providers import ProviderKind, Requirement, google_sheets
+from sales_app.wiring.providers.types import CredentialDeclaration, ProviderDescriptor
 
 PLACEHOLDER_MODELS = ("", "todo")
 
@@ -124,8 +130,12 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
     found = client_wiring_and_document(application, client_id)
     model = ""
     problems: tuple[str, ...] = ("no settings",)
+    source_problem = "Choose where your prospects come from, in your data source settings."
     if found is not None:
         raw, document = found
+        source_problem = _source_problem(
+            application, client_id, source_provider(raw, document), document
+        )
         llm = document.get("llm")
         value = llm.get("model") if isinstance(llm, Mapping) else None
         model = value.strip() if isinstance(value, str) else ""
@@ -152,6 +162,7 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
             not problems,
             "Your business settings are incomplete or invalid. Review and save them.",
         ),
+        _Check("source_connected", source_problem is None, source_problem or ""),
         _Check(
             "platform_connections",
             not registry.missing(client_id),
@@ -165,13 +176,106 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
     )
 
 
+def source_provider(raw: Mapping[str, Any], document: Mapping[str, Any]) -> str:
+    """The chosen source, else the store's provider (what `client.yaml` names), else Google Sheets."""
+    section = document.get("source")
+    chosen = section.get("provider") if isinstance(section, Mapping) else None
+    if isinstance(chosen, str) and chosen:
+        return chosen
+    sheets = raw.get("sheets")
+    store = sheets.get("provider") if isinstance(sheets, Mapping) else None
+    return store if isinstance(store, str) and store else DEFAULT_SOURCE
+
+
+def sheets_of(document: Mapping[str, Any]) -> tuple[str, str]:
+    """The spreadsheet id and the prospects tab the settings document holds."""
+    section = document.get("sheets")
+    section = section if isinstance(section, Mapping) else {}
+    return str(section.get("spreadsheet_id", "")), str(section.get("prospects_tab", "Prospects"))
+
+
+def _client_credentials(descriptor: ProviderDescriptor) -> tuple[CredentialDeclaration, ...]:
+    return tuple(
+        c
+        for c in descriptor.credentials
+        if c.scope is ScopeKind.CLIENT and c.required_when is Requirement.ALWAYS
+    )
+
+
+def source_fingerprint(
+    application: Application, client_id: str, provider: str, document: Mapping[str, Any]
+) -> str:
+    """What a connection test is made *for*: the source and every parameter of its connection that
+    the client controls (the spreadsheet and its tab; the moment a stored secret was last written,
+    never the secret). A test result counts only while this is unchanged. Opaque, holds no secret."""
+    parts: dict[str, Any] = {"source": provider}
+    if provider == google_sheets.KEY:
+        parts["spreadsheet_id"], parts["prospects_tab"] = sheets_of(document)
+    descriptor = application.provider_registry.get(provider)
+    for credential in _client_credentials(descriptor) if descriptor is not None else ():
+        try:
+            status = application.credentials.status(client_scope(client_id), credential.key)
+            parts[credential.key] = status.updated_at.isoformat() if status.updated_at else None
+        except SecretStoreError:
+            parts[credential.key] = "unreadable"
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def current_source_fingerprint(application: Application, client_id: str) -> str | None:
+    """`source_fingerprint` of the client as it is now, or None if it has no settings at all."""
+    found = client_wiring_and_document(application, client_id)
+    if found is None:
+        return None
+    raw, document = found
+    return source_fingerprint(application, client_id, source_provider(raw, document), document)
+
+
+def _source_problem(
+    application: Application, client_id: str, provider: str, document: Mapping[str, Any]
+) -> str | None:
+    """Why the prospect source the client chose cannot run its agent yet, or None.
+
+    A source passes only when all of this holds: the runtime can run it (HubSpot, until its connector
+    exists, never does), the secret it needs from the client is stored, and the client's last real
+    connection test (`POST /client/v1/source/test`) succeeded **for the configuration it has now**.
+    Change the source, the spreadsheet, the tab or the token and the result stops counting."""
+    descriptor = application.provider_registry.get(provider)
+    if descriptor is None or not descriptor.plays(ProviderKind.SOURCE):
+        return "The prospect source you chose is not available. Choose another one."
+    if not descriptor.runnable:
+        return f"{descriptor.label} cannot run your agent yet. Choose another source to start it."
+    for credential in _client_credentials(descriptor):
+        try:
+            stored = application.credentials.status(
+                client_scope(client_id), credential.key
+            ).configured
+        except SecretStoreError:
+            stored = False
+        if not stored:
+            return f"Your {credential.label} is missing. Add it in your data source settings."
+    try:
+        check = application.source_checks.get(client_id)
+    except (SourceCheckStoreCorruptError, SourceCheckStoreUnavailableError):
+        return "The result of your connection test is temporarily unavailable. Try again."
+    if check is None or check.fingerprint != source_fingerprint(
+        application, client_id, provider, document
+    ):
+        return (
+            f"Test the connection to {descriptor.label}: it has not been tested "
+            "since it was last changed."
+        )
+    if not check.ok:
+        return f"The last connection test of {descriptor.label} failed. Fix it, then test again."
+    return None
+
+
 @contextlib.contextmanager
-def _switch_available() -> Iterator[None]:
+def switch_available() -> Iterator[None]:
     """Every read or write of the agent switch answers the same 503 when its store is down or
     unreadable, whichever store it is, and names nothing of the cause."""
     try:
         yield
-    except (AgentStateStoreCorruptError, SQLAlchemyError):
+    except (AgentStateStoreCorruptError, AgentStateStoreUnavailableError):
         raise HTTPException(503, "the agent switch is temporarily unavailable") from None
 
 
@@ -258,12 +362,12 @@ def create_client_agent_router(application: Application) -> APIRouter:
 
     @router.get("/agent", response_model=AgentResponse)
     def get_agent(client: ClientProfile = Depends(get_current_client)) -> AgentResponse:
-        with _switch_available():
+        with switch_available():
             return agent_response(client)
 
     @router.post("/agent/start", response_model=AgentResponse)
     def start_agent(client: ClientProfile = Depends(get_current_client)) -> AgentResponse:
-        with _switch_available():
+        with switch_available():
             return _start(client)
 
     def _start(client: ClientProfile) -> AgentResponse:
@@ -289,7 +393,7 @@ def create_client_agent_router(application: Application) -> APIRouter:
 
     @router.post("/agent/pause", response_model=AgentResponse)
     def pause_agent(client: ClientProfile = Depends(get_current_client)) -> AgentResponse:
-        with _switch_available():
+        with switch_available():
             return _pause(client)
 
     def _pause(client: ClientProfile) -> AgentResponse:

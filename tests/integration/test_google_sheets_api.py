@@ -186,3 +186,28 @@ class TestErrorsAreExplained:
 def test_a_missing_credentials_file_fails_clearly(tmp_path):
     with pytest.raises(FileNotFoundError):
         GoogleSheetsApi.from_service_account_file(str(tmp_path / "nope.json"))
+
+
+class TestAConnectionCheckBuildsItsOwnBoundedClient:
+    @pytest.fixture(autouse=True)
+    def _no_key_file(self, monkeypatch):
+        from google.auth.credentials import AnonymousCredentials
+        from google.oauth2 import service_account
+
+        monkeypatch.setattr(
+            service_account.Credentials,
+            "from_service_account_file",
+            classmethod(lambda cls, path, scopes: AnonymousCredentials()),
+        )
+
+    def test_a_timeout_and_one_try_are_what_is_asked(self):
+        api = GoogleSheetsApi.from_service_account_file(
+            "key.json", timeout_seconds=7.5, max_attempts=1
+        )
+        assert api._max_attempts == 1
+        assert api._service._http.http.timeout == 7.5
+
+    def test_without_them_the_client_is_what_it_always_was(self):
+        api = GoogleSheetsApi.from_service_account_file("key.json")
+        assert api._max_attempts == 5
+        assert api._service._http.timeout == 60  # the library's own default

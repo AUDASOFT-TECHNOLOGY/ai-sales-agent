@@ -17,6 +17,7 @@ PROVIDERS = ROOT / "src" / "sales_app" / "wiring" / "providers"
 # Descriptor module -> the `sales_integrations` adapters it may import. `meta` builds nothing yet.
 OWN_ADAPTER = {
     "google_sheets": {"google_sheets"},
+    "hubspot": set(),  # declared only: its connector is a later increment
     "whatsapp": {"whatsapp"},
     "openai": {"openai"},
     "meta": set(),

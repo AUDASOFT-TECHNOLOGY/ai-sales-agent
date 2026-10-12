@@ -220,7 +220,7 @@ def test_configuration_lives_in_the_app_not_the_core():
 
 # ---- the Google Sheets adapter must not leak into the Core or the app --------------------------
 
-GOOGLE_LIBRARIES = {"google", "googleapiclient", "httplib2", "gspread"}
+GOOGLE_LIBRARIES = {"google", "google_auth_httplib2", "googleapiclient", "httplib2", "gspread"}
 SHEETS_VOCABULARY = ("sheet", "google", "gspread")  # substrings that must not appear in Core code
 SHEETS_ADAPTER = SRC / "sales_integrations" / "google_sheets"
 
