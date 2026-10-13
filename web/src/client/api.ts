@@ -192,3 +192,26 @@ export function clientConnectTelegram(): Promise<ChannelTestResult> {
 export function clientTelegramInvitations(): Promise<TelegramInvitations> {
   return request<TelegramInvitations>("/channel/invitations");
 }
+
+/* ── Approvals (see src/sales_app/api/client_approvals.py) ──
+ * What the agent proposes and its client approves or rejects before anything is sent. Which client
+ * is asking comes only from the session cookie; an id is only ever one the server listed. */
+
+export interface Proposal {
+  id: string;
+  /** Null when the prospect is no longer in the source. */
+  prospect_name: string | null;
+  text: string;
+  language: string | null;
+  due_at: string;
+}
+
+export type ProposalDecision = "approve" | "reject";
+
+export function clientProposals(): Promise<{ proposals: Proposal[] }> {
+  return request<{ proposals: Proposal[] }>("/approvals");
+}
+
+export function clientDecideProposal(id: string, decision: ProposalDecision): Promise<{ id: string; decision: string }> {
+  return request<{ id: string; decision: string }>(`/approvals/${encodeURIComponent(id)}/${decision}`, { method: "POST" });
+}

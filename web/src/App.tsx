@@ -9,6 +9,7 @@ import { AdminClientDetailPage } from "./admin/pages/AdminClientDetailPage";
 import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
 import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
 import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
+import { ClientApprovalsPage } from "./client/ClientApprovalsPage";
 import { ClientAuthProvider } from "./client/ClientAuthContext";
 import { ClientChannelPage } from "./client/ClientChannelPage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
@@ -96,6 +97,7 @@ export function App() {
               <Route path="history" element={<History />} />
               <Route path="notifications" element={<Notifications />} />
               <Route path="profile" element={<ClientProfilePage />} />
+              <Route path="approvals" element={<ClientApprovalsPage />} />
               <Route path="channel" element={<ClientChannelPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>

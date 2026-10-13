@@ -865,6 +865,24 @@ export const en = {
   "channel.error.tooMany": "A test was just made. Wait a few seconds.",
   "channel.error.upstream": "The service could not be reached. Try again shortly.",
   "channel.error.unavailable": "Settings are temporarily unavailable. Try again shortly.",
+
+  "nav.approvals": "Approvals",
+  "approvals.title": "Approvals",
+  "approvals.intro": "Messages your agent has written and is waiting to send. Approve a message to let it go out at the agent's next sending run; reject it and it is never sent.",
+  "approvals.loading": "Loading the messages to approve…",
+  "approvals.empty": "Nothing is waiting for your approval.",
+  "approvals.refresh": "Refresh",
+  "approvals.approve": "Approve",
+  "approvals.reject": "Reject",
+  "approvals.unknownProspect": "Unknown prospect",
+  "approvals.due": "Planned for {date}",
+  "approvals.done.approved": "Message approved. It will be sent at the agent's next sending run.",
+  "approvals.done.rejected": "Message rejected. It will not be sent.",
+  "approvals.error.session": "Your session has expired. Sign in again.",
+  "approvals.error.gone": "This message is no longer waiting: it was already decided. The list has been refreshed.",
+  "approvals.error.cannotApprove": "This message cannot be approved because the prospect can no longer be contacted. You can still reject it.",
+  "approvals.error.notReady": "Your agent is not ready yet, so there is nothing to approve. Check the readiness of your agent.",
+  "approvals.error.unavailable": "Messages are temporarily unavailable. Try again shortly.",
 } as const;
 
 export type MessageKey = keyof typeof en;
