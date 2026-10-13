@@ -813,3 +813,21 @@ one the contact reaches the consent registry through `refused_contacts()`).
 - No write-back to HubSpot: the source is read-only and the write-back syncer is not wired to it.
 - Rate limits are reported (`retry_after`), not retried.
 - The PostgreSQL migration `0004` is still to be verified before production; tests run on SQLite.
+
+## J. Implemented: approving proposals without a sheet
+
+In `approval` mode every message the Brain writes waits for a person. With Google Sheets that person
+edits the Actions tab. A client on HubSpot has no such tab (its proposals live in the SQL operational
+store), so until now its proposals could never be approved and nothing was ever sent.
+
+- **Core** (`Engine`, under its single lock): `pending_proposals()` (read-only, oldest first),
+  `approve_proposal(action_id, actor=)` and `reject_proposal(action_id, actor=)`. A decision is taken
+  once (`ProposalNotFoundError` afterwards, or for an unknown id). Approval is refused
+  (`ProposalNotApprovableError`) if the prospect can no longer be contacted; rejection never is.
+  Approving only releases the message: `dispatch()` sends it after the safety checks every send
+  passes. Both decisions are audited (`action.approved` / `action.rejected`, `actor` = `client:<id>`).
+- **Client API** (`api/client_approvals.py`, no route takes a client id): `GET /client/v1/approvals`,
+  `POST /client/v1/approvals/{action_id}/approve` and `/reject`. They go through the runtime lease,
+  never to a store directly, so they work the same on a Sheets client.
+- **Not done:** editing a draft before approving it; the Web UI for these routes; approving from a
+  channel; write-back of statuses to HubSpot (the connector is read-only).

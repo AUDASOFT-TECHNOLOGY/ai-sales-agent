@@ -22,6 +22,7 @@ from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
+from sales_app.api.client_approvals import create_client_approvals_router
 from sales_app.api.client_channel import (
     BotProbeFactory,
     MailProbeFactory,
@@ -85,6 +86,7 @@ def create_app(
     app.include_router(create_admin_integrations_router(application, connection_http))
     app.include_router(create_client_router(application))
     app.include_router(create_client_agent_router(application))
+    app.include_router(create_client_approvals_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))
     app.include_router(create_client_channel_router(application, mail_probe, bot_probe))
 

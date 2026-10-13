@@ -59,11 +59,12 @@ from sales_core.engine.applier import (
     proposal,
     validate_decision,
 )
-from sales_core.engine.errors import describe
+from sales_core.engine.errors import ProposalNotApprovableError, ProposalNotFoundError, describe
 from sales_core.engine.models import (
     EngineConfig,
     InboundReceipt,
     InboundStatus,
+    PendingProposal,
     RunCollector,
     RunReport,
 )
@@ -336,6 +337,61 @@ class Engine:
         if action.action_type is SalesActionType.FIRST_CONTACT:
             return ContactOrigin.OUTBOUND
         return ContactOrigin.UNKNOWN
+
+    # ==== Approval by a person ================================================================
+
+    def pending_proposals(self) -> tuple[PendingProposal, ...]:
+        """The proposals awaiting a person's decision, oldest first (read-only)."""
+        with self._lock:
+            proposed = sorted(
+                (
+                    a
+                    for a in self._repo.list_actions({ActionStatus.PROPOSED})
+                    if a.draft is not None
+                ),
+                key=lambda a: (a.due_at, a.action_id),
+            )
+            return tuple(self._pending(a) for a in proposed)
+
+    def _pending(self, action: SalesAction) -> PendingProposal:
+        assert action.draft is not None
+        prospect = self._repo.get_prospect(action.prospect_id)
+        return PendingProposal(
+            action_id=action.action_id,
+            prospect_id=action.prospect_id,
+            prospect_name=prospect.display_name if prospect is not None else None,
+            text=action.draft.text,
+            language=action.draft.language,
+            due_at=action.due_at,
+        )
+
+    def approve_proposal(self, action_id: ActionId, *, actor: str) -> None:
+        """A person approves a proposal: it becomes APPROVED and `dispatch()` sends it, after the
+        safety checks it always passes. Refused if the person can no longer be contacted."""
+        with self._lock:
+            action = self._proposed(action_id)
+            prospect = self._repo.get_prospect(action.prospect_id)
+            verdict = check_contactable(prospect, self._channel.channel)
+            if prospect is None or not verdict.allowed:
+                raise ProposalNotApprovableError("this prospect can no longer be contacted")
+            self._repo.save_actions([replace(action, status=ActionStatus.APPROVED)])
+            self._emit_for(ev.ACTION_APPROVED, action, actor=actor)
+            self._flush(RunCollector())
+
+    def reject_proposal(self, action_id: ActionId, *, actor: str) -> None:
+        """A person rejects a proposal: nothing is sent, and the prospect can be planned again."""
+        with self._lock:
+            action = self._proposed(action_id)
+            self._repo.save_actions([replace(action, status=ActionStatus.REJECTED)])
+            self._emit_for(ev.ACTION_REJECTED, action, actor=actor)
+            self._flush(RunCollector())
+
+    def _proposed(self, action_id: ActionId) -> SalesAction:
+        """The action as it is stored now, only if it still awaits a decision."""
+        for action in self._repo.list_actions({ActionStatus.PROPOSED}):
+            if action.action_id == action_id and action.draft is not None:
+                return action
+        raise ProposalNotFoundError(action_id)
 
     # ==== Phase B: dispatch ==================================================================
 

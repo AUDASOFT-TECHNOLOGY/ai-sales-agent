@@ -1,6 +1,7 @@
 """Configuration and result types of the Engine."""
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 
 from sales_core.approval import ApprovalMode
@@ -38,6 +39,18 @@ class InboundPolicy:
     @property
     def engages_unknown_senders(self) -> bool:
         return self.spontaneous_conversations and self.unknown_sender is UnknownSenderPolicy.ENGAGE
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PendingProposal:
+    """A message the Brain proposed and a person has yet to approve or reject (read-only view)."""
+
+    action_id: ActionId
+    prospect_id: ProspectId
+    prospect_name: str | None  # None: the prospect is no longer in the source
+    text: str
+    language: str | None
+    due_at: datetime
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

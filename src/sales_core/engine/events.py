@@ -2,7 +2,8 @@
 
 ACTION_PLANNED = "action.planned"
 ACTION_PROPOSED = "action.proposed"
-ACTION_APPROVED = "action.approved"  # automatic approval (autonomous mode)
+ACTION_APPROVED = "action.approved"  # automatic (autonomous mode) or by a person: see `actor`
+ACTION_REJECTED = "action.rejected"  # by a person: see `actor`
 ACTION_COMPLETED = "action.completed"
 ACTION_CANCELLED = "action.cancelled"
 ACTION_SENT = "action.sent"
