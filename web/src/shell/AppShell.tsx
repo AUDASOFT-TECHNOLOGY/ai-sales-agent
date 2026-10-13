@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { motion } from "motion/react";
-import { ChevronsLeft, ChevronsRight, History, LogOut, MessageSquare, Rocket, Search, SlidersHorizontal, UserRound, Users, Radar } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, History, LogOut, MessageSquare, Rocket, Search, SlidersHorizontal, Send, UserRound, Users, Radar } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { TENANT } from "../mock/data";
@@ -25,6 +25,7 @@ const NAV: Array<{ to: string; key: MessageKey; icon: typeof Rocket; group?: "ru
   { to: "/conversations", key: "nav.conversations", icon: MessageSquare, group: "run" },
   { to: "/history", key: "nav.history", icon: History, group: "run" },
   { to: "/configure", key: "nav.configure", icon: SlidersHorizontal, group: "shape" },
+  { to: "/channel", key: "nav.channel", icon: Send, group: "shape" },
 ];
 
 const TITLE: Record<string, MessageKey> = {
@@ -36,6 +37,7 @@ const TITLE: Record<string, MessageKey> = {
   "/configure": "configure.title",
   "/notifications": "notifications.title",
   "/profile": "profile.title",
+  "/channel": "channel.title",
 };
 
 function Aurora() {
@@ -184,6 +186,7 @@ function TabBar() {
     ["/conversations", "nav.chats", MessageSquare],
     ["/history", "nav.history", History],
     ["/configure", "nav.configure", SlidersHorizontal],
+    ["/channel", "nav.channel", Send],
     ...(state.live ? [] : ([["/setup", "nav.setup", Rocket]] as Array<[string, MessageKey, typeof Rocket]>)),
   ];
   return (

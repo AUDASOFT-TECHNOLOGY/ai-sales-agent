@@ -91,3 +91,104 @@ export function clientChangePassword(
 export function clientUpdateProfile(changes: ProfileChanges): Promise<ClientProfile> {
   return request<ClientProfile>("/profile", { method: "PATCH", body: JSON.stringify(changes) });
 }
+
+/* ── Channel (see src/sales_app/api/client_channel.py) ──
+ * No response carries a password or a token: only whether one is stored. The secrets travel in the
+ * one PUT body that writes them and are never kept by this module. */
+
+export interface ChannelOption {
+  key: string;
+  label: string;
+}
+
+export interface EmailSettings {
+  from_address: string | null;
+  from_name: string | null;
+  username: string | null;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  smtp_security: string | null;
+  imap_host: string | null;
+  imap_port: number | null;
+  imap_security: string | null;
+  mailbox: string | null;
+  subject: string | null;
+}
+
+export interface TelegramSettings {
+  contact_prompt: string;
+  contact_button: string;
+  not_found_text: string;
+  connected: boolean;
+}
+
+export interface CredentialStatus {
+  label: string;
+  configured: boolean;
+  updated_at: string | null;
+}
+
+export interface ChannelState {
+  version: number | null;
+  channel: string;
+  authorized: boolean;
+  options: ChannelOption[];
+  email: EmailSettings | null;
+  telegram: TelegramSettings | null;
+  credential: CredentialStatus | null;
+  problem: string | null;
+  updated_at: string | null;
+  updated_by: "client" | "administrator" | null;
+}
+
+export interface ChannelUpdate {
+  expected_version: number | null;
+  channel: string;
+  email?: Partial<Record<keyof EmailSettings, string | number>>;
+  telegram?: Partial<Record<"contact_prompt" | "contact_button" | "not_found_text", string>>;
+}
+
+/** The outcome of a real call to the sending/receiving service (never a simulation). */
+export interface ChannelTestResult {
+  channel: string;
+  ok: boolean;
+  message: string;
+  details: Record<string, string>;
+  checked_at: string;
+}
+
+export interface TelegramInvitations {
+  bot_username: string;
+  bot_link: string;
+  waiting: number;
+  invitations: Array<{ prospect_id: string; display_name: string; phone: string | null; email: string | null; link: string | null }>;
+}
+
+export function clientChannel(): Promise<ChannelState> {
+  return request<ChannelState>("/channel");
+}
+
+export function clientSaveChannel(update: ChannelUpdate): Promise<ChannelState> {
+  return request<ChannelState>("/channel", { method: "PUT", body: JSON.stringify(update) });
+}
+
+/** Write-only: the answer says whether a secret is stored, never what it is. */
+export function clientSaveCredential(field: "password" | "bot_token", value: string): Promise<CredentialStatus> {
+  return request<CredentialStatus>("/channel/credentials", { method: "PUT", body: JSON.stringify({ [field]: value }) });
+}
+
+export function clientRemoveCredential(): Promise<CredentialStatus> {
+  return request<CredentialStatus>("/channel/credentials", { method: "DELETE" });
+}
+
+export function clientTestChannel(): Promise<ChannelTestResult> {
+  return request<ChannelTestResult>("/channel/test", { method: "POST" });
+}
+
+export function clientConnectTelegram(): Promise<ChannelTestResult> {
+  return request<ChannelTestResult>("/channel/connect", { method: "POST" });
+}
+
+export function clientTelegramInvitations(): Promise<TelegramInvitations> {
+  return request<TelegramInvitations>("/channel/invitations");
+}
