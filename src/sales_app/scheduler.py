@@ -13,9 +13,12 @@ from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
+from typing import Protocol
 from zoneinfo import ZoneInfo
 
+from sales_app.config import ClientConfig
 from sales_app.errors import ClientNotReadyError
+from sales_app.inbox import InboxPoller, poll_inbox
 from sales_app.logs import client_logger
 from sales_app.registry import ClientRegistry
 from sales_app.wiring import ClientRuntime
@@ -25,6 +28,7 @@ log = logging.getLogger(__name__)
 
 BACKOFF_BASE_SECONDS = 30
 BACKOFF_MAX_SECONDS = 900
+INBOX_EVERY_MINUTES = 2  # how often a mailbox is read; not tied to the outbound window
 
 
 class Job(StrEnum):
@@ -32,6 +36,15 @@ class Job(StrEnum):
     PREPARE = "prepare"  # another planning pass: new prospects, newly due follow-ups
     DISPATCH = "dispatch"  # send what humans approved since the last run
     RECOVER = "recover"  # process stored replies that were never handled
+    INBOX = "inbox"  # fetch the replies of a channel that does not call us (a mailbox)
+
+
+class InboxSupport(Protocol):
+    """Which clients have an inbox to poll, and how to open it (`IntegrationBuilders`)."""
+
+    def polls_inbox(self, config: ClientConfig) -> bool: ...
+
+    def open_inbox(self, config: ClientConfig) -> InboxPoller: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,10 +63,14 @@ class Scheduler:
         *,
         executor: Executor | None = None,
         may_run: Callable[[str], bool] | None = None,
+        inbox: InboxSupport | None = None,
+        inbox_every_minutes: int = INBOX_EVERY_MINUTES,
     ) -> None:
         self._registry = registry
         self._clock = clock
         self._may_run = may_run  # the client's own switch; None: nothing to ask
+        self._inbox = inbox
+        self._inbox_every = inbox_every_minutes
         self._executor = executor
         self._owns_executor = executor is None
 
@@ -76,9 +93,11 @@ class Scheduler:
         )
         outbound_open = local.weekday() in schedule.weekdays and local >= opens_at
 
+        # Replies are read whenever they are due, outbound window or not, and before the cycle
+        # that answers them.
+        jobs: list[Job] = [Job.INBOX] if self._inbox_due(runtime, now) else []
         if outbound_open and state.last_daily_date != local.date():
-            return [Job.DAILY]  # includes recovery and dispatch
-        jobs: list[Job] = []
+            return [*jobs, Job.DAILY]  # includes recovery and dispatch
         if _elapsed(state.last_recover_at, now, schedule.recover_every_minutes):
             jobs.append(Job.RECOVER)
         if outbound_open and _elapsed(state.last_prepare_at, now, schedule.prepare_every_minutes):
@@ -86,6 +105,14 @@ class Scheduler:
         if outbound_open and _elapsed(state.last_dispatch_at, now, schedule.dispatch_every_minutes):
             jobs.append(Job.DISPATCH)
         return jobs
+
+    def _inbox_due(self, runtime: ClientRuntime, now: datetime) -> bool:
+        if self._inbox is None or not self._inbox.polls_inbox(runtime.config):
+            return False
+        state = runtime.state
+        if state.inbox_blocked_until is not None and now < state.inbox_blocked_until:
+            return False
+        return _elapsed(state.last_inbox_at, now, self._inbox_every)
 
     # ---- running -------------------------------------------------------------------------
 
@@ -153,7 +180,7 @@ class Scheduler:
             for job in jobs:
                 result = self._execute(runtime, job, now)
                 results.append(result)
-                if not result.ok:
+                if not result.ok and job is not Job.INBOX:
                     break  # a failing client waits for its backoff before anything else
         finally:
             runtime.state.end()
@@ -173,6 +200,8 @@ class Scheduler:
                     reports = [engine.prepare()]
                 elif job is Job.DISPATCH:
                     reports = [engine.dispatch()]
+                elif job is Job.INBOX:
+                    reports = [self._poll(runtime, engine)]
                 else:
                     reports = [engine.recover_pending_replies()]
         except ClientNotReadyError as error:
@@ -181,7 +210,10 @@ class Scheduler:
             return JobResult(runtime.client_id, job, ok=False, errors=(str(error),))
         except Exception as error:
             logger.exception("job %s failed", job.value)
-            self._block(runtime, now)
+            if job is Job.INBOX:
+                self._block_inbox(runtime, now)
+            else:
+                self._block(runtime, now)
             runtime.health.record_failure(job.value, now, f"{type(error).__name__}: {error}")
             return JobResult(runtime.client_id, job, ok=False, errors=(str(error),))
 
@@ -193,9 +225,30 @@ class Scheduler:
         logger.info("job %s finished (%d reported problems)", job.value, len(errors))
         return JobResult(runtime.client_id, job, ok=True, errors=errors)
 
+    def _poll(self, runtime: ClientRuntime, engine):
+        """One poll of the client's inbox, with the config in force for this lease."""
+        assert self._inbox is not None
+        poller = self._inbox.open_inbox(runtime.config)
+        try:
+            return poll_inbox(engine, poller)
+        finally:
+            poller.close()
+
+    @staticmethod
+    def _block_inbox(runtime: ClientRuntime, now: datetime) -> None:
+        state = runtime.state
+        state.inbox_failures += 1
+        delay = min(BACKOFF_BASE_SECONDS * 2 ** (state.inbox_failures - 1), BACKOFF_MAX_SECONDS)
+        state.inbox_blocked_until = now + timedelta(seconds=delay)
+
     @staticmethod
     def _mark_done(runtime: ClientRuntime, job: Job, now: datetime) -> None:
         state = runtime.state
+        if job is Job.INBOX:  # its own bookkeeping: it never clears another job's backoff
+            state.last_inbox_at = now
+            state.inbox_blocked_until = None
+            state.inbox_failures = 0
+            return
         state.blocked_until = None
         if job is Job.DAILY:
             zone = ZoneInfo(runtime.config.spec.timezone)

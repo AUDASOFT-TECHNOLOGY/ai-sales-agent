@@ -3,8 +3,10 @@
 from sales_core.safety.checks import (
     ALLOWED,
     DEFAULT_OPT_OUT_KEYWORDS,
+    OPT_IN_CHANNELS,
     BlockReason,
     SafetyVerdict,
+    awaits_opt_in,
     check_contactable,
     check_ready_to_send,
     is_opt_out_message,
@@ -14,8 +16,10 @@ from sales_core.safety.checks import (
 __all__ = [
     "ALLOWED",
     "DEFAULT_OPT_OUT_KEYWORDS",
+    "OPT_IN_CHANNELS",
     "BlockReason",
     "SafetyVerdict",
+    "awaits_opt_in",
     "check_contactable",
     "check_ready_to_send",
     "is_opt_out_message",

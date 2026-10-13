@@ -12,6 +12,8 @@ from pydantic import ValidationError
 
 from sales_app.brain_registry import BrainRegistry
 from sales_app.config.brain_settings import prepare_brain_settings
+from sales_app.config.channel_access import GOVERNED, effective_channels
+from sales_app.config.email_settings import EmailChannelSettings, mailbox_key_of
 from sales_app.config.llm_registry import EMPTY_LLM_REGISTRY, LLMRegistry
 from sales_app.config.offered_models import inactive_model_reason, models_from
 from sales_app.config.resolution import (
@@ -26,18 +28,24 @@ from sales_app.config.resolution import (
 )
 from sales_app.config.schema import ClientFile
 from sales_app.config.secrets import (
+    CHANNELS_ACCESS,
+    CHANNELS_ALLOWED,
+    EMAIL_PASSWORD,
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
     OPENAI_ORGANIZATION,
     OPENAI_PROJECT,
     SHEETS_CREDENTIALS_FILE,
     SOURCE_CREDENTIALS,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_WEBHOOK_SECRET,
     WHATSAPP_ACCESS_TOKEN,
     WHATSAPP_API_VERSION,
     WHATSAPP_APP_SECRET,
     WHATSAPP_PHONE_NUMBER_ID,
     Secrets,
 )
+from sales_app.config.telegram_settings import TelegramChannelSettings, bot_id_of
 from sales_app.config_store import ConfigStore, ConfigStoreError
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_app.secret_store import GLOBAL_SCOPE, SecretStore, SecretStoreError, client_scope
@@ -78,6 +86,20 @@ class ClientConfig:
     @property
     def phone_number_id(self) -> str | None:
         return self.secrets.get_optional(WHATSAPP_PHONE_NUMBER_ID)
+
+    @property
+    def telegram_bot_id(self) -> str | None:
+        """The bot this client talks through, when its channel is Telegram and it has one."""
+        if self.spec.channel_provider != "telegram":
+            return None
+        return bot_id_of(self.secrets.get_optional(TELEGRAM_BOT_TOKEN))
+
+    @property
+    def mailbox_key(self) -> str | None:
+        """The mailbox this client reads, when its channel is e-mail and it has one set up."""
+        if self.spec.channel_provider != "email":
+            return None
+        return mailbox_key_of(self.spec.channel_settings)
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +316,35 @@ def _resolve_secrets(
         return (env.get(variable, "").strip() or None) if variable else None
 
     whatsapp = spec.whatsapp
+    channel = spec.channel_provider
+    # A client on e-mail asks for its mailbox's credentials and none of Meta's; every other channel
+    # keeps asking for what it always did.
+    whatsapp_wanted = (
+        [
+            (WHATSAPP_ACCESS_TOKEN, "WhatsApp access token", client, whatsapp.token_env, live),
+            (
+                WHATSAPP_PHONE_NUMBER_ID,
+                "WhatsApp phone number id",
+                client,
+                whatsapp.phone_number_id_env,
+                live,
+            ),
+            (WHATSAPP_APP_SECRET, "Meta app secret", GLOBAL_SCOPE, whatsapp.app_secret_env, live),
+        ]
+        if channel not in ("email", "telegram")
+        else []
+    )
+    email_wanted = (
+        [(EMAIL_PASSWORD, "Email password", client, None, live)] if channel == "email" else []
+    )
+    telegram_wanted = (
+        [
+            (TELEGRAM_BOT_TOKEN, "Telegram bot token", client, None, live),
+            (TELEGRAM_WEBHOOK_SECRET, "Telegram webhook secret", client, None, live),
+        ]
+        if channel == "telegram"
+        else []
+    )
     # A client whose prospects live elsewhere does not use the spreadsheet, so it needs no Google
     # access; it needs the credential its own source declares, from the credential store only.
     sheets_used = not spec.source_apart_from_store
@@ -312,15 +363,9 @@ def _resolve_secrets(
             if source_credential is not None
             else []
         ),
-        (WHATSAPP_ACCESS_TOKEN, "WhatsApp access token", client, whatsapp.token_env, live),
-        (
-            WHATSAPP_PHONE_NUMBER_ID,
-            "WhatsApp phone number id",
-            client,
-            whatsapp.phone_number_id_env,
-            live,
-        ),
-        (WHATSAPP_APP_SECRET, "Meta app secret", GLOBAL_SCOPE, whatsapp.app_secret_env, live),
+        *whatsapp_wanted,
+        *email_wanted,
+        *telegram_wanted,
     ]
     values: dict[str, str] = {}
     missing: list[str] = []
@@ -330,6 +375,24 @@ def _resolve_secrets(
             values[key] = value
         elif required:
             missing.append(f"{label} is not configured")
+    if channel == "email" and live:
+        try:
+            EmailChannelSettings.model_validate(spec.channel_settings)
+        except ValueError:
+            missing.append("Email settings are incomplete")
+    if channel == "telegram" and live:
+        try:
+            TelegramChannelSettings.model_validate(spec.channel_settings)
+        except ValueError:
+            missing.append("Telegram settings are incomplete")
+    granted = effective_channels(
+        secret_store.get(GLOBAL_SCOPE, CHANNELS_ALLOWED) if secret_store is not None else None,
+        secret_store.get(client, CHANNELS_ACCESS) if secret_store is not None else None,
+    )
+    if channel in GOVERNED and channel not in granted:
+        # Judged on every resolution, so a channel the Admin forbids afterwards stops a client that
+        # had already set it up. Even a dry run is refused: the channel is not this client's.
+        missing.append(f"The {channel} channel is not authorized for this account")
     # Not a secret: the platform-wide API version, else the one this client's file names.
     stored_version = secret_store.get(GLOBAL_SCOPE, WHATSAPP_API_VERSION) if secret_store else None
     values[WHATSAPP_API_VERSION] = stored_version or whatsapp.api_version
@@ -359,6 +422,8 @@ def _cross_client_errors(clients: list[ClientConfig]) -> list[str]:
             "spreadsheet_id",
             lambda c: None if c.spec.source_apart_from_store else c.spec.sheets.spreadsheet_id,
         ),
+        ("email mailbox", lambda c: c.mailbox_key),
+        ("Telegram bot", lambda c: c.telegram_bot_id),
         ("whatsapp.token_env", lambda c: c.spec.whatsapp.token_env),
         ("whatsapp.phone_number_id_env", lambda c: c.spec.whatsapp.phone_number_id_env),
     ]

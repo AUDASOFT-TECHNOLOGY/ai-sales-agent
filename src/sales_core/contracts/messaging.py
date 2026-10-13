@@ -38,6 +38,11 @@ class InboundMessage:
     text: str
     timestamp: datetime
     metadata: Mapping[str, str] = field(default_factory=dict)
+    # Who the sender says they are, set ONLY by an adapter that has authenticated the claim (never
+    # from message text). A channel whose senders cannot be found by an address we already hold
+    # (Telegram: a chat id) uses them to attach the sender to the prospect we meant to reach.
+    linked_prospect_id: str | None = None  # an invitation that only we could have issued
+    shared_phone: str | None = None  # a number the platform confirmed belongs to the sender
 
     def __post_init__(self) -> None:
         require_text(self.sender, "sender")

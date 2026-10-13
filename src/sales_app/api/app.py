@@ -16,11 +16,17 @@ from fastapi.responses import PlainTextResponse
 
 from sales_app.api.admin import create_admin_router
 from sales_app.api.admin_agents import create_admin_agents_router
+from sales_app.api.admin_channels import create_admin_channels_router
 from sales_app.api.admin_clients import create_admin_clients_router
 from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
+from sales_app.api.client_channel import (
+    BotProbeFactory,
+    MailProbeFactory,
+    create_client_channel_router,
+)
 from sales_app.api.client_source import (
     SheetsProbeFactory,
     create_client_source_router,
@@ -31,7 +37,9 @@ from sales_app.connection_tests import HttpClientFactory, default_http_client
 from sales_app.errors import ClientNotReadyError
 from sales_app.logs import client_logger
 from sales_app.wiring import ClientRuntime
-from sales_core.engine import InboundReceipt
+from sales_app.wiring.providers import email as email_provider
+from sales_app.wiring.providers import telegram as telegram_provider
+from sales_core.engine import InboundReceipt, InboundStatus
 from sales_core.ports import InvalidSignatureError, MalformedPayloadError
 
 log = logging.getLogger(__name__)
@@ -44,6 +52,8 @@ def create_app(
     run_scheduler: bool = True,
     connection_http: HttpClientFactory = default_http_client,
     sheets_probe: SheetsProbeFactory = default_sheets_probe,
+    mail_probe: MailProbeFactory = email_provider.MailProbe,
+    bot_probe: BotProbeFactory = telegram_provider.TelegramProbe,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -71,10 +81,12 @@ def create_app(
     app.include_router(create_admin_clients_router(application))
     app.include_router(create_admin_agents_router(application))
     app.include_router(create_admin_settings_router(application))
+    app.include_router(create_admin_channels_router(application))
     app.include_router(create_admin_integrations_router(application, connection_http))
     app.include_router(create_client_router(application))
     app.include_router(create_client_agent_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))
+    app.include_router(create_client_channel_router(application, mail_probe, bot_probe))
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -131,7 +143,12 @@ def create_app(
                 ) from None  # the provider redelivers; the Engine de-duplicates
             _report(runtime, "inbound", receipt.errors, application)
             if application.agent_may_work(runtime.client_id):
-                background.add_task(_process, runtime, receipt, application)
+                if receipt.status is InboundStatus.UNKNOWN_SENDER:
+                    background.add_task(
+                        _answer_unknown, runtime, provider, event.message, application
+                    )
+                else:
+                    background.add_task(_process, runtime, receipt, application)
             # else: the message is stored; the reply waits (recover_pending_replies) until the
             # client has started its agent again, or the Admin has enabled the client again.
             handled += 1
@@ -166,6 +183,21 @@ def _report(
     for message in errors:
         logger.error("%s: %s", job, message)
     runtime.health.record_success(job, application.clock.now(), errors)
+
+
+def _answer_unknown(
+    runtime: ClientRuntime, provider: str, message: Any, application: Application
+) -> None:
+    """Background task: a stranger wrote on a channel that has something to say to them (Telegram
+    asks for their phone number). Never fatal: the message was stored or audited already."""
+    builders = application.builders
+    channel = builders.channels.get(provider) if builders is not None else None
+    if channel is None or channel.answer_unknown is None:
+        return
+    try:
+        channel.answer_unknown(runtime.config, message)
+    except Exception:  # noqa: BLE001 - nothing to retry: the person can simply write again
+        client_logger(__name__, runtime.client_id).exception("could not answer an unknown sender")
 
 
 def _process(runtime: ClientRuntime, receipt: InboundReceipt, application: Application) -> None:

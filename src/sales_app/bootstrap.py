@@ -11,6 +11,7 @@ from typing import Any
 
 from sales_app.admin_auth import AdminAuthService, AdminSessionStore, AdminUserStore
 from sales_app.agent_state import AgentStateStore, InMemoryAgentStateStore
+from sales_app.channel_policy import ChannelPolicyService
 from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore
 from sales_app.config import build_llm_registry, clamp_mode, load_client_configs
@@ -79,6 +80,10 @@ class Application:
     agent_state: AgentStateStore = field(default_factory=InMemoryAgentStateStore)
     # The last real test of each client's prospect source, and what it was made for.
     source_checks: SourceCheckStore = field(default_factory=InMemorySourceCheckStore)
+    # Which channels clients may use: the Admin's decision (see `sales_app.channel_policy`).
+    channel_policy: ChannelPolicyService | None = None
+    # How each channel is run, kept for what the webhook route needs of it (answering a stranger).
+    builders: IntegrationBuilders | None = None
 
     def agent_may_work(self, client_id: str) -> bool:
         """`_may_work`, failing closed: if either switch cannot be read, the answer is no."""
@@ -290,6 +295,8 @@ def _assemble(
         executor=refresh_executor,
     )
     credentials.set_on_change(manager.notify_change)
+    channel_policy = ChannelPolicyService(secrets, audit, now=clock.now)
+    channel_policy.set_on_change(manager.notify_change)
 
     return Application(
         settings=settings,
@@ -303,6 +310,7 @@ def _assemble(
             clock,
             executor=executor,
             may_run=lambda client_id: _may_work(agent_state, settings.clients_dir, client_id),
+            inbox=builders,
         ),
         parsers=parsers,
         clock=clock,
@@ -313,6 +321,8 @@ def _assemble(
         account_stores=account_stores,
         agent_state=agent_state,
         source_checks=source_checks,
+        channel_policy=channel_policy,
+        builders=builders,
     )
 
 

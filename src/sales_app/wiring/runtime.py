@@ -27,6 +27,8 @@ from sales_integrations.system import DisabledChannel
 
 log = logging.getLogger(__name__)
 
+INBOX_JOB = "inbox"  # the scheduler's job that reads a mailbox (`sales_app.scheduler.Job.INBOX`)
+
 
 class ClientHealth:
     """What `/health/clients` reports. Written from scheduler threads and webhook tasks."""
@@ -38,11 +40,18 @@ class ClientHealth:
         self._last_error: str | None = None
         self._last_error_at: str | None = None
         self._failures = 0
+        # The mailbox is followed on its own: the success of the daily cycle must not hide a
+        # mailbox that cannot be read, and the mailbox's failures must not inflate the backoff of
+        # the jobs that send (`consecutive_failures` stays theirs).
+        self._inbox_failures = 0
 
     def record_success(self, job: str, at: datetime, errors: Sequence[str] = ()) -> None:
         with self._lock:
-            self._status = "ready"
-            self._failures = 0
+            if job == INBOX_JOB:
+                self._inbox_failures = 0
+            else:
+                self._failures = 0
+            self._status = "degraded" if self._inbox_failures or self._failures else "ready"
             self._last_runs[job] = at.isoformat()
             if errors:  # the job ran, but reported problems worth seeing
                 self._last_error, self._last_error_at = errors[0], at.isoformat()
@@ -50,18 +59,24 @@ class ClientHealth:
     def record_failure(self, job: str, at: datetime, error: str) -> None:
         with self._lock:
             self._status = "degraded"
-            self._failures += 1
+            if job == INBOX_JOB:
+                self._inbox_failures += 1
+            else:
+                self._failures += 1
             self._last_error, self._last_error_at = f"{job}: {error}", at.isoformat()
 
     def snapshot(self) -> dict[str, object]:
         with self._lock:
-            return {
+            snapshot: dict[str, object] = {
                 "status": self._status,
                 "last_runs": dict(self._last_runs),
                 "last_error": self._last_error,
                 "last_error_at": self._last_error_at,
                 "consecutive_failures": self._failures,
             }
+            if self._inbox_failures:  # only for a client whose mailbox is failing
+                snapshot["inbox_failures"] = self._inbox_failures
+            return snapshot
 
 
 @dataclass
@@ -72,6 +87,11 @@ class ScheduleState:
     last_prepare_at: datetime | None = None
     last_dispatch_at: datetime | None = None
     last_recover_at: datetime | None = None
+    last_inbox_at: datetime | None = None
+    # The mailbox backs off on its own: a mailbox that cannot be reached must not stop the client
+    # from sending what its team approved.
+    inbox_blocked_until: datetime | None = None
+    inbox_failures: int = 0
     blocked_until: datetime | None = None  # backoff after a failed job
     _busy: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)

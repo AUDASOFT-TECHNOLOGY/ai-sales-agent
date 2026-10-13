@@ -75,6 +75,7 @@ def prospect_to_doc(value: Prospect) -> dict[str, Any]:
         "contact": {
             "phone": value.contact.phone,
             "email": value.contact.email,
+            "telegram_chat_id": value.contact.telegram_chat_id,
             "preferred_channel": _opt(value.contact.preferred_channel, str),
         },
         "status": str(value.status),
@@ -95,6 +96,7 @@ def prospect_from_doc(doc: Mapping[str, Any]) -> Prospect:
         contact=ContactInfo(
             phone=contact["phone"],
             email=contact["email"],
+            telegram_chat_id=contact.get("telegram_chat_id"),  # absent from older documents
             preferred_channel=_opt(contact["preferred_channel"], Channel),
         ),
         status=ProspectStatus(doc["status"]),
@@ -116,6 +118,7 @@ def state_to_doc(value: ProspectState) -> dict[str, Any]:
         "stage": value.stage,
         "schedule": scheduling_to_doc(value.schedule),
         "conversation_id": value.conversation_id,
+        "telegram_chat_id": value.telegram_chat_id,
         "status_reason": value.status_reason,
         "status_changed_at": _when(value.status_changed_at),
     }
@@ -131,6 +134,7 @@ def state_from_doc(
         stage=doc["stage"],
         schedule=scheduling_from_doc(doc["schedule"]),
         conversation_id=doc["conversation_id"],
+        telegram_chat_id=doc.get("telegram_chat_id"),  # absent from older documents
         status_reason=doc["status_reason"],
         status_changed_at=_read_when(doc["status_changed_at"]),
         revision=revision,

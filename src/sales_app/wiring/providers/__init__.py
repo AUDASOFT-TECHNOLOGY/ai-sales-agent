@@ -4,7 +4,15 @@
 means writing its module and listing it here; nothing else in the application names it.
 """
 
-from sales_app.wiring.providers import google_sheets, hubspot, meta, openai, whatsapp
+from sales_app.wiring.providers import (
+    email,
+    google_sheets,
+    hubspot,
+    meta,
+    openai,
+    telegram,
+    whatsapp,
+)
 from sales_app.wiring.providers.registry import (
     DuplicateCredentialError,
     DuplicateProviderError,
@@ -31,6 +39,8 @@ def default_registry() -> ProviderRegistry:
             google_sheets.DESCRIPTOR,
             hubspot.DESCRIPTOR,
             whatsapp.DESCRIPTOR,
+            email.DESCRIPTOR,
+            telegram.DESCRIPTOR,
             openai.DESCRIPTOR,
             meta.DESCRIPTOR,
         ]
@@ -52,10 +62,12 @@ __all__ = [
     "UniquenessRule",
     "UnknownProviderError",
     "default_registry",
+    "email",
     "fake_descriptor",
     "google_sheets",
     "hubspot",
     "meta",
     "openai",
+    "telegram",
     "whatsapp",
 ]

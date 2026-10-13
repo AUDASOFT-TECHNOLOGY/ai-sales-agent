@@ -6,6 +6,7 @@ by field, according to what the source declares it owns.
 """
 
 from collections.abc import Collection
+from dataclasses import replace
 
 from sales_app.sourcing.fields import ProspectField
 from sales_app.sourcing.ports import ProspectState
@@ -73,7 +74,14 @@ def merge_prospect(
         client_id=source.client_id,
         prospect_id=prospect_id,  # type: ignore[arg-type]  # a plain str at run time
         display_name=source.display_name,
-        contact=source.contact,
+        contact=replace(
+            source.contact,
+            telegram_chat_id=revansa(
+                ProspectField.TELEGRAM_CHAT_ID,
+                source.contact.telegram_chat_id,
+                state.telegram_chat_id if state else None,
+            ),
+        ),
         status=status,
         stage=revansa(ProspectField.STAGE, source.stage, state.stage if state else None),
         locale=source.locale,

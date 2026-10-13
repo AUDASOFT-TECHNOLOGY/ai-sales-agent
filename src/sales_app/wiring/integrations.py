@@ -15,6 +15,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from sales_app.config import ClientConfig
+from sales_app.config.runtime_config import channel_provider_key
+from sales_app.inbox import InboxPoller
 from sales_app.settings import Settings
 from sales_app.sourcing.consent import ConsentWriter
 from sales_app.sourcing.ports import OperationalStore, ProspectSource
@@ -27,7 +29,8 @@ from sales_app.wiring.providers import (
     openai,
     whatsapp,
 )
-from sales_core.contracts import Channel
+from sales_core.approval import ApprovalMode
+from sales_core.contracts import Channel, InboundMessage
 from sales_core.ports import LLMProvider, MessagingChannel, SalesRepository, WebhookParser
 
 # The factories now live in the providers' descriptors; these names are what existing importers
@@ -45,7 +48,12 @@ class ChannelProvider:
     build: Callable[[ClientConfig], MessagingChannel]
     routing_key: Callable[[ClientConfig], str | None]  # which account inbound events address
     webhook_secret: Callable[[ClientConfig], str | None]  # what signs inbound requests
-    build_parser: Callable[[Mapping[str, str]], WebhookParser]  # from {routing_key: secret}
+    # From {routing_key: secret}; None for a channel with no webhook (e-mail: see `build_inbox`).
+    build_parser: Callable[[Mapping[str, str]], WebhookParser] | None
+    # What the scheduler polls for replies, one per run; None for a channel that calls us.
+    build_inbox: Callable[[ClientConfig], InboxPoller] | None = None
+    # Answers a sender no prospect matches (see `ChannelSupport.answer_unknown`); None: no answer.
+    answer_unknown: Callable[[ClientConfig, InboundMessage], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +67,24 @@ class IntegrationBuilders:
     # One client's operational store / consent registry, or None when the deployment has none.
     operational_stores: Callable[[str], OperationalStore] | None = None
     consent: Callable[[str], ConsentWriter] | None = None
+
+    # ---- polling the channels that do not call us ------------------------------------------
+
+    def polls_inbox(self, config: ClientConfig) -> bool:
+        """Whether this client's replies are fetched by the scheduler. Never in a dry run, which
+        does not talk to the outside: a message read there would be marked read and then dropped."""
+        if config.effective_mode is ApprovalMode.DRY_RUN:
+            return False
+        key = channel_provider_key(config)
+        provider = self.channels.get(key) if key is not None else None
+        return provider is not None and provider.build_inbox is not None
+
+    def open_inbox(self, config: ClientConfig) -> InboxPoller:
+        key = channel_provider_key(config)
+        provider = self.channels.get(key) if key is not None else None
+        if provider is None or provider.build_inbox is None:
+            raise LookupError("this client's channel has no inbox to poll")
+        return provider.build_inbox(config)
 
 
 def default_builders(
@@ -92,7 +118,9 @@ def default_builders(
             build=descriptor.build,
             routing_key=support.routing_key,
             webhook_secret=support.webhook_secret,
-            build_parser=parser,
+            build_parser=parser if support.build_parser is not None else None,
+            build_inbox=support.build_inbox,
+            answer_unknown=support.answer_unknown,
         )
 
     def runnable(kind: ProviderKind):

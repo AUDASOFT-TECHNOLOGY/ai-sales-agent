@@ -105,7 +105,9 @@ class ProspectChange:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ProspectState:
-    """What Revansa itself holds about one prospect. Never a name, a number or an address.
+    """What Revansa itself holds about one prospect. Never a name, a number or an address, with one
+    exception: `telegram_chat_id`, the chat the person opened with the client's bot. No source can
+    hold it (the person gave it to the bot, not to the CRM), so it lives here or nowhere.
 
     `status` is None until Revansa first sets one. `revision` counts the writes of this record: a
     save that carries a stale revision is refused (`StateConflictError`), so a concurrent edit by a
@@ -118,6 +120,7 @@ class ProspectState:
     stage: str | None = None
     schedule: Scheduling = field(default_factory=Scheduling)
     conversation_id: ConversationId | None = None
+    telegram_chat_id: str | None = None
     status_reason: str | None = None
     status_changed_at: datetime | None = None
     revision: int = 0
@@ -263,7 +266,11 @@ class OperationalStore(FactsReader, FactsWriter, Protocol):
     def get_local_prospect(self, prospect_id: ProspectId) -> Prospect | None: ...
 
     def find_local_by_contact(
-        self, *, phone: str | None = None, email: str | None = None
+        self,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        telegram_chat_id: str | None = None,
     ) -> Prospect | None: ...
 
     def create_local_prospects(self, prospects: Sequence[Prospect]) -> None:

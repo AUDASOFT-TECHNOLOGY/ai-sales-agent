@@ -153,7 +153,7 @@ class TestBuildFailures:
         results = {
             "unknown_sheets_provider": case(raw_overrides={"sheets": {"provider": "airtable"}}),
             "unknown_llm_provider": case(raw_overrides={"llm": {"provider": "anthropic"}}),
-            "unknown_channel_provider": case(raw_overrides={"whatsapp": {"provider": "telegram"}}),
+            "unknown_channel_provider": case(raw_overrides={"whatsapp": {"provider": "signal"}}),
             "brain_cannot_be_imported": case(
                 raw_overrides={"brain": {"factory": "no_such_module_xyz:good_brain"}}
             ),
@@ -167,7 +167,7 @@ class TestBuildFailures:
                 raw_overrides={"brain": {"factory": "app_test_brains:not_a_brain"}}
             ),
             "unknown_channel_provider_in_dry_run": case(
-                raw_overrides={"whatsapp": {"provider": "telegram"}}, ceiling=DRY
+                raw_overrides={"whatsapp": {"provider": "signal"}}, ceiling=DRY
             ),
         }
         assert_golden("runtime_build_failures", results)

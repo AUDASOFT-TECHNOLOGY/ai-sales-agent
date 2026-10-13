@@ -58,13 +58,14 @@ required column is reported (never guessed at) and the tab is not used until it 
 | `display_name` | yes | client | text | name shown to humans and passed to the Brain |
 | `phone` | yes | client | any phone format | the WhatsApp number; compared by its digits. Blank means "not contactable" |
 | `email` | no | client | text | contact e-mail |
-| `preferred_channel` | no | client | `whatsapp`, `sms`, `email` | preferred channel |
+| `preferred_channel` | no | client | `whatsapp`, `sms`, `email`, `telegram` | preferred channel |
 | `locale` | no | client | text, e.g. `fr`, `ar-TN` | prospect language, passed to the Brain |
 | `status` | yes | **shared** | `new`, `active`, `paused`, `opted_out`, `closed` | lifecycle; blank means `new` |
 | `stage` | yes | **shared** | free text | the Brain's own funnel label; opaque to the Core |
 | `next_action_type` | yes | **shared** | `follow_up`, `reminder`, `callback`, `first_contact` | what is due next |
 | `next_action_due_at` | yes | **shared** | date and time | when it is due. Type and date must be set together |
 | `conversation_id` | no | agent | text | link to the conversation; derived if blank |
+| `telegram_chat_id` | no | agent | digits | the Telegram chat the prospect opened with the client's bot (see [telegram-channel.md](telegram-channel.md)). Written the day they start the bot; **added to the right of your columns if the sheet has none**; never edit it by hand |
 | `last_contacted_at` | yes | agent | date and time | last outbound message |
 | `last_inbound_at` | yes | agent | date and time | last inbound message |
 | `follow_up_count` | yes | agent | whole number | follow-ups already sent |

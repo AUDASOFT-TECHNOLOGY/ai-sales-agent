@@ -169,8 +169,24 @@ class CompositeRepository:
         return self._local_view(local, gate) if local is not None else None
 
     def find_prospect_by_contact(
-        self, *, phone: str | None = None, email: str | None = None
+        self,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        telegram_chat_id: str | None = None,
     ) -> Prospect | None:
+        chat = (telegram_chat_id or "").strip()
+        if chat:  # a chat id is learned by Revansa, so only Revansa's own records can hold it
+            for prospect_id, state in self._store.list_states().items():
+                if state.telegram_chat_id == chat:
+                    found = self.get_prospect(prospect_id)
+                    if found is not None:
+                        return found
+            local = self._store.find_local_by_contact(telegram_chat_id=chat)
+            if local is not None:
+                return self._local_view(local, self._gate(read_source=False))
+        if not (phone or email):
+            return None
         record = self._source.find_prospect_by_contact(phone=phone, email=email)
         if record is not None:
             public = self._public_id(record.prospect_id)
@@ -261,8 +277,16 @@ class CompositeRepository:
             if event.event_type == KEYWORD_OPT_OUT_EVENT and event.prospect_id is not None:
                 record = self._find_raw(event.prospect_id)
                 if record is not None:
+                    state = self._state_of(event.prospect_id)
+                    chat = (state.telegram_chat_id if state else None) or (
+                        record.contact.telegram_chat_id
+                    )
                     self._consent.record_opt_out(
-                        ContactInfo(phone=record.contact.phone, email=record.contact.email),
+                        ContactInfo(
+                            phone=record.contact.phone,
+                            email=record.contact.email,
+                            telegram_chat_id=chat,
+                        ),
                         origin=Origin.INBOUND_KEYWORD,
                         reason=ReasonCode.KEYWORD,
                         actor=KEYWORD_ACTOR,
@@ -396,6 +420,8 @@ def _apply(state: ProspectState, change: _Change) -> ProspectState:
         updated = replace(updated, stage=new.stage)
     if ProspectField.CONVERSATION_ID in fields:
         updated = replace(updated, conversation_id=new.conversation_id)
+    if ProspectField.TELEGRAM_CHAT_ID in fields:
+        updated = replace(updated, telegram_chat_id=new.contact.telegram_chat_id)
     return updated
 
 

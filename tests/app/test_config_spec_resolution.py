@@ -501,10 +501,14 @@ class TestProviders:
         )
 
     def test_a_disabled_channel_need_not_be_runnable(self, tmp_path):
-        document = canonical_fixture("doc_v3.json")  # its email channel is disabled and unknown
+        document = canonical_fixture("doc_v3.json")
+        document["channels"][1]["provider"] = (
+            "carrier_pigeon"  # disabled, and a provider nobody knows
+        )
         result = new_pipeline(tmp_path, canonical_fixture("wiring_canonical.json"), document)
         assert any(
-            "channels[1].provider: unknown provider 'email'" in p for p in result.provider_problems
+            "channels[1].provider: unknown provider 'carrier_pigeon'" in p
+            for p in result.provider_problems
         )
         assert not any("cannot be run yet" in p for p in result.provider_problems)
 

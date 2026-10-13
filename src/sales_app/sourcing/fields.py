@@ -25,6 +25,7 @@ class ProspectField(StrEnum):
     LAST_INBOUND_AT = "last_inbound_at"
     FOLLOW_UP_COUNT = "follow_up_count"
     CONVERSATION_ID = "conversation_id"
+    TELEGRAM_CHAT_ID = "telegram_chat_id"  # learned by Revansa from the person: never a source's
 
 
 # What a person is: always the source's, whatever else it owns. A source may leave them empty.
@@ -69,6 +70,8 @@ def field_value(prospect: Prospect, field: ProspectField) -> object:
             return schedule.follow_up_count
         case ProspectField.CONVERSATION_ID:
             return prospect.conversation_id
+        case ProspectField.TELEGRAM_CHAT_ID:
+            return prospect.contact.telegram_chat_id
 
 
 def changed_fields(before: Prospect, after: Prospect) -> frozenset[ProspectField]:

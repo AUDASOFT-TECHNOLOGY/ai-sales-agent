@@ -13,12 +13,14 @@ from sales_core.contracts import (
     ActionId,
     ActionPriority,
     ActionStatus,
+    Channel,
     ClientContext,
     Prospect,
     ProspectStatus,
     SalesAction,
     SalesActionType,
 )
+from sales_core.safety import awaits_opt_in
 
 DEFAULT_DAILY_ACTION_LIMIT = 20
 
@@ -57,6 +59,7 @@ def plan_daily_actions(
     existing_actions: Sequence[SalesAction],
     now: datetime,
     daily_limit: int = DEFAULT_DAILY_ACTION_LIMIT,
+    channel: Channel | None = None,
 ) -> DailyPlan:
     """Select up to `daily_limit` outreach actions for the client's current local day.
 
@@ -68,6 +71,10 @@ def plan_daily_actions(
     count toward the limit; `reply` actions neither count nor are ever planned here.
     A prospect is skipped if it already has an action in flight, or was already given an
     outreach action today, so repeated runs and re-runs after a crash create no duplicates.
+
+    `channel`, when given, is the channel the client sends on. On one where the person must start the
+    conversation (Telegram), a prospect who has not is skipped: planning them would spend the quota
+    on a message that cannot be sent. They are planned the day they say hello.
 
     Every planned action is due `now`, has status PLANNED, and uses its idempotency key as id.
     """
@@ -93,6 +100,8 @@ def plan_daily_actions(
 
     tiers: dict[SalesActionType, list[tuple[datetime, Prospect]]] = {t: [] for t in _TIER_ORDER}
     for prospect in prospects:
+        if channel is not None and awaits_opt_in(prospect, channel):
+            continue
         tier = _tier_of(prospect, now)
         if tier is not None and prospect.prospect_id not in blocked:
             due = prospect.schedule.next_action_due_at or now  # unscheduled new prospects tie

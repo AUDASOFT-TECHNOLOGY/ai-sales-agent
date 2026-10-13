@@ -528,10 +528,14 @@ class FakeOperationalStore:
         return self._local_view(prospect_id) if prospect_id in self._local else None
 
     def find_local_by_contact(
-        self, *, phone: str | None = None, email: str | None = None
+        self,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        telegram_chat_id: str | None = None,
     ) -> Prospect | None:
         self._maybe_fail("find_local_by_contact")
-        wanted = lookup_keys(phone=phone, email=email)
+        wanted = lookup_keys(phone=phone, email=email, telegram_chat_id=telegram_chat_id)
         if not wanted:
             return None
         return next(
@@ -584,6 +588,10 @@ class FakeOperationalStore:
         identity, state = self._local[prospect_id], self._states[prospect_id]
         return replace(
             identity,
+            contact=replace(
+                identity.contact,
+                telegram_chat_id=state.telegram_chat_id or identity.contact.telegram_chat_id,
+            ),
             status=state.status if state.status is not None else ProspectStatus.NEW,
             stage=state.stage,
             schedule=state.schedule,

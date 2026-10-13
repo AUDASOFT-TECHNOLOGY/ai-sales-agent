@@ -38,6 +38,11 @@ from sales_app.api.admin_clients import (
 )
 from sales_app.api.client import make_current_client_dependency
 from sales_app.bootstrap import Application
+from sales_app.channel_status import (
+    channel_problem,
+    channel_provider_of,
+    is_channel_reason,
+)
 from sales_app.client_auth import is_client_active
 from sales_app.client_profiles import ClientProfile
 from sales_app.config import validate_settings_document
@@ -131,8 +136,12 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
     model = ""
     problems: tuple[str, ...] = ("no settings",)
     source_problem = "Choose where your prospects come from, in your data source settings."
+    channel = "whatsapp"
+    channel_issue: str | None = None
     if found is not None:
         raw, document = found
+        channel = channel_provider_of(raw, document)
+        channel_issue = channel_problem(application, client_id, channel, document)
         source_problem = _source_problem(
             application, client_id, source_provider(raw, document), document
         )
@@ -141,6 +150,18 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
         model = value.strip() if isinstance(value, str) else ""
         problems = validate_settings_document(client_id, raw, document).errors
 
+    platform_ok = not [m for m in registry.missing(client_id) if not is_channel_reason(m)]
+    # WhatsApp is connected by the administrator, so a client on it has only its number to give.
+    # A client on any other channel has that channel's own check instead.
+    channel_check = (
+        _Check(
+            "whatsapp_number",
+            bool(profile.whatsapp_number) and not profile.whatsapp_reconnect_required,
+            "Your WhatsApp number is missing, or was changed and is not connected yet.",
+        )
+        if channel == "whatsapp"
+        else _Check("channel_ready", channel_issue is None, channel_issue or "")
+    )
     return (
         _Check(
             "enabled_by_administrator",
@@ -165,14 +186,10 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
         _Check("source_connected", source_problem is None, source_problem or ""),
         _Check(
             "platform_connections",
-            not registry.missing(client_id),
+            platform_ok,
             "The platform connections for your agent are not complete. Contact your administrator.",
         ),
-        _Check(
-            "whatsapp_number",
-            bool(profile.whatsapp_number) and not profile.whatsapp_reconnect_required,
-            "Your WhatsApp number is missing, or was changed and is not connected yet.",
-        ),
+        channel_check,
     )
 
 

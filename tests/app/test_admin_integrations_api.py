@@ -257,6 +257,9 @@ class TestClientCredentials:
             "whatsapp.access_token",
             "whatsapp.phone_number_id",
             "hubspot.access_token",
+            "email.password",
+            "telegram.bot_token",
+            "telegram.webhook_secret",
         }
         assert all(c["scope"] == "client" for c in body)
 

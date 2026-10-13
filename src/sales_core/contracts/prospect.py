@@ -13,6 +13,9 @@ from sales_core.contracts.ids import ClientId, ConversationId, ProspectId
 class ContactInfo:
     phone: str | None = None  # E.164 expected; normalisation is the adapter's job
     email: str | None = None
+    # The Telegram chat a person opened with the client's bot. A bot cannot write first, so this
+    # is empty until the person starts the conversation; it is the only Telegram address there is.
+    telegram_chat_id: str | None = None
     preferred_channel: Channel | None = None
 
 

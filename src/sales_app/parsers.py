@@ -46,7 +46,10 @@ def build_parsers(
     parsers: dict[str, WebhookParser] = {}
     newest = {c.client_id: c for c in configs}
     for name, provider in builders.channels.items():
+        if provider.build_parser is None:
+            continue  # this channel does not call us: its replies are polled (`sales_app.inbox`)
         secrets: dict[str, str] = {}
+        holders: dict[str, str] = {}  # routing key -> the one client it belongs to
         serving = False
         for config in [*installed, *configs]:
             if channel_provider_key(config) != name:
@@ -55,6 +58,11 @@ def build_parsers(
             key = provider.routing_key(config)
             secret = provider.webhook_secret(newest.get(config.client_id, config))
             if key and secret:
+                # An account belongs to one client. The clients in force come first, so a client
+                # that is being set up on someone else's account can never take its messages (nor
+                # replace its secret): it is refused when its runtime is built, and ignored here.
+                if holders.setdefault(key, config.client_id) != config.client_id:
+                    continue
                 secrets[key] = secret
         if serving:
             parsers[name] = provider.build_parser(secrets)

@@ -56,6 +56,9 @@ PROSPECTS = TabSpec(
         ColumnSpec("next_action_type", H),
         ColumnSpec("next_action_due_at", H),
         ColumnSpec("conversation_id", S, required=False),
+        # The Telegram chat a prospect opened with the bot. Written by the agent the day they say
+        # hello, so a spreadsheet without it gets it then (`GoogleSheetsRepository`).
+        ColumnSpec("telegram_chat_id", S, required=False),
         ColumnSpec("last_contacted_at", S),
         ColumnSpec("last_inbound_at", S),
         ColumnSpec("follow_up_count", S),

@@ -3,8 +3,8 @@
   "brain_factory_missing": "alpha: brain: 'app_test_brains' has no callable 'nope'",
   "brain_is_not_a_brain": "alpha: brain: app_test_brains:not_a_brain returned object, which has no decide() method",
   "brain_raises": "alpha: brain: app_test_brains:raising_brain failed while building the Brain: cannot build this brain",
-  "unknown_channel_provider": "alpha: unknown whatsapp provider 'telegram'",
-  "unknown_channel_provider_in_dry_run": "alpha: unknown whatsapp provider 'telegram'",
+  "unknown_channel_provider": "alpha: unknown whatsapp provider 'signal'",
+  "unknown_channel_provider_in_dry_run": "alpha: unknown whatsapp provider 'signal'",
   "unknown_llm_provider": "alpha: llm: alpha: unknown llm provider 'anthropic'",
   "unknown_sheets_provider": "alpha: repository: alpha: unknown sheets provider 'airtable'"
 }

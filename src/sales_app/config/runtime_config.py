@@ -95,7 +95,7 @@ def channel_provider_key(config: ClientConfig) -> str | None:
             ids = ", ".join(channel.id for channel in enabled)
             raise MultipleChannelsError(f"more than one channel is enabled ({ids})")
         return enabled[0].provider if enabled else None
-    return config.spec.whatsapp.provider
+    return config.spec.channel_provider
 
 
 # ---- ClientSpec -> the legacy view the wiring reads ----------------------------------------------

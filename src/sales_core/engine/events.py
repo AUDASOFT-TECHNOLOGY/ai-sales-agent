@@ -22,10 +22,12 @@ PROSPECT_PAUSED = "prospect.paused"
 PROSPECT_HANDOFF = "prospect.handoff"
 PROSPECT_CLOSED = "prospect.closed"
 PROSPECT_CREATED = "prospect.created"  # an unknown sender the client chose to engage
+PROSPECT_LINKED = "prospect.linked"  # a prospect started the conversation on an opt-in channel
 
 INBOUND_RECEIVED = "inbound.received"
 INBOUND_DUPLICATE = "inbound.duplicate"
 INBOUND_UNKNOWN_SENDER = "inbound.unknown_sender"
+INBOUND_LINK_REFUSED = "inbound.link_refused"  # a claim on a prospect that could not be honoured
 INBOUND_ERROR = "inbound.error"
 
 DRYRUN_DECISION = "dryrun.decision"

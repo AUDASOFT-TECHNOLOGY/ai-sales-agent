@@ -140,10 +140,15 @@ class GoogleSheetsRepository:
             return None
 
     def find_prospect_by_contact(
-        self, *, phone: str | None = None, email: str | None = None
+        self,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        telegram_chat_id: str | None = None,
     ) -> Prospect | None:
         wanted_phone = codecs.digits(phone) if phone else ""
         wanted_email = email.strip().casefold() if email else ""
+        wanted_chat = telegram_chat_id.strip() if telegram_chat_id else ""
         with self._lock:
             table, accepted = self._prospects()
             for row, prospect in accepted:
@@ -156,7 +161,12 @@ class GoogleSheetsRepository:
                     and contact.email
                     and contact.email.strip().casefold() == wanted_email
                 )
-                if by_phone or by_email:
+                by_chat = (
+                    wanted_chat
+                    and contact.telegram_chat_id
+                    and contact.telegram_chat_id.strip() == wanted_chat
+                )
+                if by_phone or by_email or by_chat:
                     snapshot = _Snapshot(prospect, codecs.row_raw(table, row))
                     self._prospect_snaps[prospect.prospect_id] = snapshot
                     return prospect
@@ -169,10 +179,19 @@ class GoogleSheetsRepository:
             for prospect in prospects:
                 self._require_client(prospect.client_id, f"prospect {prospect.prospect_id!r}")
             table = self._read_table("prospects")
+            if any(p.contact.telegram_chat_id for p in prospects):
+                table = self._with_telegram_column(table)
             # Checked against every row, including ones the adapter cannot read (never contacted).
             ids = {codecs.text_of(table.cell(r, "prospect_id")) for r in table.rows}
             phones = {codecs.digits(codecs.text_of(table.cell(r, "phone"))) for r in table.rows}
+            chats = {codecs.text_of(table.cell(r, "telegram_chat_id")) for r in table.rows}
             for prospect in prospects:
+                chat = (prospect.contact.telegram_chat_id or "").strip()
+                if chat and chat in chats:
+                    raise ValueError(
+                        f"prospect {prospect.prospect_id!r}: the Telegram chat is already in use"
+                    )
+                chats.add(chat)
                 phone = codecs.digits(prospect.contact.phone or "")
                 if prospect.prospect_id in ids:
                     raise ValueError(f"prospect {prospect.prospect_id!r} already exists")
@@ -198,6 +217,8 @@ class GoogleSheetsRepository:
             for prospect in incoming.values():
                 self._require_client(prospect.client_id, f"prospect {prospect.prospect_id!r}")
             table = self._read_table("prospects")
+            if any(p.contact.telegram_chat_id for p in incoming.values()):
+                table = self._with_telegram_column(table)
             rows = self._rows_by_id(table, "prospect_id")
             plan = _WritePlan(table)
             for prospect_id, prospect in incoming.items():
@@ -468,6 +489,18 @@ class GoogleSheetsRepository:
         title = self._tabs.title(key)
         (values,) = self._api.read(self._sid, [quote_tab(title)])
         return parse_table(TAB_SPECS[key], title, values, self._mapping)
+
+    def _with_telegram_column(self, table: Table) -> Table:
+        """The prospects table, having the `telegram_chat_id` column added to the right of the
+        client's own if the sheet has none. A chat id that could not be written would be lost
+        without a word, and the person would never be recognised again: the column is the only
+        place the link lives, so it is created rather than skipped."""
+        if "telegram_chat_id" in table.index:
+            return table
+        header = header_for(TAB_SPECS["prospects"], "telegram_chat_id", self._mapping)
+        span = f"{quote_tab(table.title)}!{_col(len(table.headers))}1"
+        self._api.write(self._sid, [(span, [[header]])])
+        return self._read_table("prospects")
 
     def _read_header(self, key: str) -> Table:
         title = self._tabs.title(key)

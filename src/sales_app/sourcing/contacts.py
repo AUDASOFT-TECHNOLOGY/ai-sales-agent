@@ -12,6 +12,7 @@ from sales_core.contracts import ContactInfo
 
 PHONE = "phone"
 EMAIL = "email"
+TELEGRAM = "telegram"
 
 
 def normalize_phone(value: str | None) -> str:
@@ -29,7 +30,8 @@ def normalize_email(value: str | None) -> str:
 
 
 def contact_keys(contact: ContactInfo) -> frozenset[str]:
-    """Every comparable identity a contact carries, as `phone:<digits>` and `email:<address>`.
+    """Every comparable identity a contact carries, as `phone:<digits>`, `email:<address>` and
+    `telegram:<chat id>`.
 
     Two prospects are the same contact if their key sets meet. A contact with neither a usable
     phone nor an e-mail has no key and is never matched to anything.
@@ -41,12 +43,18 @@ def contact_keys(contact: ContactInfo) -> frozenset[str]:
     address = normalize_email(contact.email)
     if address:
         keys.add(f"{EMAIL}:{address}")
+    chat = (contact.telegram_chat_id or "").strip()
+    if chat:
+        keys.add(f"{TELEGRAM}:{chat}")
     return frozenset(keys)
 
 
-def lookup_keys(*, phone: str | None = None, email: str | None = None) -> frozenset[str]:
-    """The keys a lookup by phone and/or e-mail asks for (same form as `contact_keys`)."""
-    return contact_keys(ContactInfo(phone=phone, email=email))
+def lookup_keys(
+    *, phone: str | None = None, email: str | None = None, telegram_chat_id: str | None = None
+) -> frozenset[str]:
+    """The keys a lookup by phone, e-mail and/or Telegram chat asks for (same form as
+    `contact_keys`)."""
+    return contact_keys(ContactInfo(phone=phone, email=email, telegram_chat_id=telegram_chat_id))
 
 
 def same_contact(first: ContactInfo, second: ContactInfo) -> bool:

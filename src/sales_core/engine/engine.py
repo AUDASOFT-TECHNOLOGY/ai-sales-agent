@@ -79,8 +79,10 @@ from sales_core.ports import (
     SalesRepository,
 )
 from sales_core.safety import (
+    OPT_IN_CHANNELS,
     BlockReason,
     SafetyVerdict,
+    awaits_opt_in,
     check_contactable,
     check_ready_to_send,
     is_opt_out_message,
@@ -135,6 +137,20 @@ class Engine:
         with self._lock:
             return prospects_contacted(self._repo.list_actions({ActionStatus.SENT}))
 
+    def prospects_awaiting_opt_in(self) -> tuple[Prospect, ...]:
+        """The prospects who could be written to but have not started the conversation yet, on a
+        channel where they must (read-only). Empty on any other channel. These are the people a
+        client has to invite; none of them is lost or paused meanwhile."""
+        with self._lock:
+            channel = self._channel.channel
+            if channel not in OPT_IN_CHANNELS:
+                return ()
+            return tuple(
+                p
+                for p in self._repo.list_prospects()
+                if p.status in _ACTIVE_STATUSES and awaits_opt_in(p, channel)
+            )
+
     @property
     def _dry_run(self) -> bool:
         return self._config.mode is ApprovalMode.DRY_RUN
@@ -158,6 +174,7 @@ class Engine:
                 existing_actions=actions,
                 now=now,
                 daily_limit=self._config.daily_action_limit,
+                channel=self._channel.channel,
             )
             if plan.actions and not self._dry_run:
                 # One batch, BEFORE any Brain call: the quota stays reserved if we crash.
@@ -520,7 +537,11 @@ class Engine:
         if self._dry_run:
             self._emit(ev.DRYRUN_INBOUND, sender=inbound.sender, external_id=inbound.external_id)
             return InboundReceipt(status=InboundStatus.DRY_RUN)
-        prospect = self._find_sender(inbound) or self._engage_unknown_sender(inbound)
+        prospect = (
+            self._find_sender(inbound)
+            or self._link_sender(inbound)
+            or self._engage_unknown_sender(inbound)
+        )
         if prospect is None:
             return InboundReceipt(status=InboundStatus.UNKNOWN_SENDER)
 
@@ -589,18 +610,25 @@ class Engine:
             )
             return None
         by_email = inbound.channel is Channel.EMAIL
+        by_telegram = inbound.channel is Channel.TELEGRAM
         address = inbound.sender.strip()
         digits = "".join(c for c in address if c.isdigit())
-        key = address.casefold() if by_email or not digits else digits
+        if by_telegram:
+            key = f"tg{address.casefold()}"  # a chat id is not a phone number
+        else:
+            key = address.casefold() if by_email or not digits else digits
+        by_phone = not by_email and not by_telegram
+        name = inbound.metadata.get("sender_name", "").strip() if by_telegram else ""
         prospect = Prospect(
             client_id=self._client.client_id,
             # The local day is part of the id: that is what `_created_on` counts, and it survives
             # restarts. A redelivery never reaches here again: the prospect is found by contact.
             prospect_id=ProspectId(f"{_created_prefix(today)}{key}"),
-            display_name=address,
+            display_name=name or address,
             contact=ContactInfo(
                 email=address if by_email else None,
-                phone=None if by_email else address,
+                phone=address if by_phone else None,
+                telegram_chat_id=address if by_telegram else None,
                 preferred_channel=inbound.channel,
             ),
             status=ProspectStatus.ACTIVE,
@@ -624,7 +652,48 @@ class Engine:
     def _find_sender(self, inbound: InboundMessage) -> Prospect | None:
         if inbound.channel is Channel.EMAIL:
             return self._repo.find_prospect_by_contact(email=inbound.sender)
+        if inbound.channel is Channel.TELEGRAM:
+            return self._repo.find_prospect_by_contact(telegram_chat_id=inbound.sender)
         return self._repo.find_prospect_by_contact(phone=inbound.sender)
+
+    def _link_sender(self, inbound: InboundMessage) -> Prospect | None:
+        """Attach a sender we cannot find to the prospect they were invited as, when the adapter
+        has authenticated who they are (an invitation only we could issue, or a number the
+        platform confirmed is theirs).
+
+        Only on a channel where the person must speak first, and only if that prospect is not
+        already attached to someone else: a forwarded invitation must never take over a
+        conversation, nor can a second person replace the first.
+        """
+        if inbound.channel not in OPT_IN_CHANNELS:
+            return None
+        claimed: Prospect | None = None
+        via = ""
+        if inbound.linked_prospect_id:
+            via, claimed = (
+                "invitation",
+                self._repo.get_prospect(ProspectId(inbound.linked_prospect_id)),
+            )
+        elif inbound.shared_phone:
+            via, claimed = "phone", self._repo.find_prospect_by_contact(phone=inbound.shared_phone)
+        if claimed is None:
+            if via:
+                self._emit(ev.INBOUND_LINK_REFUSED, via=via, reason="no such prospect")
+            return None
+        if claimed.contact.telegram_chat_id:
+            self._emit(
+                ev.INBOUND_LINK_REFUSED,
+                prospect_id=claimed.prospect_id,
+                via=via,
+                reason="already linked",
+            )
+            return None
+        linked = replace(
+            claimed, contact=replace(claimed.contact, telegram_chat_id=inbound.sender.strip())
+        )
+        self._repo.update_prospects([linked])
+        self._emit(ev.PROSPECT_LINKED, prospect_id=claimed.prospect_id, via=via)
+        return linked
 
     def _touch_last_inbound(self, prospect: Prospect, at: datetime) -> None:
         current = prospect.schedule.last_inbound_at

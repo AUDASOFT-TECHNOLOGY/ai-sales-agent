@@ -17,6 +17,11 @@ DEFAULT_OPT_OUT_KEYWORDS = frozenset({"stop"})
 
 _CONTACTABLE_STATUSES = frozenset({ProspectStatus.NEW, ProspectStatus.ACTIVE})
 
+# Channels where the person must open the conversation before anyone may write to them (a Telegram
+# bot cannot message a user who never started it). Having no address there is not "no contact
+# details": it is "has not said hello yet", and the prospect is waiting, not lost.
+OPT_IN_CHANNELS = frozenset({Channel.TELEGRAM})
+
 
 class BlockReason(StrEnum):
     UNKNOWN_PROSPECT = "unknown_prospect"
@@ -24,6 +29,7 @@ class BlockReason(StrEnum):
     PAUSED = "paused"  # requires human handling
     CLOSED = "closed"
     NO_CONTACT = "no_contact"  # no address for the channel
+    NOT_LINKED = "not_linked"  # the channel needs the person to start the conversation first
     NO_DRAFT = "no_draft"
     CLIENT_MISMATCH = "client_mismatch"
 
@@ -42,8 +48,20 @@ ALLOWED = SafetyVerdict()
 
 def recipient_for(prospect: Prospect, channel: Channel) -> str | None:
     """The prospect's address on `channel`, if we have one."""
-    address = prospect.contact.email if channel is Channel.EMAIL else prospect.contact.phone
+    match channel:
+        case Channel.EMAIL:
+            address = prospect.contact.email
+        case Channel.TELEGRAM:
+            address = prospect.contact.telegram_chat_id
+        case _:
+            address = prospect.contact.phone
     return address if address and address.strip() else None
+
+
+def awaits_opt_in(prospect: Prospect, channel: Channel) -> bool:
+    """True if the prospect cannot be written to on `channel` only because they have not started
+    the conversation there yet."""
+    return channel in OPT_IN_CHANNELS and recipient_for(prospect, channel) is None
 
 
 def check_contactable(prospect: Prospect | None, channel: Channel) -> SafetyVerdict:
@@ -59,7 +77,9 @@ def check_contactable(prospect: Prospect | None, channel: Channel) -> SafetyVerd
     if prospect.status not in _CONTACTABLE_STATUSES:  # future statuses are blocked by default
         return SafetyVerdict(BlockReason.PAUSED)
     if recipient_for(prospect, channel) is None:
-        return SafetyVerdict(BlockReason.NO_CONTACT)
+        return SafetyVerdict(
+            BlockReason.NOT_LINKED if channel in OPT_IN_CHANNELS else BlockReason.NO_CONTACT
+        )
     return ALLOWED
 
 

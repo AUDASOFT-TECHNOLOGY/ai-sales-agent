@@ -370,6 +370,9 @@ class TestService:
             "whatsapp.access_token",
             "whatsapp.phone_number_id",
             "hubspot.access_token",
+            "email.password",
+            "telegram.bot_token",
+            "telegram.webhook_secret",
         }
         assert not any(s.configured for s in svc.describe(GLOBAL_SCOPE))
 

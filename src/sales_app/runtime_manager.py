@@ -189,7 +189,7 @@ class RuntimeManager:
         if config is None:
             self._set(client_id, FAILED, resolution.errors)
             return None
-        clash = self._phone_clash(config)
+        clash = self._phone_clash(config) or self._mailbox_clash(config) or self._bot_clash(config)
         if clash is not None:
             self._set(client_id, FAILED, (clash,))
             return None
@@ -296,6 +296,26 @@ class RuntimeManager:
         for other in self._registry.configs():
             if other.client_id != config.client_id and other.phone_number_id == phone:
                 return f"WhatsApp phone number id is already used by client {other.client_id!r}"
+        return None
+
+    def _mailbox_clash(self, config: ClientConfig) -> str | None:
+        """A mailbox must belong to one client: two reading it would take each other's replies."""
+        mailbox = config.mailbox_key
+        if not mailbox:
+            return None
+        for other in self._registry.configs():
+            if other.client_id != config.client_id and other.mailbox_key == mailbox:
+                return f"the mailbox is already used by client {other.client_id!r}"
+        return None
+
+    def _bot_clash(self, config: ClientConfig) -> str | None:
+        """A Telegram bot has one webhook: two clients on it would take each other's messages."""
+        bot = config.telegram_bot_id
+        if not bot:
+            return None
+        for other in self._registry.configs():
+            if other.client_id != config.client_id and other.telegram_bot_id == bot:
+                return f"the Telegram bot is already used by client {other.client_id!r}"
         return None
 
     def _set(self, client_id: str, state: str, errors: Sequence[str] = ()) -> None:

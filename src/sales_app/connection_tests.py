@@ -416,3 +416,117 @@ def _hubspot_category(response: httpx.Response) -> str | None:
     except Exception:  # noqa: BLE001 - an unreadable body just means no code
         return None
     return category if isinstance(category, str) and _HUBSPOT_CATEGORY.match(category) else None
+
+
+# ---- e-mail -----------------------------------------------------------------------------------
+
+
+class MailProbeFailure(Exception):
+    """What a mailbox check found, by kind: `auth`, `unreachable` or `refused`. Nothing else: not
+    what the server said, which may repeat the login."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
+class MailProbe(Protocol):
+    def check_smtp(self) -> None: ...
+
+    def check_imap(self) -> None: ...
+
+
+_MAIL_PROBLEMS = {
+    "auth": "the server refused the login",
+    "refused": "this server cannot be used (it is not a public mail server)",
+    "unreachable": "the server could not be reached",
+}
+
+
+def check_email(*, probe: MailProbe | None) -> ConnectionResult:
+    """Log in to the sending server and to the mailbox: no message is sent, none is read. `probe`
+    is None when the mailbox is not set up (settings or password missing)."""
+    if probe is None:
+        return ConnectionResult(False, "Email: the settings or the password are not set yet.")
+    details: dict[str, str] = {}
+    problems: list[str] = []
+    for name, check in (("smtp", probe.check_smtp), ("imap", probe.check_imap)):
+        try:
+            check()
+        except MailProbeFailure as failure:
+            details[name] = failure.kind
+            problems.append(f"{name.upper()}: {_MAIL_PROBLEMS.get(failure.kind, 'it failed')}")
+        else:
+            details[name] = "ok"
+    if problems:
+        return ConnectionResult(False, "Email: " + "; ".join(problems) + ".", details)
+    return ConnectionResult(True, "Email: sending and reading both work.", details)
+
+
+# ---- Telegram ---------------------------------------------------------------------------------
+
+
+class BotProbeFailure(Exception):
+    """What a bot check found, by kind: `auth`, `unreachable`, `rate_limited` or `service_error`.
+    Nothing else: not what Telegram said, and never the token."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
+class BotProbe(Protocol):
+    def check_bot(self) -> str:
+        """The bot's username, or `BotProbeFailure`."""
+        ...
+
+    def register_webhook(self, url: str, secret: str) -> None:
+        """Tell Telegram where to deliver, or `BotProbeFailure`."""
+        ...
+
+    def webhook_state(self, expected_url: str | None) -> str:
+        """`ok`, `not_set`, `other_url` or `failing`: whether Telegram delivers to us."""
+        ...
+
+
+_BOT_PROBLEMS = {
+    "auth": "Telegram refused this bot token",
+    "unreachable": "Telegram could not be reached",
+    "rate_limited": "Telegram asks to try again later",
+    "rejected": "Telegram refused the platform's address for this bot",
+    "service_error": "Telegram had a problem",
+}
+_WEBHOOK_PROBLEMS = {
+    "not_set": "Telegram has no webhook for this bot yet: connect the bot",
+    "other_url": "this bot sends its messages somewhere else: connect the bot again",
+    "failing": "Telegram cannot deliver messages to the platform",
+}
+
+
+def check_telegram(*, probe: BotProbe | None, expected_url: str | None) -> ConnectionResult:
+    """Ask Telegram who the bot is and where it delivers: nothing is sent to anyone. `probe` is None
+    when the bot is not set up (no token). `expected_url` is where the platform receives updates,
+    None when the deployment has no public address (then only the token can be checked)."""
+    if probe is None:
+        return ConnectionResult(False, "Telegram: the bot token is not set yet.")
+    try:
+        probe.check_bot()
+    except BotProbeFailure as failure:
+        message = _BOT_PROBLEMS.get(failure.kind, "it failed")
+        return ConnectionResult(False, f"Telegram: {message}.", {"bot": failure.kind})
+    details = {"bot": "ok"}
+    if expected_url is None:
+        details["webhook"] = "unchecked"
+        return ConnectionResult(
+            False,
+            "Telegram: the bot token works, but the platform has no public address to receive "
+            "messages on. Contact your administrator.",
+            details,
+        )
+    state = probe.webhook_state(expected_url)
+    details["webhook"] = state
+    if state != "ok":
+        return ConnectionResult(
+            False, f"Telegram: {_WEBHOOK_PROBLEMS.get(state, 'the webhook is not ready')}.", details
+        )
+    return ConnectionResult(True, "Telegram: the bot works and delivers to the platform.", details)

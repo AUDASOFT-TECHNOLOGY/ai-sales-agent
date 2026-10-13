@@ -113,6 +113,41 @@ class TestProspects:
         assert env.repo.find_prospect_by_contact() is None
 
 
+class TestTelegramContact:
+    """A prospect's Telegram chat is a contact like the others, found by what Telegram gave us."""
+
+    def test_found_by_the_chat_id_and_only_by_it(self, env):
+        contact = ContactInfo(phone="+15550000001", telegram_chat_id="424242")
+        env.seed_prospects(p("p1", contact=contact), p("p2"))
+        assert env.repo.find_prospect_by_contact(telegram_chat_id="424242").prospect_id == "p1"
+        assert env.repo.find_prospect_by_contact(telegram_chat_id=" 424242 ").prospect_id == "p1"
+        assert env.repo.find_prospect_by_contact(telegram_chat_id="42424") is None
+        assert env.repo.find_prospect_by_contact(telegram_chat_id="") is None
+        # a phone number is not a chat id, and a chat id is not a phone number
+        assert env.repo.find_prospect_by_contact(telegram_chat_id="15550000001") is None
+        assert env.repo.find_prospect_by_contact(phone="424242") is None
+
+    def test_a_chat_id_written_by_an_update_is_read_back_and_found(self, env):
+        env.seed_prospects(p("p1"))
+        current = env.repo.get_prospect(ProspectId("p1"))
+        linked = replace(current, contact=replace(current.contact, telegram_chat_id="424242"))
+        env.repo.update_prospects([linked])
+        assert env.repo.get_prospect(ProspectId("p1")) == linked
+        assert env.repo.find_prospect_by_contact(telegram_chat_id="424242") == linked
+        assert env.repo.find_prospect_by_contact(phone=current.contact.phone) == linked
+
+    def test_a_prospect_created_from_a_chat_is_read_listed_and_found(self, env):
+        created = p(
+            "p2",
+            contact=ContactInfo(telegram_chat_id="515151", preferred_channel=Channel.TELEGRAM),
+            status=ProspectStatus.ACTIVE,
+            schedule=Scheduling(last_inbound_at=NOW),
+        )
+        env.repo.create_prospects([created])
+        assert env.repo.get_prospect(ProspectId("p2")) == created
+        assert env.repo.find_prospect_by_contact(telegram_chat_id="515151") == created
+
+
 class TestCreateProspects:
     def test_a_created_prospect_can_be_read_listed_and_found_by_contact(self, env):
         existing = p("p1")

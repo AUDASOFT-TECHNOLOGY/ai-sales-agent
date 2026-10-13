@@ -17,6 +17,8 @@ from pydantic import (
 )
 
 from sales_app.brain_registry import BRAIN_KEY_PATTERN
+from sales_app.config.email_settings import EmailChannelSettings
+from sales_app.config.telegram_settings import TelegramChannelSettings
 from sales_core.approval import ApprovalMode
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -110,6 +112,34 @@ class SourceSection(_Section):
 
     provider: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,31}$")]
     settings: dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _leave_out_empty_settings(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        if not data.get("settings"):
+            data.pop("settings", None)
+        return data
+
+
+class ChannelSection(_Section):
+    """Which provider the client talks to its prospects through, when it chose one itself.
+
+    Without it the channel is the operator's (`whatsapp.provider`). `settings` holds the client's
+    non-secret choices for that provider (never a password) and is left out of a dump when empty.
+    Whether the client may use that channel at all is the Admin's decision, judged when the
+    configuration is resolved (see `sales_app.config.channel_access`), not here.
+    """
+
+    provider: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,31}$")]
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _known_settings(self) -> "ChannelSection":
+        if self.provider == "email" and self.settings:
+            EmailChannelSettings.model_validate(self.settings)  # a half-written mailbox is refused
+        if self.provider == "telegram" and self.settings:
+            TelegramChannelSettings.model_validate(self.settings)
+        return self
 
     @model_serializer(mode="wrap")
     def _leave_out_empty_settings(self, handler: Any) -> dict[str, Any]:
@@ -253,16 +283,27 @@ class ClientFile(_Section):
     source: SourceSection | None = None  # None: the source is the store's provider
     llm: LLMSection
     whatsapp: WhatsAppSection
+    channel: ChannelSection | None = None  # None: the channel is `whatsapp.provider`
     schedule: ScheduleSection = Field(default_factory=ScheduleSection)
     inbound: InboundSection = Field(default_factory=InboundSection)
 
     @model_serializer(mode="wrap")
-    def _leave_out_an_unset_source(self, handler: Any) -> dict[str, Any]:
-        """A configuration that never chose a source dumps exactly as before sources existed."""
+    def _leave_out_what_was_never_chosen(self, handler: Any) -> dict[str, Any]:
+        """A configuration that never chose a source or a channel dumps exactly as before."""
         data = handler(self)
-        if data.get("source") is None:
-            data.pop("source", None)
+        for key in ("source", "channel"):
+            if data.get(key) is None:
+                data.pop(key, None)
         return data
+
+    @property
+    def channel_provider(self) -> str:
+        """The provider prospects are talked to through: the chosen one, else the operator's."""
+        return self.channel.provider if self.channel is not None else self.whatsapp.provider
+
+    @property
+    def channel_settings(self) -> dict[str, Any]:
+        return dict(self.channel.settings) if self.channel is not None else {}
 
     @property
     def source_provider(self) -> str:

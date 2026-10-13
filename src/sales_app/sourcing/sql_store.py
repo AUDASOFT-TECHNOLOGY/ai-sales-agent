@@ -212,9 +212,13 @@ class SqlOperationalStore:
         return None if row is None else self._local(row)
 
     def find_local_by_contact(
-        self, *, phone: str | None = None, email: str | None = None
+        self,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        telegram_chat_id: str | None = None,
     ) -> Prospect | None:
-        wanted = lookup_keys(phone=phone, email=email)
+        wanted = lookup_keys(phone=phone, email=email, telegram_chat_id=telegram_chat_id)
         if not wanted:
             return None
         row = self._rows.find_local_by_keys(sorted(wanted))
@@ -285,6 +289,10 @@ class SqlOperationalStore:
         state = self._state(row["state"])
         return replace(
             identity,
+            contact=replace(
+                identity.contact,
+                telegram_chat_id=state.telegram_chat_id or identity.contact.telegram_chat_id,
+            ),
             status=state.status if state.status is not None else ProspectStatus.NEW,
             stage=state.stage,
             schedule=state.schedule,

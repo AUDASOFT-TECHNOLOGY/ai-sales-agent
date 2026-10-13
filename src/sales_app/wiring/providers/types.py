@@ -103,7 +103,18 @@ class ChannelSupport:
     kind: str
     routing_key: Callable[[Any], str | None]  # which account an inbound event addresses
     webhook_secret: Callable[[Any], str | None]  # what signs inbound requests for that account
-    build_parser: Callable[[Mapping[str, str], str | None], Any]
+    # None for a channel that does not call us (e-mail): it has no webhook, and `build_inbox`
+    # makes what the scheduler polls instead. A channel has at least one way to hear back.
+    build_parser: Callable[[Mapping[str, str], str | None], Any] | None
+    build_inbox: Callable[[Any], Any] | None = None
+    # What to do with a message from someone no prospect matches, on a channel where that person is
+    # waiting for an answer (Telegram asks them to share their number). Never raises into the
+    # webhook: the application logs a failure and goes on.
+    answer_unknown: Callable[[Any, Any], None] | None = None
+
+    def __post_init__(self) -> None:
+        if self.build_parser is None and self.build_inbox is None:
+            raise ValueError("a channel needs a webhook parser or an inbox to hear back from")
 
 
 @dataclass(frozen=True, slots=True)

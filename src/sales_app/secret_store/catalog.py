@@ -127,6 +127,21 @@ CATALOG: tuple[CredentialSpec, ...] = (
         pattern=re.compile(r"^\d{5,32}$"),
         rule="must be the numeric id Meta gives the phone number (digits only)",
     ),
+    CredentialSpec("email.password", ScopeKind.CLIENT, "Email password"),
+    CredentialSpec(
+        "telegram.bot_token",
+        ScopeKind.CLIENT,
+        "Telegram bot token",
+        pattern=re.compile(r"^\d{5,20}:[A-Za-z0-9_-]{30,64}$"),
+        rule="must be the token BotFather gives (it looks like 123456789:AA...)",
+    ),
+    CredentialSpec(
+        "telegram.webhook_secret",
+        ScopeKind.CLIENT,
+        "Telegram webhook secret",
+        pattern=re.compile(r"^[A-Za-z0-9_-]{32,256}$"),
+        rule="must be 32 to 256 letters, digits, - or _",
+    ),
     CredentialSpec(
         "hubspot.access_token",
         ScopeKind.CLIENT,

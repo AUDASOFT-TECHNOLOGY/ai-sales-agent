@@ -61,17 +61,24 @@ CATALOG_BY_KEY = {spec.key: spec for spec in CATALOG}
 MODEL_LIST_KEYS = {"openai.model_sol", "openai.model_lune", "openai.models"}
 
 
-class TestTheRegistryHoldsTheFiveProviders:
-    def test_the_five_descriptors(self):
+class TestTheRegistryHoldsTheProviders:
+    def test_every_governed_channel_is_a_channel_provider_and_back(self):
+        from sales_app.config.channel_access import GOVERNED
+
+        assert {d.key for d in REGISTRY.list(CHANNEL)} == GOVERNED
+
+    def test_the_descriptors(self):
         assert [d.key for d in REGISTRY] == [
+            "email",
             "google_sheets",
             "hubspot",
             "meta",
             "openai",
+            "telegram",
             "whatsapp",
         ]
-        assert len(REGISTRY) == 5
-        for key in ("google_sheets", "hubspot", "whatsapp", "openai", "meta"):
+        assert len(REGISTRY) == 7
+        for key in ("email", "google_sheets", "hubspot", "whatsapp", "openai", "meta", "telegram"):
             assert key in REGISTRY and REGISTRY.require(key).key == key
 
     def test_keys_are_unique(self):
@@ -86,7 +93,7 @@ class TestTheRegistryHoldsTheFiveProviders:
     def test_providers_by_the_role_they_play(self):
         assert [d.key for d in REGISTRY.list(SOURCE)] == ["google_sheets", "hubspot"]
         assert [d.key for d in REGISTRY.list(STORE)] == ["google_sheets"]
-        assert [d.key for d in REGISTRY.list(CHANNEL)] == ["whatsapp"]
+        assert [d.key for d in REGISTRY.list(CHANNEL)] == ["email", "telegram", "whatsapp"]
         assert [d.key for d in REGISTRY.list(LLM)] == ["meta", "openai"]
 
     def test_the_descriptors_are_immutable(self):
@@ -437,20 +444,22 @@ class TestTheBuildersTheRuntimeUsesAreUnchanged:
             "consent",
         ]
 
-    def test_the_channel_provider_keeps_its_five_fields(self):
+    def test_the_channel_provider_keeps_its_fields_and_gains_the_inbox(self):
         assert [f.name for f in dataclasses.fields(ChannelProvider)] == [
             "kind",
             "build",
             "routing_key",
             "webhook_secret",
             "build_parser",
+            "build_inbox",  # added with e-mail, the one channel that is polled, not pushed
+            "answer_unknown",  # added with Telegram, where a stranger is asked who they are
         ]
 
     def test_the_table_has_the_same_providers_as_before(self):
         builders = self.builders()
         assert set(builders.repositories) == {"google_sheets"}
         assert set(builders.llms) == {"openai"}
-        assert set(builders.channels) == {"whatsapp"}
+        assert set(builders.channels) == {"whatsapp", "email", "telegram"}
 
     def test_each_entry_is_the_providers_own_factory(self):
         builders = self.builders()

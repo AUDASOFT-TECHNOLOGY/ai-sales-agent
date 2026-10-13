@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # provider's API wants are entered by the Admin in Settings, the single source of them (see
     # sales_app.llm_models.settings_catalog). Kept only so an older deployment still starts.
     model_upstream_ids: dict[str, str] = Field(default_factory=dict)
+    # The address people reach this deployment on (https://revansa.example). Telegram needs it to
+    # know where to deliver a client's messages (`<base>/webhooks/telegram`); unset, a Telegram bot
+    # can be saved and tested but not connected. No trailing path, never a secret.
+    public_base_url: str | None = None
     lock_file: Path = Path(".sales-agent.lock")
     host: str = "127.0.0.1"
     port: int = 8000

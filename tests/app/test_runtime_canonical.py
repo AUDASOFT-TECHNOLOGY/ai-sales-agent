@@ -542,10 +542,10 @@ class TestOneChannelRuns:
 
     def test_an_unknown_channel_provider_is_refused_at_build_time(self, tmp_path, monkeypatch):
         install_recording_vendors(monkeypatch)
-        config = self.with_channels(tmp_path, [{"provider": "email"}]).config
+        config = self.with_channels(tmp_path, [{"provider": "carrier_pigeon"}]).config
         with pytest.raises(RuntimeBuildError) as raised:
             build_runtime(config, default_builders(make_settings(tmp_path)), FakeClock(NOW))
-        assert str(raised.value) == "alpha: unknown channel provider 'email'"
+        assert str(raised.value) == "alpha: unknown channel provider 'carrier_pigeon'"
 
 
 def _parts(config):
@@ -752,7 +752,7 @@ class TestProvidersComeFromTheRegistry:
         builders = default_builders(make_settings(tmp_path))
         assert set(builders.repositories) == {"google_sheets"}
         assert set(builders.llms) == {"openai"}
-        assert set(builders.channels) == {"whatsapp"}
+        assert set(builders.channels) == {"whatsapp", "email", "telegram"}
 
     def test_a_declared_provider_that_cannot_run_is_refused_like_an_unknown_one(
         self, tmp_path, monkeypatch

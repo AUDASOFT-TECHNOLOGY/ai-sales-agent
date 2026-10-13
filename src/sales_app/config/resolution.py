@@ -60,6 +60,7 @@ SETTINGS_SECTION_KEYS: Mapping[str, tuple[str, ...]] = {
     "brain": ("settings", "settings_version"),
     "inbound": ("spontaneous_conversations", "unknown_contacts", "limits"),
     "source": ("provider", "settings"),
+    "channel": ("provider", "settings"),
 }
 _SECTIONS_BY_VERSION = {1: _SECTIONS_V1, 2: SETTINGS_SECTION_KEYS}
 
@@ -181,6 +182,11 @@ def extract_document(spec: ClientFile) -> dict[str, Any]:
         document["source"] = {"provider": spec.source_provider}
         if spec.source_settings:
             document["source"]["settings"] = deepcopy(spec.source_settings)
+    if spec.channel is not None:
+        # Written only when the client chose its own channel, for the same reason as `source`.
+        document["channel"] = {"provider": spec.channel.provider}
+        if spec.channel.settings:
+            document["channel"]["settings"] = deepcopy(spec.channel.settings)
     return document
 
 

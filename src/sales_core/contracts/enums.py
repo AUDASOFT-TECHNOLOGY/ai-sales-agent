@@ -11,6 +11,7 @@ class Channel(StrEnum):
     WHATSAPP = "whatsapp"
     SMS = "sms"
     EMAIL = "email"
+    TELEGRAM = "telegram"
 
 
 class Direction(StrEnum):

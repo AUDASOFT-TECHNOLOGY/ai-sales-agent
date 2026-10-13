@@ -123,13 +123,24 @@ class FakeSalesRepository:
         return self._prospects.get(prospect_id)
 
     def find_prospect_by_contact(
-        self, *, phone: str | None = None, email: str | None = None
+        self,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        telegram_chat_id: str | None = None,
     ) -> Prospect | None:
         self._maybe_fail("find_prospect_by_contact")
         wanted_phone = _digits(phone) if phone else ""
         wanted_email = email.strip().casefold() if email else ""
+        wanted_chat = telegram_chat_id.strip() if telegram_chat_id else ""
         for prospect in self._prospects.values():
             contact = prospect.contact
+            if (
+                wanted_chat
+                and contact.telegram_chat_id
+                and contact.telegram_chat_id.strip() == wanted_chat
+            ):
+                return prospect
             if wanted_phone and contact.phone and _digits(contact.phone) == wanted_phone:
                 return prospect
             if wanted_email and contact.email and contact.email.strip().casefold() == wanted_email:

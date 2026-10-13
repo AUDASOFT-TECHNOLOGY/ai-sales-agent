@@ -19,6 +19,8 @@ OWN_ADAPTER = {
     "google_sheets": {"google_sheets"},
     "hubspot": {"hubspot"},
     "whatsapp": {"whatsapp"},
+    "email": {"mail"},
+    "telegram": {"telegram"},
     "openai": {"openai"},
     "meta": set(),
 }

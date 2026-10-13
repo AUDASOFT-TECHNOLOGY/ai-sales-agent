@@ -335,7 +335,7 @@ class TestBootstrap:
         table = default_builders(make_settings(tmp_path))
         assert set(table.repositories) == {"google_sheets"}
         assert set(table.llms) == {"openai"}
-        assert set(table.channels) == {"whatsapp"}
+        assert set(table.channels) == {"whatsapp", "email", "telegram"}
 
     def test_close_waits_for_the_scheduler(self, tmp_path):
         application, _, _ = build_test_application(tmp_path, "alpha")

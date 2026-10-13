@@ -157,6 +157,7 @@ def decode_prospect(table: Table, row: Row, client_id: ClientId, zone: ZoneInfo)
     contact = ContactInfo(
         phone=phone or None,
         email=email or None,
+        telegram_chat_id=text_of(get("telegram_chat_id")) or None,
         preferred_channel=parse_enum(get("preferred_channel"), Channel, "preferred_channel"),
     )
     schedule = Scheduling(
@@ -196,6 +197,7 @@ def encode_prospect(prospect: Prospect, zone: ZoneInfo) -> dict[str, str]:
         "display_name": prospect.display_name,
         "phone": prospect.contact.phone or "",
         "email": prospect.contact.email or "",
+        "telegram_chat_id": prospect.contact.telegram_chat_id or "",
         "preferred_channel": str(prospect.contact.preferred_channel or ""),
         "locale": prospect.locale or "",
         "status": str(prospect.status),

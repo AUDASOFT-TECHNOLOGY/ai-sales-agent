@@ -32,10 +32,15 @@ class SalesRepository(Protocol):
     def get_prospect(self, prospect_id: ProspectId) -> Prospect | None: ...
 
     def find_prospect_by_contact(
-        self, *, phone: str | None = None, email: str | None = None
+        self,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        telegram_chat_id: str | None = None,
     ) -> Prospect | None:
         """Prospect whose contact matches (used for inbound messages). Phone numbers are compared
-        ignoring formatting (spaces, '+', dashes); emails ignoring case. None if no match."""
+        ignoring formatting (spaces, '+', dashes); emails ignoring case; a Telegram chat id exactly.
+        None if no match."""
         ...
 
     def create_prospects(self, prospects: Sequence[Prospect]) -> None:

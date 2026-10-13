@@ -48,6 +48,15 @@ CLIENT_ROUTES = {
     ("PUT", "/client/v1/source/credentials"),
     ("DELETE", "/client/v1/source/credentials"),
     ("POST", "/client/v1/source/test"),
+    # Lot E: the channel (e-mail or WhatsApp) and the mailbox password; the API field is `channel`.
+    ("GET", "/client/v1/channel"),
+    ("PUT", "/client/v1/channel"),
+    ("PUT", "/client/v1/channel/credentials"),
+    ("DELETE", "/client/v1/channel/credentials"),
+    ("POST", "/client/v1/channel/test"),
+    # Telegram: connecting the client's own bot, and the links that let its prospects start it.
+    ("POST", "/client/v1/channel/connect"),
+    ("GET", "/client/v1/channel/invitations"),
 }
 
 
