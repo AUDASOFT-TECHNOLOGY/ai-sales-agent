@@ -261,6 +261,9 @@ def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> Sa
     and the client never silently keeps running on the store's own provider instead.
     """
     spec, client_id = config.spec, config.client_id
+    if spec.lanes is not None:
+        # Only this client is affected: the others start, and this one is kept as not ready.
+        raise ClientUnavailableError(f"{client_id}: lanes: a client with lanes cannot be run yet")
     if not spec.source_apart_from_store:
         return _stage(
             client_id,

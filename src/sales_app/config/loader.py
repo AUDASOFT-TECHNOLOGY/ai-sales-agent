@@ -393,6 +393,9 @@ def _resolve_secrets(
         # Judged on every resolution, so a channel the Admin forbids afterwards stops a client that
         # had already set it up. Even a dry run is refused: the channel is not this client's.
         missing.append(f"The {channel} channel is not authorized for this account")
+    for lane in spec.lanes or ():
+        if lane.channel in GOVERNED and lane.channel not in granted:
+            missing.append(f"The {lane.channel} channel is not authorized for this account")
     # Not a secret: the platform-wide API version, else the one this client's file names.
     stored_version = secret_store.get(GLOBAL_SCOPE, WHATSAPP_API_VERSION) if secret_store else None
     values[WHATSAPP_API_VERSION] = stored_version or whatsapp.api_version

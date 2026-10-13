@@ -10,6 +10,7 @@ from sales_core.contracts.conversation import Conversation, MessageDraft
 from sales_core.contracts.enums import SCHEDULABLE_ACTION_TYPES, DecisionType, SalesActionType
 from sales_core.contracts.fact import Fact, FactProposal
 from sales_core.contracts.ids import ClientId
+from sales_core.contracts.lane import LaneRoute
 from sales_core.contracts.prospect import Prospect
 
 
@@ -39,6 +40,7 @@ class BrainRequest:
     action: SalesAction  # why the Brain is being asked (first contact, follow-up, reply)
     now: datetime  # injected so decisions are reproducible
     facts: tuple[Fact, ...] = ()  # what is known about the prospect
+    lane: LaneRoute | None = None  # the products in scope for this prospect; None: all of them
 
     def __post_init__(self) -> None:
         require_aware(self.now, "now")

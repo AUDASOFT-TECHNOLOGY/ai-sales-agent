@@ -9,9 +9,10 @@ from sales_core.contracts.enums import (
     SCHEDULABLE_ACTION_TYPES,
     ActionPriority,
     ActionStatus,
+    Channel,
     SalesActionType,
 )
-from sales_core.contracts.ids import ActionId, ClientId, ProspectId
+from sales_core.contracts.ids import ActionId, ClientId, LaneId, ProspectId
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -33,6 +34,10 @@ class SalesAction:
     next_stage: str | None = None
     next_action_type: SalesActionType | None = None
     next_action_due_at: datetime | None = None
+    # Where this action was meant to go, fixed when it was planned (or answered). A lane that is
+    # reconfigured later never redirects work already in flight. None: the client has no lanes.
+    lane_id: LaneId | None = None
+    channel: Channel | None = None
 
     def __post_init__(self) -> None:
         require_text(self.action_id, "action_id")

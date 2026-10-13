@@ -29,7 +29,15 @@ from sales_core.contracts.fact import (
     FactProposal,
     fact_identity,
 )
-from sales_core.contracts.ids import ActionId, ClientId, ConversationId, MessageId, ProspectId
+from sales_core.contracts.ids import (
+    ActionId,
+    ClientId,
+    ConversationId,
+    LaneId,
+    MessageId,
+    ProspectId,
+)
+from sales_core.contracts.lane import LaneRoute
 from sales_core.contracts.llm import LLMMessage, LLMRequest, LLMResponse
 from sales_core.contracts.messaging import InboundEvent, InboundMessage, OutboundMessage, SendResult
 from sales_core.contracts.payment import (
@@ -95,6 +103,8 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "LLMRole",
+    "LaneId",
+    "LaneRoute",
     "Message",
     "MessageDraft",
     "MessageId",

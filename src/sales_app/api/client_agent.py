@@ -28,7 +28,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from sales_app.agent_state import AgentStateStoreCorruptError, AgentStateStoreUnavailableError
 from sales_app.api.admin_clients import (
@@ -247,13 +247,28 @@ def current_source_fingerprint(application: Application, client_id: str) -> str 
     return source_fingerprint(application, client_id, source_provider(raw, document), document)
 
 
+def _operator_settings_ok(descriptor: ProviderDescriptor, document: Mapping[str, Any]) -> bool:
+    """Whether the operator's settings for a source chosen apart from the store are acceptable to
+    its provider (HubSpot: what the CRM's statuses mean). They are the Admin's, never the client's:
+    without them the runtime refuses to build the source, and the client must be told who can act."""
+    model = descriptor.settings_models.get(ProviderKind.SOURCE)
+    section = document.get("source")
+    if model is None or not isinstance(section, Mapping):
+        return True
+    try:
+        model.model_validate(section.get("settings") or {})
+    except ValidationError:
+        return False
+    return True
+
+
 def _source_problem(
     application: Application, client_id: str, provider: str, document: Mapping[str, Any]
 ) -> str | None:
     """Why the prospect source the client chose cannot run its agent yet, or None.
 
-    A source passes only when all of this holds: the runtime can run it (HubSpot, until its connector
-    exists, never does), the secret it needs from the client is stored, and the client's last real
+    A source passes only when all of this holds: the runtime can run it, the operator's settings for it are in place (HubSpot: what
+    its statuses mean), the secret it needs from the client is stored, and the client's last real
     connection test (`POST /client/v1/source/test`) succeeded **for the configuration it has now**.
     Change the source, the spreadsheet, the tab or the token and the result stops counting."""
     descriptor = application.provider_registry.get(provider)
@@ -270,6 +285,8 @@ def _source_problem(
             stored = False
         if not stored:
             return f"Your {credential.label} is missing. Add it in your data source settings."
+    if not _operator_settings_ok(descriptor, document):
+        return f"{descriptor.label} is not set up on the platform side yet. Contact your administrator."
     try:
         check = application.source_checks.get(client_id)
     except (SourceCheckStoreCorruptError, SourceCheckStoreUnavailableError):

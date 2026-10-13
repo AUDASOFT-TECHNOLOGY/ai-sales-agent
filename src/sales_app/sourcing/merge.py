@@ -33,7 +33,8 @@ def merge_prospect(
 
     Raises `ValueError` if `state` belongs to another client or to another prospect.
     """
-    owned_fields = frozenset(owned)
+    # The lane a person belongs to is Revansa's own, whatever a source says it owns.
+    owned_fields = frozenset(owned) - {ProspectField.LANE_ID}
     prospect_id = public_id if public_id is not None else source.prospect_id
     if state is not None and (
         state.client_id != source.client_id or state.prospect_id != prospect_id
@@ -92,4 +93,5 @@ def merge_prospect(
         ),
         schedule=schedule,
         attributes=source.attributes,
+        lane_id=revansa(ProspectField.LANE_ID, source.lane_id, state.lane_id if state else None),  # type: ignore[arg-type]
     )

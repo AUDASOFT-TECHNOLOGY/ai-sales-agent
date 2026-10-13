@@ -40,7 +40,15 @@ SETTINGS_SCHEMA_VERSION = 2
 SUPPORTED_SCHEMA_VERSIONS = (1, 2)
 
 # What a stored settings document may contain. Anything else is operator-owned or unknown.
-SETTINGS_TOP_KEYS = ("display_name", "timezone", "mode", "daily_action_limit", "opt_out_keywords")
+SETTINGS_TOP_KEYS = (
+    "display_name",
+    "timezone",
+    "mode",
+    "daily_action_limit",
+    "opt_out_keywords",
+    "sources",
+    "lanes",
+)
 _SECTIONS_V1: Mapping[str, tuple[str, ...]] = {
     "sheets": (
         "spreadsheet_id",
@@ -182,6 +190,10 @@ def extract_document(spec: ClientFile) -> dict[str, Any]:
         document["source"] = {"provider": spec.source_provider}
         if spec.source_settings:
             document["source"]["settings"] = deepcopy(spec.source_settings)
+    if spec.lanes is not None and spec.sources is not None:
+        # Written only for a client that runs lanes: every other document stays what it was.
+        document["sources"] = [s.model_dump(mode="json") for s in spec.sources]
+        document["lanes"] = [lane.model_dump(mode="json") for lane in spec.lanes]
     if spec.channel is not None:
         # Written only when the client chose its own channel, for the same reason as `source`.
         document["channel"] = {"provider": spec.channel.provider}
@@ -260,6 +272,11 @@ def _finish(client_id: str, candidate: ClientFile) -> SettingsCheck:
     prepared, problems = prepare_brain_settings(candidate, require_module=True)
     if problems:
         return SettingsCheck(None, None, problems)
+    from sales_app.config.lanes import lane_problems  # here: it needs the provider registry
+
+    lanes = lane_problems(prepared)
+    if lanes:
+        return SettingsCheck(None, None, tuple(lanes))
     return SettingsCheck(prepared, extract_document(prepared), ())
 
 

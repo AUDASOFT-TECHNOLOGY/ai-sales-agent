@@ -84,6 +84,7 @@ def prospect_to_doc(value: Prospect) -> dict[str, Any]:
         "conversation_id": value.conversation_id,
         "schedule": scheduling_to_doc(value.schedule),
         "attributes": dict(value.attributes),
+        "lane_id": value.lane_id,
     }
 
 
@@ -105,6 +106,7 @@ def prospect_from_doc(doc: Mapping[str, Any]) -> Prospect:
         conversation_id=doc["conversation_id"],
         schedule=scheduling_from_doc(doc["schedule"]),
         attributes=doc["attributes"],
+        lane_id=doc.get("lane_id"),  # absent from older documents
     )
 
 
@@ -119,6 +121,7 @@ def state_to_doc(value: ProspectState) -> dict[str, Any]:
         "schedule": scheduling_to_doc(value.schedule),
         "conversation_id": value.conversation_id,
         "telegram_chat_id": value.telegram_chat_id,
+        "lane_id": value.lane_id,
         "status_reason": value.status_reason,
         "status_changed_at": _when(value.status_changed_at),
     }
@@ -135,6 +138,7 @@ def state_from_doc(
         schedule=scheduling_from_doc(doc["schedule"]),
         conversation_id=doc["conversation_id"],
         telegram_chat_id=doc.get("telegram_chat_id"),  # absent from older documents
+        lane_id=doc.get("lane_id"),  # absent from older documents
         status_reason=doc["status_reason"],
         status_changed_at=_read_when(doc["status_changed_at"]),
         revision=revision,
@@ -168,6 +172,8 @@ def action_to_doc(value: SalesAction) -> dict[str, Any]:
         "next_stage": value.next_stage,
         "next_action_type": _opt(value.next_action_type, str),
         "next_action_due_at": _when(value.next_action_due_at),
+        "lane_id": value.lane_id,
+        "channel": _opt(value.channel, str),
     }
 
 
@@ -195,6 +201,8 @@ def action_from_doc(doc: Mapping[str, Any]) -> SalesAction:
         next_stage=doc["next_stage"],
         next_action_type=_opt(doc["next_action_type"], SalesActionType),
         next_action_due_at=_read_when(doc["next_action_due_at"]),
+        lane_id=doc.get("lane_id"),  # absent from older documents
+        channel=_opt(doc.get("channel"), Channel),
     )
 
 

@@ -121,6 +121,7 @@ class ProspectState:
     schedule: Scheduling = field(default_factory=Scheduling)
     conversation_id: ConversationId | None = None
     telegram_chat_id: str | None = None
+    lane_id: str | None = None  # the lane the person was attributed to; never changed once set
     status_reason: str | None = None
     status_changed_at: datetime | None = None
     revision: int = 0

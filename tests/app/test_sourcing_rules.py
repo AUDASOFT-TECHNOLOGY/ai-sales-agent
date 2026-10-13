@@ -794,4 +794,6 @@ class TestProblems:
             "unmapped_status",
             "unreadable_record",
             "duplicate_contact",
+            "duplicate_id",
+            "id_collision",
         }

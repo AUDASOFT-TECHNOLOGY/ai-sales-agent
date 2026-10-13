@@ -49,6 +49,12 @@ from sales_app.sourcing.ports import (
     SourceCapabilities,
 )
 from sales_app.sourcing.problems import ProblemCode, SourceProblem
+from sales_app.sourcing.sheets_source import (
+    RowIssue,
+    RowProblem,
+    SheetsProspectSource,
+    SheetsReader,
+)
 from sales_app.sourcing.statuses import (
     CONTACTABLE,
     MAPPABLE,
@@ -75,6 +81,10 @@ __all__ = [
     "ProspectField",
     "ProspectSource",
     "ProspectState",
+    "RowIssue",
+    "RowProblem",
+    "SheetsProspectSource",
+    "SheetsReader",
     "SourceAuthError",
     "SourceCapabilities",
     "SourceConflictError",

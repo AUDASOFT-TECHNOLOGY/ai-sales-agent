@@ -59,7 +59,7 @@ from sales_app.llm_models import check_model
 from sales_app.logs import client_logger
 from sales_app.secret_store import client_scope
 from sales_app.wiring import ClientRuntime
-from sales_app.wiring.providers import ProviderKind
+from sales_app.wiring.providers import ProviderKind, hubspot
 
 # How long a request waits for the running client to take a published change. The refresh goes on
 # in the background after that; `GET /clients/{id}/runtime-status` says how it ended.
@@ -116,6 +116,14 @@ class ClientLLMResponse(BaseModel):
 class UpdateClientLLMRequest(BaseModel):
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
+
+
+class ClientSourceSettingsResponse(BaseModel):
+    """What the operator decided about the client's HubSpot account. No secret is among it."""
+
+    provider: str
+    configured: bool  # False: nothing decided yet, so the agent cannot run on HubSpot
+    settings: dict[str, Any] | None = None
 
 
 class ClientWhatsAppResponse(BaseModel):
@@ -1134,5 +1142,58 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             model=check.spec.llm.model,
             api_key_env=check.spec.llm.api_key_env,
         )
+
+    # ---- the HubSpot source settings (the operator's: what the CRM's words mean) ------------
+
+    def hubspot_settings_of(client_id: str) -> tuple[dict, dict, str, dict | None]:
+        found = _wiring_and_base_document(application, client_id)
+        if found is None:
+            raise HTTPException(404, "no such client")
+        raw, document = found
+        section = document.get("source")
+        section = section if isinstance(section, Mapping) else {}
+        provider = str(section.get("provider") or "")
+        settings = section.get("settings")
+        return raw, document, provider, thaw_document(settings) if settings else None
+
+    @router.get("/clients/{client_id}/source", response_model=ClientSourceSettingsResponse)
+    def get_client_source(
+        client_id: str, admin: AdminUser = Depends(get_current_admin)
+    ) -> ClientSourceSettingsResponse:
+        ensure_client_access(admin, client_id)  # 404 before existence is even checked
+        _, _, provider, settings = hubspot_settings_of(client_id)
+        return ClientSourceSettingsResponse(
+            provider=provider, configured=settings is not None, settings=settings
+        )
+
+    @router.put("/clients/{client_id}/source", response_model=ClientSourceSettingsResponse)
+    def update_client_source(
+        client_id: str,
+        body: hubspot.HubSpotSourceSettings,
+        admin: AdminUser = Depends(require_owner),  # only an owner decides what the CRM means
+    ) -> ClientSourceSettingsResponse:
+        ensure_client_access(admin, client_id)  # 404 before existence is even checked
+        raw, base_document, provider, _ = hubspot_settings_of(client_id)
+        if provider != hubspot.KEY:
+            # The client chooses its source; the operator only settles what a chosen one means.
+            raise HTTPException(409, "this client has not chosen HubSpot as its source")
+        settings = body.model_dump(mode="json", exclude_none=True)
+        document = {**base_document, "source": {"provider": provider, "settings": settings}}
+        check = validate_settings_document(client_id, raw, document)
+        if check.errors or check.document is None:
+            raise HTTPException(400, "; ".join(check.errors) or "invalid configuration")
+        current = application.config_store.current(client_id)
+        try:
+            application.config_store.publish(
+                client_id,
+                check.document,
+                author=f"admin:{admin.username}",
+                note="update HubSpot source settings",
+                expected_parent=current.version if current is not None else None,
+            )
+        except ConfigConflictError as error:
+            raise HTTPException(409, str(error)) from error
+        _apply_now(application, client_id)
+        return ClientSourceSettingsResponse(provider=provider, configured=True, settings=settings)
 
     return router

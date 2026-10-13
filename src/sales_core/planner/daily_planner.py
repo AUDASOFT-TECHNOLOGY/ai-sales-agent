@@ -4,7 +4,7 @@ Callers (the engine) read prospects and existing actions from the repository, ca
 `plan_daily_actions`, and persist the returned actions themselves.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -15,6 +15,7 @@ from sales_core.contracts import (
     ActionStatus,
     Channel,
     ClientContext,
+    LaneRoute,
     Prospect,
     ProspectStatus,
     SalesAction,
@@ -60,6 +61,7 @@ def plan_daily_actions(
     now: datetime,
     daily_limit: int = DEFAULT_DAILY_ACTION_LIMIT,
     channel: Channel | None = None,
+    route_of: Callable[[Prospect], LaneRoute | None] | None = None,
 ) -> DailyPlan:
     """Select up to `daily_limit` outreach actions for the client's current local day.
 
@@ -75,6 +77,11 @@ def plan_daily_actions(
     `channel`, when given, is the channel the client sends on. On one where the person must start the
     conversation (Telegram), a prospect who has not is skipped: planning them would spend the quota
     on a message that cannot be sent. They are planned the day they say hello.
+
+    `route_of`, when given, replaces `channel` for a client that runs several lanes: it answers, for
+    each prospect, the lane they belong to and so the channel to write to them on (None: the
+    prospect is in no lane the client runs, and is skipped). The opt-in rule above is then applied
+    per prospect with their own channel, and every action planned carries its lane and channel.
 
     Every planned action is due `now`, has status PLANNED, and uses its idempotency key as id.
     """
@@ -99,8 +106,14 @@ def plan_daily_actions(
     used_keys = {a.idempotency_key for a in existing_actions}
 
     tiers: dict[SalesActionType, list[tuple[datetime, Prospect]]] = {t: [] for t in _TIER_ORDER}
+    routes: dict[str, LaneRoute] = {}
     for prospect in prospects:
-        if channel is not None and awaits_opt_in(prospect, channel):
+        if route_of is not None:
+            route = route_of(prospect)
+            if route is None or awaits_opt_in(prospect, route.channel):
+                continue
+            routes[prospect.prospect_id] = route
+        elif channel is not None and awaits_opt_in(prospect, channel):
             continue
         tier = _tier_of(prospect, now)
         if tier is not None and prospect.prospect_id not in blocked:
@@ -116,6 +129,7 @@ def plan_daily_actions(
             if key in used_keys or prospect.prospect_id in blocked:
                 continue
             blocked.add(prospect.prospect_id)  # also drops duplicate entries in `prospects`
+            route = routes.get(prospect.prospect_id)
             selected.append(
                 SalesAction(
                     action_id=ActionId(key),
@@ -126,6 +140,8 @@ def plan_daily_actions(
                     idempotency_key=key,
                     priority=_TIER_PRIORITY[tier],
                     status=ActionStatus.PLANNED,
+                    lane_id=route.lane_id if route is not None else None,
+                    channel=route.channel if route is not None else None,
                 )
             )
 

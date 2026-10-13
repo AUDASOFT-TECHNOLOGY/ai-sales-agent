@@ -297,4 +297,5 @@ class SqlOperationalStore:
             stage=state.stage,
             schedule=state.schedule,
             conversation_id=state.conversation_id,
+            lane_id=state.lane_id or identity.lane_id,
         )

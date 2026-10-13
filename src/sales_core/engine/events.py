@@ -23,6 +23,7 @@ PROSPECT_PAUSED = "prospect.paused"
 PROSPECT_HANDOFF = "prospect.handoff"
 PROSPECT_CLOSED = "prospect.closed"
 PROSPECT_CREATED = "prospect.created"  # an unknown sender the client chose to engage
+PROSPECT_LANE_ASSIGNED = "prospect.lane_assigned"  # written once: the lane a prospect belongs to
 PROSPECT_LINKED = "prospect.linked"  # a prospect started the conversation on an opt-in channel
 
 INBOUND_RECEIVED = "inbound.received"

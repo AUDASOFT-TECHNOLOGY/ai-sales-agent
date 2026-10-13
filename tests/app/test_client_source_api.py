@@ -725,8 +725,17 @@ def test_google_sheets_clients_stay_ready(world, alpha):
     assert body["ready"] is True and "source_connected" in check_ids(body, True)
 
 
+def settle_hubspot_mapping(world):
+    """What the Admin decides for a client on HubSpot (without it, the source is not ready)."""
+    response = world.admin().put(
+        "/admin/v1/clients/alpha/source", json={"status_mapping": {"NEW": "new"}}
+    )
+    assert response.status_code == 200, response.text
+
+
 def test_hubspot_does_not_start_while_the_runtime_could_not_build_it(world, alpha):
     choose(alpha, "hubspot")
+    settle_hubspot_mapping(world)
     save_token(alpha)
     assert alpha.post(TEST).json()["ok"] is True
     body = alpha.get(READINESS).json()
@@ -901,6 +910,7 @@ def test_replacing_the_token_cancels_the_test_made_with_the_old_one(fresh):
 def test_hubspot_with_a_current_successful_test_still_needs_a_runtime_that_built(fresh):
     alpha = fresh.browser("alpha")
     choose(alpha, "hubspot")
+    settle_hubspot_mapping(fresh)
     save_token(alpha)
     assert alpha.post(TEST).json()["ok"] is True
     assert alpha.get(SOURCE).json()["last_test"] == {

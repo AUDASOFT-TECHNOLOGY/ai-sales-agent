@@ -16,9 +16,11 @@ from sales_core.engine.models import (
     RunReport,
     UnknownSenderPolicy,
 )
+from sales_core.engine.routing import ChannelRouter
 
 __all__ = [
     "ActionOutcome",
+    "ChannelRouter",
     "Engine",
     "EngineConfig",
     "InboundPolicy",

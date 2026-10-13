@@ -114,6 +114,11 @@ class GoogleSheetsRepository:
         return self._client_id
 
     @property
+    def prospects_title(self) -> str:
+        """The title of the prospects tab, which is what a `RowProblem.tab` names."""
+        return self._tabs.title("prospects")
+
+    @property
     def problems(self) -> tuple[RowProblem, ...]:
         """Rows found unusable at the last read of each tab (they are excluded from results)."""
         with self._lock:
@@ -422,14 +427,17 @@ class GoogleSheetsRepository:
 
     # ==== onboarding helpers (not part of the port) ======================================
 
-    def verify(self) -> list[str]:
-        """Check the spreadsheet against the schema. Empty list means ready; 'warning:' is soft."""
+    def verify(self, tabs: Sequence[str] | None = None) -> list[str]:
+        """Check the spreadsheet against the schema. Empty list means ready; 'warning:' is soft.
+
+        `tabs` limits the check to some tabs (by key, e.g. `("prospects",)`), for a spreadsheet that
+        is only read as a source: the tabs of the store are then none of its business."""
         try:
             meta = self._api.metadata(self._sid)
         except SheetsApiError as error:
             return [str(error)]
         issues: list[str] = []
-        for key in TAB_SPECS:
+        for key in tabs if tabs is not None else TAB_SPECS:
             title = self._tabs.title(key)
             if title not in meta.titles:
                 if TAB_SPECS[key].on_demand:

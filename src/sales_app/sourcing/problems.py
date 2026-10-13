@@ -10,7 +10,9 @@ class ProblemCode(StrEnum):
     BLANK_STATUS = "blank_status"  # the record carries no status: left out, never assumed new
     UNMAPPED_STATUS = "unmapped_status"  # a status the operator did not map: left out
     UNREADABLE_RECORD = "unreadable_record"  # the record cannot be interpreted at all
-    DUPLICATE_CONTACT = "duplicate_contact"  # a local prospect and a source record share a contact
+    DUPLICATE_CONTACT = "duplicate_contact"  # two records of one repository share a contact
+    DUPLICATE_ID = "duplicate_id"  # a source holds the same id on several records: all left out
+    ID_COLLISION = "id_collision"  # a record's id looks like another source's (`<source>:...`)
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,8 +21,11 @@ class SourceProblem:
 
     `native_id` is the source's own id when it is safe to show (it passed the id check), otherwise
     None. `detail` is a fixed sentence: never a name, a number, an address or a credential.
+    `source_id` names the source instance it came from when a client has several (the composite
+    sets it; a source never does), so two sources' identical native ids are never confused.
     """
 
     code: ProblemCode
     detail: str
     native_id: str | None = None
+    source_id: str | None = None

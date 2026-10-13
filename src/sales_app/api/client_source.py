@@ -17,8 +17,8 @@ session cookie, so no id supplied by the browser can reach another client's sour
 - **The test** (`POST /client/v1/source/test`) makes one real, read-only call to the chosen source.
   A success proves the access works at that moment and nothing more; a failure is a fixed sentence.
 
-A source that is not run yet (HubSpot, until its connector exists) can be chosen, given its token and
-tested, but the agent cannot start on it (`readiness`), and switching the source pauses an agent that
+HubSpot can be chosen, given its token and tested, but the agent cannot start on it until the Admin
+has settled what its statuses mean (`readiness`), and switching the source pauses an agent that
 was running: the client starts it again deliberately.
 """
 

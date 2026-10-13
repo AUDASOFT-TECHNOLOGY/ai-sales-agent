@@ -5,6 +5,16 @@ assembly for a client whose prospects live in a CRM (or any `ProspectSource`) an
 lives in an `OperationalStore`. A client whose spreadsheet plays both roles does **not** go through
 here: `GoogleSheetsRepository` is used directly, unchanged.
 
+**Several sources.** A client may have more than one source, given as an ordered mapping
+`source_id -> source`. Each source names its prospects `<namespace>:<native id>` (its
+`capabilities.id_namespace`), so two sources holding the same native id never meet. At most one
+source may have no namespace: it keeps its native ids unchanged (a client's historical spreadsheet),
+and an id that starts with another source's `<namespace>:` is never read as its own. A single source
+behaves exactly as it always did. A contact held by two different sources is listed once, from the
+first source in order, and reported; if the one set aside has opted out, the one kept is opted out
+too (a refusal follows the person). What each source owns is respected record by record, so the
+status and opt-out signal of a source that has them (HubSpot) are not given to one that has not.
+
 **Reads** join what the source says a person is with what Revansa holds about them (`merge`), and
 treat a contact the consent registry blocks as `OPTED_OUT` whichever record it is found on. The
 registry is read once per read (`snapshot()`); the refusals a source reports for records it left
@@ -46,7 +56,12 @@ from sales_app.sourcing.fields import (
     ProspectField,
     changed_fields,
 )
-from sales_app.sourcing.identifiers import local_id_problem, to_native_id, to_public_id
+from sales_app.sourcing.identifiers import (
+    SEPARATOR,
+    local_id_problem,
+    to_native_id,
+    to_public_id,
+)
 from sales_app.sourcing.merge import merge_prospect
 from sales_app.sourcing.ports import OperationalStore, ProspectSource, ProspectState
 from sales_app.sourcing.problems import ProblemCode, SourceProblem
@@ -72,6 +87,18 @@ KEYWORD_OPT_OUT_EVENT = "prospect.opted_out"
 KEYWORD_ACTOR = "system:inbound"
 
 _UNKNOWN = "unknown prospect"
+_SOFT = "warning:"  # how a verification issue says it is not blocking
+_SINGLE_SOURCE = "source"  # the id of the one source of a client that has just one, unnamed
+
+
+@dataclass(frozen=True, slots=True)
+class _Bound:
+    """One source of the client, with what it was declared to be."""
+
+    source_id: str
+    source: ProspectSource
+    namespace: str | None
+    owned: frozenset[ProspectField]
 
 
 class _Gate:
@@ -101,16 +128,34 @@ class CompositeRepository:
 
     def __init__(
         self,
-        source: ProspectSource,
+        source: ProspectSource | Mapping[str, ProspectSource],
         store: OperationalStore,
         consent: ConsentWriter,
     ) -> None:
-        if source.client_id != store.client_id:
-            raise ValueError("the source and the store belong to different clients")
-        self._source = source
+        entries = (
+            list(source.items())
+            if isinstance(source, Mapping)
+            else [(source.capabilities.id_namespace or _SINGLE_SOURCE, source)]
+        )
+        if not entries:
+            raise ValueError("a repository needs at least one source")
+        bound: list[_Bound] = []
+        for source_id, each in entries:
+            if not source_id:
+                raise ValueError("a source needs an id")
+            if each.client_id != store.client_id:
+                raise ValueError("the source and the store belong to different clients")
+            bound.append(
+                _Bound(source_id, each, each.capabilities.id_namespace, each.capabilities.owned)
+            )
+        namespaces = [b.namespace for b in bound if b.namespace is not None]
+        if len(set(namespaces)) != len(namespaces):
+            raise ValueError("two sources share an id namespace")
+        if len(bound) > 1 and len(namespaces) < len(bound) - 1:
+            raise ValueError("only one source may keep its native ids")
+        self._sources = tuple(bound)
         self._store = store
         self._consent = consent
-        self._namespace = source.capabilities.id_namespace
         self._conflicts: tuple[SourceProblem, ...] = ()
 
     def __repr__(self) -> str:
@@ -123,31 +168,58 @@ class CompositeRepository:
     # ---- reading prospects ---------------------------------------------------------------
 
     def list_prospects(self) -> Sequence[Prospect]:
-        found = self._source.list_prospects()
+        read = [(b, b.source.list_prospects()) for b in self._sources]
         local = list(self._store.list_local_prospects())
         states = self._store.list_states()
         gate = self._gate(read_source=True)
 
-        owned = self._source.capabilities.owned
         result: list[Prospect] = []
         public_ids: set[str] = set()
         contacts: set[str] = set()
-        for record in found:
-            public = self._public_id(record.prospect_id)
-            if public is None:
-                continue
-            public_ids.add(public)
-            contacts |= contact_keys(record.contact)
-            result.append(
-                merge_prospect(
+        owners: dict[str, tuple[int, str]] = {}  # contact key -> (index in result, source id)
+        conflicts: list[SourceProblem] = []
+        for bound, found in read:
+            for record in found:
+                public = self._public_id(bound, record.prospect_id)
+                if public is None:
+                    continue
+                if self._shadowed(bound, public):
+                    conflicts.append(
+                        self._tagged(
+                            bound,
+                            SourceProblem(
+                                ProblemCode.ID_COLLISION,
+                                "a record has an id that belongs to another source",
+                            ),
+                        )
+                    )
+                    continue
+                keys = contact_keys(record.contact)
+                merged = merge_prospect(
                     record,
                     states.get(ProspectId(public)),
-                    owned=owned,
+                    owned=bound.owned,
                     public_id=public,
                     contact_opted_out=gate.blocks(record.contact),
                 )
-            )
-        conflicts: list[SourceProblem] = []
+                contacts |= keys
+                public_ids.add(public)
+                earlier = {
+                    owners[k] for k in keys if k in owners and owners[k][1] != bound.source_id
+                }
+                if earlier:  # the same person in two sources: the first one is the one contacted
+                    conflicts.append(
+                        self._tagged(
+                            bound, _conflict("a record shares a contact with another source")
+                        )
+                    )
+                    if merged.status is ProspectStatus.OPTED_OUT:  # a refusal follows the person
+                        for index in {i for i, _ in earlier}:
+                            result[index] = replace(result[index], status=ProspectStatus.OPTED_OUT)
+                    continue
+                for key in keys:
+                    owners.setdefault(key, (len(result), bound.source_id))
+                result.append(merged)
         for prospect in local:
             if prospect.prospect_id in public_ids:  # the source wins; the local one is set aside
                 conflicts.append(_conflict("a local prospect has the id of a source record"))
@@ -159,12 +231,15 @@ class CompositeRepository:
         return result
 
     def get_prospect(self, prospect_id: ProspectId) -> Prospect | None:
-        native = self._native_id(prospect_id)
-        gate = self._gate(read_source=native is not None)
-        if native is not None:
-            record = self._source.get_prospect(native)
+        found = self._locate(prospect_id)
+        gate = self._gate(read_source=found is not None)
+        if found is not None:
+            bound, native = found
+            record = bound.source.get_prospect(native)
             if record is not None:
-                return self._merged(record, prospect_id, gate)
+                return self._with_refusals_of_others(
+                    bound, record, self._merged(bound, record, prospect_id, gate), gate
+                )
         local = self._store.get_local_prospect(prospect_id)
         return self._local_view(local, gate) if local is not None else None
 
@@ -187,15 +262,18 @@ class CompositeRepository:
                 return self._local_view(local, self._gate(read_source=False))
         if not (phone or email):
             return None
-        record = self._source.find_prospect_by_contact(phone=phone, email=email)
-        if record is not None:
-            public = self._public_id(record.prospect_id)
-            if public is not None:
-                return self._merged(record, ProspectId(public), self._gate(read_source=True))
+        hit = self._find_in_sources(phone=phone, email=email)
+        if hit is not None:
+            bound, record = hit
+            public = self._public_id(bound, record.prospect_id)
+            if public is not None and not self._shadowed(bound, public):
+                gate = self._gate(read_source=True)
+                merged = self._merged(bound, record, ProspectId(public), gate)
+                return self._with_refusals_of_others(bound, record, merged, gate)
         local = self._store.find_local_by_contact(phone=phone, email=email)
         if local is None:
             return None
-        return self._local_view(local, self._gate(read_source=record is not None))
+        return self._local_view(local, self._gate(read_source=hit is not None))
 
     # ---- writing prospects ---------------------------------------------------------------
 
@@ -207,12 +285,10 @@ class CompositeRepository:
             self._require_client(prospect.client_id)
             if local_id_problem(prospect.prospect_id) is not None:
                 raise ValueError("the id cannot be held safely by the store")
-            native = self._native_id(prospect.prospect_id)
-            if native is not None and self._source.get_prospect(native) is not None:
+            found = self._locate(prospect.prospect_id)
+            if found is not None and found[0].source.get_prospect(found[1]) is not None:
                 raise ValueError("a prospect with this id already exists")
-            if self._source.find_prospect_by_contact(
-                phone=prospect.contact.phone, email=prospect.contact.email
-            ):
+            if self._find_in_sources(phone=prospect.contact.phone, email=prospect.contact.email):
                 raise ValueError("the contact is already in use")
         gate = self._gate(read_source=True)
         # A person who refused is never recreated as contactable, even if their record was left out.
@@ -296,10 +372,12 @@ class CompositeRepository:
     # ---- health --------------------------------------------------------------------------
 
     def problems(self) -> tuple[SourceProblem, ...]:
-        return (*self._source.problems(), *self._store.problems(), *self._conflicts)
+        found = [self._tagged(b, p) for b in self._sources for p in b.source.problems()]
+        return (*found, *self._store.problems(), *self._conflicts)
 
     def verify(self) -> list[str]:
-        return [*self._source.verify(), *self._store.verify()]
+        issues = [self._labelled(b, i) for b in self._sources for i in b.source.verify()]
+        return [*issues, *self._store.verify()]
 
     # ---- internals -----------------------------------------------------------------------
 
@@ -307,25 +385,92 @@ class CompositeRepository:
         if client_id != self.client_id:
             raise ValueError("an object belongs to another client")
 
-    def _public_id(self, native_id: str) -> str | None:
+    def _public_id(self, bound: _Bound, native_id: str) -> str | None:
         try:
-            return to_public_id(self._namespace, native_id)
+            return to_public_id(bound.namespace, native_id)
         except InvalidNativeIdError:
             return None
 
-    def _native_id(self, public_id: str) -> str | None:
-        try:
-            return to_native_id(self._namespace, public_id)
-        except ValueError:
+    def _locate(self, public_id: str) -> tuple[_Bound, str] | None:
+        """The source a public id belongs to and its native id there, or None (a local id, an id
+        of no source). A source with a namespace claims the ids that carry it; the one without
+        claims the rest, except what looks like another source's."""
+        keeper: _Bound | None = None
+        for bound in self._sources:
+            if bound.namespace is None:
+                keeper = bound
+                continue
+            try:
+                return bound, to_native_id(bound.namespace, public_id)
+            except ValueError:
+                continue
+        if keeper is None or self._shadowed(keeper, public_id):
             return None
+        return keeper, public_id
+
+    def _shadowed(self, bound: _Bound, public_id: str) -> bool:
+        """Whether an id kept as it is carries the namespace of another source: it could not be told
+        apart from that source's prospects, so it is left out and reported."""
+        if bound.namespace is not None:
+            return False
+        return any(
+            public_id.startswith(f"{other.namespace}{SEPARATOR}")
+            for other in self._sources
+            if other.namespace is not None
+        )
+
+    def _with_refusals_of_others(
+        self, bound: _Bound, record: Prospect, merged: Prospect, gate: _Gate
+    ) -> Prospect:
+        """A refusal follows the person, whichever source holds it: `list_prospects` does this for
+        every record, and a single read must not answer differently. If the same contact is
+        opted out in another source, so is this record. Only when there are several sources."""
+        if len(self._sources) == 1 or merged.status is ProspectStatus.OPTED_OUT:
+            return merged
+        for other in self._sources:
+            if other is bound:
+                continue
+            twin = other.source.find_prospect_by_contact(
+                phone=record.contact.phone, email=record.contact.email
+            )
+            if twin is None:
+                continue
+            public = self._public_id(other, twin.prospect_id)
+            if public is None or self._shadowed(other, public):
+                continue
+            if self._merged(other, twin, public, gate).status is ProspectStatus.OPTED_OUT:
+                return replace(merged, status=ProspectStatus.OPTED_OUT)
+        return merged
+
+    def _find_in_sources(
+        self, *, phone: str | None, email: str | None
+    ) -> tuple[_Bound, Prospect] | None:
+        for bound in self._sources:
+            record = bound.source.find_prospect_by_contact(phone=phone, email=email)
+            if record is not None:
+                return bound, record
+        return None
+
+    def _tagged(self, bound: _Bound, problem: SourceProblem) -> SourceProblem:
+        """With several sources, a problem says which one it comes from."""
+        return replace(problem, source_id=bound.source_id) if len(self._sources) > 1 else problem
+
+    def _labelled(self, bound: _Bound, issue: str) -> str:
+        if len(self._sources) == 1:
+            return issue
+        if issue.startswith(_SOFT):
+            return f"{_SOFT} [{bound.source_id}]{issue[len(_SOFT) :]}"
+        return f"[{bound.source_id}] {issue}"
 
     def _gate(self, *, read_source: bool) -> _Gate:
-        """Who is blocked now. Records the refusals of the source's latest reads first, so they
+        """Who is blocked now. Records the refusals of the sources' latest reads first, so they
         take effect in this very read; the contacts go nowhere else."""
         snapshot = self._consent.snapshot()
         if not read_source:
             return _Gate(snapshot, frozenset())
-        fresh = [c for c in self._source.refused_contacts() if not snapshot.blocks(c)]
+        fresh = [
+            c for b in self._sources for c in b.source.refused_contacts() if not snapshot.blocks(c)
+        ]
         extra: set[str] = set()
         for contact in fresh:
             extra |= contact_keys(contact)
@@ -339,11 +484,11 @@ class CompositeRepository:
     def _state_of(self, public_id: str) -> ProspectState | None:
         return self._store.get_states([ProspectId(public_id)]).get(ProspectId(public_id))
 
-    def _merged(self, record: Prospect, public_id: str, gate: _Gate) -> Prospect:
+    def _merged(self, bound: _Bound, record: Prospect, public_id: str, gate: _Gate) -> Prospect:
         return merge_prospect(
             record,
             self._state_of(public_id),
-            owned=self._source.capabilities.owned,
+            owned=bound.owned,
             public_id=public_id,
             contact_opted_out=gate.blocks(record.contact),
         )
@@ -355,9 +500,9 @@ class CompositeRepository:
 
     def _find_raw(self, prospect_id: str) -> Prospect | None:
         """The prospect as its home holds it (source record, or local prospect), or None."""
-        native = self._native_id(prospect_id)
-        if native is not None:
-            record = self._source.get_prospect(native)
+        found = self._locate(prospect_id)
+        if found is not None:
+            record = found[0].source.get_prospect(found[1])
             if record is not None:
                 return record
         return self._store.get_local_prospect(ProspectId(prospect_id))
@@ -366,11 +511,11 @@ class CompositeRepository:
         """Which fields of this prospect go to the store; refuses what may not be written."""
         self._require_client(incoming.client_id)
         public = incoming.prospect_id
-        native = self._native_id(public)
-        record = self._source.get_prospect(native) if native is not None else None
-        if record is not None:
-            before = self._merged(record, public, self._gate(read_source=True))
-            owned = self._source.capabilities.owned
+        found = self._locate(public)
+        record = found[0].source.get_prospect(found[1]) if found is not None else None
+        if found is not None and record is not None:
+            before = self._merged(found[0], record, public, self._gate(read_source=True))
+            owned = found[0].owned - {ProspectField.LANE_ID}
         else:
             local = self._store.get_local_prospect(public)
             if local is None:
@@ -422,6 +567,9 @@ def _apply(state: ProspectState, change: _Change) -> ProspectState:
         updated = replace(updated, conversation_id=new.conversation_id)
     if ProspectField.TELEGRAM_CHAT_ID in fields:
         updated = replace(updated, telegram_chat_id=new.contact.telegram_chat_id)
+    if ProspectField.LANE_ID in fields and state.lane_id is None:
+        # Written once: a person already attributed is never moved to another lane.
+        updated = replace(updated, lane_id=new.lane_id)
     return updated
 
 

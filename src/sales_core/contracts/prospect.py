@@ -6,7 +6,7 @@ from datetime import datetime
 
 from sales_core.contracts._validation import freeze_mapping, require_aware, require_text
 from sales_core.contracts.enums import Channel, ProspectStatus, SalesActionType
-from sales_core.contracts.ids import ClientId, ConversationId, ProspectId
+from sales_core.contracts.ids import ClientId, ConversationId, LaneId, ProspectId
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -51,6 +51,9 @@ class Prospect:
     conversation_id: ConversationId | None = None  # reference to the history, not the history
     schedule: Scheduling = field(default_factory=Scheduling)
     attributes: Mapping[str, str] = field(default_factory=dict)  # extra source columns, opaque
+    # The lane this person belongs to, written once and then kept (see `ChannelRouter`). None: the
+    # client has no lanes, or the person has not been attributed yet.
+    lane_id: LaneId | None = None
 
     def __post_init__(self) -> None:
         require_text(self.client_id, "client_id")

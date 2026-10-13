@@ -68,6 +68,7 @@ from sales_core.engine.models import (
     RunCollector,
     RunReport,
 )
+from sales_core.engine.routing import ChannelRouter
 from sales_core.facts import ProposalRejection, review_proposals
 from sales_core.kpi import prospects_contacted
 from sales_core.planner import plan_daily_actions
@@ -107,7 +108,8 @@ class Engine:
         client: ClientContext,
         repository: SalesRepository,
         brain: Brain,
-        channel: MessagingChannel,
+        channel: MessagingChannel | None = None,
+        router: ChannelRouter | None = None,
         clock: Clock,
         config: EngineConfig,
         facts: FactsReader | None = None,
@@ -115,6 +117,8 @@ class Engine:
     ) -> None:
         if repository.client_id != client.client_id:
             raise ValueError("repository is bound to a different client than the engine")
+        if (channel is None) == (router is None):
+            raise ValueError("an engine needs exactly one of `channel` and `router`")
         if facts_writer is not None:
             if facts_writer.client_id != client.client_id:
                 raise ValueError("facts writer is bound to a different client than the engine")
@@ -125,13 +129,21 @@ class Engine:
         self._client = client
         self._repo = repository
         self._brain = brain
-        self._channel = channel
+        # `channel=` is the client with no lanes: one channel for everyone, as it always was.
+        self._router = router if router is not None else ChannelRouter.single(channel)  # type: ignore[arg-type]
         self._clock = clock
         self._config = config
         self._facts = facts  # None: no facts are known, the Brain gets an empty collection
         self._facts_writer = facts_writer  # None: facts a Brain proposes are refused, not lost
         self._lock = threading.RLock()
         self._events: list[AuditEvent] = []  # audit events not yet written
+
+    @property
+    def _channel(self) -> MessagingChannel:
+        """The client's channel when it has one only (what `Engine(channel=...)` was given)."""
+        adapter = self._router.adapter(self._router.any_channel)
+        assert adapter is not None
+        return adapter
 
     def prospects_contacted(self) -> int:
         """How many distinct prospects have been sent at least one message (read-only)."""
@@ -143,14 +155,18 @@ class Engine:
         channel where they must (read-only). Empty on any other channel. These are the people a
         client has to invite; none of them is lost or paused meanwhile."""
         with self._lock:
-            channel = self._channel.channel
-            if channel not in OPT_IN_CHANNELS:
+            if not any(c in OPT_IN_CHANNELS for c in self._router.channels):
                 return ()
-            return tuple(
-                p
-                for p in self._repo.list_prospects()
-                if p.status in _ACTIVE_STATUSES and awaits_opt_in(p, channel)
-            )
+            waiting = []
+            for p in self._repo.list_prospects():
+                channel = self._router.channel_for(p)
+                if (
+                    channel in OPT_IN_CHANNELS
+                    and p.status in _ACTIVE_STATUSES
+                    and awaits_opt_in(p, channel)
+                ):
+                    waiting.append(p)
+            return tuple(waiting)
 
     @property
     def _dry_run(self) -> bool:
@@ -167,15 +183,17 @@ class Engine:
         with self._lock:
             run = RunCollector()
             now = self._clock.now()
-            prospects = list(self._repo.list_prospects())
+            prospects = self._assign_lanes(list(self._repo.list_prospects()), run)
             actions = list(self._repo.list_actions())
+            explicit = self._router.explicit
             plan = plan_daily_actions(
                 client=self._client,
                 prospects=prospects,
                 existing_actions=actions,
                 now=now,
                 daily_limit=self._config.daily_action_limit,
-                channel=self._channel.channel,
+                channel=None if explicit else self._router.any_channel,
+                route_of=self._router.lane_for if explicit else None,
             )
             if plan.actions and not self._dry_run:
                 # One batch, BEFORE any Brain call: the quota stays reserved if we crash.
@@ -195,10 +213,56 @@ class Engine:
             self._flush(run)
             return run.report()
 
+    def _channel_of(self, action: SalesAction, prospect: Prospect) -> Channel | None:
+        """The channel this action goes out on: the one it was given when planned, if the client
+        still has it, else the one of the prospect's lane. None: the prospect is in no lane."""
+        if action.channel is not None and self._router.adapter(action.channel) is not None:
+            return action.channel
+        return self._router.channel_for(prospect)
+
+    def _contactable(self, action: SalesAction, prospect: Prospect | None) -> SafetyVerdict:
+        if prospect is None:
+            return check_contactable(None, self._router.any_channel)
+        channel = self._channel_of(action, prospect)
+        if channel is None:
+            return SafetyVerdict(BlockReason.NO_LANE)
+        return check_contactable(prospect, channel)
+
+    def _assign_lanes(self, prospects: list[Prospect], run: RunCollector) -> list[Prospect]:
+        """Write down, once, the lane of every prospect that has none yet. A client with no lanes
+        is left exactly as it is. A prospect is never moved: only the unattributed are touched, and
+        if the write fails the attribution is simply recomputed (it is deterministic) next time."""
+        if not self._router.explicit:
+            return prospects
+        attributed: list[Prospect] = []
+        changed: list[Prospect] = []
+        for prospect in prospects:
+            if prospect.lane_id is None:
+                lane = self._router.attribute(prospect)
+                if lane is not None:
+                    prospect = replace(prospect, lane_id=lane.lane_id)
+                    changed.append(prospect)
+            attributed.append(prospect)
+        if changed and not self._dry_run:
+            try:
+                self._repo.update_prospects(changed)
+            except Exception as error:  # noqa: BLE001 - not fatal: it is recomputed next run
+                run.error(
+                    f"could not record the lane of {len(changed)} prospects: {describe(error)}"
+                )
+                return attributed
+            for prospect in changed:
+                self._emit(
+                    ev.PROSPECT_LANE_ASSIGNED,
+                    prospect_id=prospect.prospect_id,
+                    lane=prospect.lane_id,
+                )
+        return attributed
+
     def _prepare_one(
         self, action: SalesAction, prospect: Prospect | None, now: datetime, run: RunCollector
     ) -> None:
-        verdict = check_contactable(prospect, self._channel.channel)
+        verdict = self._contactable(action, prospect)
         if prospect is None or not verdict.allowed:
             self._block(action, prospect, verdict, run)
             return
@@ -320,6 +384,7 @@ class Engine:
             action=action,
             now=now,
             facts=facts,
+            lane=self._router.lane_for(prospect),
         )
 
     @staticmethod
@@ -371,7 +436,7 @@ class Engine:
         with self._lock:
             action = self._proposed(action_id)
             prospect = self._repo.get_prospect(action.prospect_id)
-            verdict = check_contactable(prospect, self._channel.channel)
+            verdict = self._contactable(action, prospect)
             if prospect is None or not verdict.allowed:
                 raise ProposalNotApprovableError("this prospect can no longer be contacted")
             self._repo.save_actions([replace(action, status=ActionStatus.APPROVED)])
@@ -420,8 +485,13 @@ class Engine:
             )
 
     def _dispatch_one(self, action: SalesAction, run: RunCollector) -> None:
-        channel = self._channel.channel
         prospect = self._repo.get_prospect(action.prospect_id)  # fresh state, not a snapshot
+        channel = self._channel_of(action, prospect) if prospect is not None else None
+        adapter = self._router.adapter(channel) if channel is not None else None
+        if prospect is not None and adapter is None:
+            self._block(action, prospect, SafetyVerdict(BlockReason.NO_LANE), run)
+            return
+        channel = channel or self._router.any_channel
         verdict = check_ready_to_send(prospect, action, channel)
         recipient = recipient_for(prospect, channel) if prospect is not None else None
         if not verdict.allowed or prospect is None or recipient is None or action.draft is None:
@@ -441,7 +511,7 @@ class Engine:
         # Persist SENDING before the channel call. If this write fails we raise: nothing was sent.
         self._repo.save_actions([sending])
         try:
-            result = self._channel.send(outbound)
+            result = adapter.send(outbound)  # type: ignore[union-attr]  # checked above
         except Exception as error:  # noqa: BLE001 - outcome unknown, must fail closed
             self._mark_unconfirmed(sending, f"channel raised {describe(error)}", run)
             return
@@ -470,7 +540,15 @@ class Engine:
                 error=describe(error),
             )
         # Bookkeeping: each step is independent so one failure cannot block the others.
-        self._step(run, sent, "append_message", self._record_outbound, sent, result)
+        self._step(
+            run,
+            sent,
+            "append_message",
+            self._record_outbound,
+            sent,
+            result,
+            self._channel_of(sent, prospect) or self._router.any_channel,
+        )
         self._step(
             run,
             sent,
@@ -480,7 +558,7 @@ class Engine:
         self._emit_for(ev.ACTION_SENT, sent, external_id=result.external_id)
         run.outcome(sent.action_id, ActionStatus.SENT if recorded else ActionStatus.SENDING)
 
-    def _record_outbound(self, action: SalesAction, result: SendResult) -> None:
+    def _record_outbound(self, action: SalesAction, result: SendResult, channel: Channel) -> None:
         draft = action.draft
         if draft is None:
             raise ValueError("cannot record a message without a draft")
@@ -496,7 +574,7 @@ class Engine:
                     prospect_id=action.prospect_id,
                     conversation_id=conversation.conversation_id,
                     direction=Direction.OUTBOUND,
-                    channel=self._channel.channel,
+                    channel=channel,
                     text=draft.text,
                     timestamp=result.timestamp,
                     external_id=result.external_id,
@@ -665,6 +743,8 @@ class Engine:
                 **refusal,
             )
             return None
+        # A stranger is in the lane that is written to on the channel they used (none if no lanes).
+        lane = self._router.lane_for_inbound(inbound.channel) if self._router.explicit else None
         by_email = inbound.channel is Channel.EMAIL
         by_telegram = inbound.channel is Channel.TELEGRAM
         address = inbound.sender.strip()
@@ -689,6 +769,7 @@ class Engine:
             ),
             status=ProspectStatus.ACTIVE,
             schedule=Scheduling(last_inbound_at=inbound.timestamp),
+            lane_id=lane.lane_id if lane is not None else None,
         )
         self._repo.create_prospects([prospect])
         self._emit(
@@ -850,10 +931,17 @@ class Engine:
                 priority=ActionPriority.HIGH,
             )
 
+        if self._router.explicit and action.channel is None:
+            # Answered where the person wrote if the client has that channel, else on their lane's.
+            lane = self._router.lane_for(prospect)
+            if lane is not None:
+                chosen = message.channel if self._router.adapter(message.channel) else lane.channel
+                action = replace(action, lane_id=lane.lane_id, channel=chosen)
+
         if is_opt_out_message(message.text, self._config.opt_out_keywords):
             self._handle_opt_out(prospect, action, run)
             return
-        verdict = check_contactable(prospect, self._channel.channel)
+        verdict = self._contactable(action, prospect)
         if not verdict.allowed:
             self._block(action, prospect, verdict, run)  # the message stays in the history
             return

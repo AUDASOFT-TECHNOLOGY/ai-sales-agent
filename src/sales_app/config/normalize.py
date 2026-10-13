@@ -305,6 +305,8 @@ def _from_legacy(
             f"source.provider: {legacy.source_provider!r} apart from the store "
             f"({legacy.sheets.provider!r}) cannot be converted yet"
         )
+    if legacy is not None and legacy.lanes is not None:
+        problems.append("lanes: a configuration with lanes cannot be converted yet")
     if problems or legacy is None:
         raise NormalizationError(_unique(problems))
     return Normalized(

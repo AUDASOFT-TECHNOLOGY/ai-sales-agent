@@ -149,6 +149,52 @@ class ChannelSection(_Section):
         return data
 
 
+_INSTANCE_ID = r"^[a-z][a-z0-9_]{1,31}$"  # also the prefix of the ids its prospects get
+_LANE_ID = r"^[a-z][a-z0-9_-]{0,31}$"
+
+
+class SourceInstance(_Section):
+    """One configured source of prospects. A client may have several, of the same provider or not.
+
+    `id` names the instance and is what its prospects' ids are prefixed with (`<id>:<native id>`),
+    so it can never change once prospects exist. `settings` holds the operator's non-secret choices
+    for that provider (never a secret), validated by the provider's own descriptor.
+    """
+
+    id: Annotated[str, StringConstraints(pattern=_INSTANCE_ID)]
+    provider: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,31}$")]
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _leave_out_empty_settings(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        if not data.get("settings"):
+            data.pop("settings", None)
+        return data
+
+
+class LaneSection(_Section):
+    """One commercial lane: the people of one source, the channel they are written to on, and the
+    products offered to them (ids of the Brain's catalog). Several lanes may share a channel; a
+    source belongs to at most one lane, so a person is never in two."""
+
+    id: Annotated[str, StringConstraints(pattern=_LANE_ID)]
+    source: Annotated[str, StringConstraints(pattern=_INSTANCE_ID)]  # the id of a `SourceInstance`
+    channel: Annotated[
+        str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,31}$")
+    ]  # a channel provider
+    products: tuple[NonEmpty, ...] = Field(
+        min_length=1
+    )  # explicit: a lane with no product sells nothing
+
+    @field_validator("products")
+    @classmethod
+    def _distinct_products(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("lists a product twice")
+        return value
+
+
 class LLMSection(_Section):
     provider: NonEmpty = "openai"
     api_key_env: EnvName = "OPENAI_API_KEY"
@@ -284,6 +330,10 @@ class ClientFile(_Section):
     llm: LLMSection
     whatsapp: WhatsAppSection
     channel: ChannelSection | None = None  # None: the channel is `whatsapp.provider`
+    # Several sources, each with its own channel and products. Both or neither: a client with
+    # neither has the single source, channel and catalog it has always had (see `lanes.py`).
+    sources: tuple[SourceInstance, ...] | None = None
+    lanes: tuple[LaneSection, ...] | None = None
     schedule: ScheduleSection = Field(default_factory=ScheduleSection)
     inbound: InboundSection = Field(default_factory=InboundSection)
 
@@ -291,7 +341,7 @@ class ClientFile(_Section):
     def _leave_out_what_was_never_chosen(self, handler: Any) -> dict[str, Any]:
         """A configuration that never chose a source or a channel dumps exactly as before."""
         data = handler(self)
-        for key in ("source", "channel"):
+        for key in ("source", "channel", "sources", "lanes"):
             if data.get(key) is None:
                 data.pop(key, None)
         return data
@@ -319,6 +369,36 @@ class ClientFile(_Section):
     def source_apart_from_store(self) -> bool:
         """Whether a source other than the store's provider was chosen."""
         return self.source_provider != self.sheets.provider
+
+    @model_validator(mode="after")
+    def _lanes_are_coherent(self) -> "ClientFile":
+        if (self.sources is None) != (self.lanes is None):
+            raise ValueError("`sources` and `lanes` go together: give both or neither")
+        if self.lanes is None or self.sources is None:
+            return self
+        if not self.lanes:
+            raise ValueError("lanes: list at least one lane, or leave `sources` and `lanes` out")
+        if self.source is not None or self.channel is not None:
+            raise ValueError(
+                "lanes replace `source` and `channel`: a client has either lanes or those two"
+            )
+        source_ids = [s.id for s in self.sources]
+        for duplicate in sorted({i for i in source_ids if source_ids.count(i) > 1}):
+            raise ValueError(f"sources: id {duplicate!r} is used more than once")
+        lane_ids = [lane.id for lane in self.lanes]
+        for duplicate in sorted({i for i in lane_ids if lane_ids.count(i) > 1}):
+            raise ValueError(f"lanes: id {duplicate!r} is used more than once")
+        used: dict[str, str] = {}
+        for lane in self.lanes:
+            if lane.source not in source_ids:
+                raise ValueError(f"lanes: {lane.id!r} uses the unknown source {lane.source!r}")
+            if lane.source in used:
+                raise ValueError(
+                    f"lanes: {lane.id!r} and {used[lane.source]!r} share the source "
+                    f"{lane.source!r}; give a lane several products instead"
+                )
+            used[lane.source] = lane.id
+        return self
 
     @field_validator("client_id")
     @classmethod
