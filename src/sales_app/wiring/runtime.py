@@ -404,7 +404,7 @@ def _build_lane_parts(
                 LaneRoute(
                     lane_id=lane.id,
                     channel=kinds[lane.channel],
-                    product_ids=lane.products,
+                    product_ids=() if lane.offers_all_products else lane.products,
                     source_id=lane.source,
                 )
                 for lane in spec.lanes or ()

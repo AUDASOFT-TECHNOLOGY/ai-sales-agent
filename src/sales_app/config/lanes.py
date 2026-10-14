@@ -8,7 +8,8 @@ them. Neither function runs anything or reads a secret.
 
 Rules (the structural ones, such as unique ids and "a source belongs to one lane", are the schema's):
 
-- a lane lists at least one product, and each must exist in the Brain's catalog;
+- a lane lists at least one product, each of which must exist in the Brain's catalog, or says
+  `ALL` (the whole catalog as it is when the Brain is asked, so new products are included);
 - every provider named is known, plays the role it is given, and its settings are acceptable;
 - a channel is judged against the channels the Admin allows the client, when they are known;
 - at most one source instance per provider that needs a secret of the client's own (two HubSpot
@@ -28,6 +29,7 @@ from sales_app.config.schema import ClientFile, LaneSection, SourceInstance
 from sales_app.secret_store import ScopeKind
 from sales_app.wiring.providers import ProviderKind, ProviderRegistry, default_registry
 from sales_app.wiring.providers.types import Requirement
+from sales_core.contracts import ALL_PRODUCTS
 
 DEFAULT_LANE = "default"
 
@@ -135,7 +137,7 @@ def lane_problems(
         problems.extend(
             f"{path}.products: {product!r} is not a product of the catalog"
             for product in lane.products
-            if product not in known
+            if product != ALL_PRODUCTS and product not in known
         )
     return problems
 

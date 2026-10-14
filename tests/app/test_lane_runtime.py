@@ -753,3 +753,15 @@ def test_a_client_with_two_channels_to_poll_reads_each_inbox_and_acknowledges_wh
     poller.close()
     assert (first.acknowledged, second.acknowledged) == (["m1"], ["m2"])
     assert (first.closed, second.closed) == (1, 1)
+
+
+def test_a_lane_that_says_all_reaches_the_engine_with_no_product_ids_and_a_list_keeps_its_own(
+    deploy,
+):
+    lanes = [dict(lane) for lane in LANES]
+    lanes[0]["products"] = ["ALL"]
+    d = deploy({"alpha": raw_for("alpha", lanes=lanes)})
+
+    router = d.runtime("alpha").engine._router
+    assert router.lane("a").product_ids == ()  # the whole catalog, whatever it holds later
+    assert router.lane("crm").product_ids == ("c",)

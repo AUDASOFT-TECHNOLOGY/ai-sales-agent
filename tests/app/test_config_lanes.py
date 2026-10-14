@@ -340,3 +340,39 @@ def test_a_lane_on_a_channel_the_admin_forbids_makes_the_client_not_ready(tmp_pa
     secrets.set(client_scope("alpha"), "channels.access", "+email", by="t")
     assert "The email channel is not authorized for this account" not in missing(secrets)
     assert "The telegram channel is not authorized for this account" in missing(secrets)
+
+
+# ---- ALL: the whole catalog (E6) ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("written", ["ALL", ["ALL"]])
+def test_a_lane_may_offer_all_products(written):
+    raw = with_lanes(lanes=[{**LANES[0], "products": written}])
+    raw["sources"] = raw["sources"][:1]
+    check = import_document("alpha", raw)
+    assert check.errors == (), check.errors
+    lane = effective_lanes(check.spec).lanes[0]
+    assert lane.products == ("ALL",) and lane.offers_all_products
+
+
+def test_all_is_judged_without_a_catalog_lookup_and_follows_the_catalog():
+    # `ALL` names no product, so a catalog that grows needs no change to the lane
+    for ids in (("a",), ("a", "b", "c", "d")):
+        raw = with_lanes(lanes=[{**LANES[0], "products": ["ALL"]}])
+        raw["brain"]["settings"] = catalog(*ids)
+        assert problems_of(raw) == []
+
+
+def test_all_cannot_be_mixed_with_products():
+    assert any("ALL stands for every product" in e for e in lane_error(products=["ALL", "a"]))
+
+
+def test_no_product_can_be_called_all_so_it_never_collides_with_one():
+    raw = with_lanes()  # product ids are lower case: "ALL" cannot be a catalog id
+    raw["brain"]["settings"] = catalog("a", "b", "c", "ALL")
+    assert problems_of(raw)
+
+
+def test_a_list_of_products_does_not_offer_all():
+    lane = effective_lanes(import_document("alpha", with_lanes()).spec).lanes[0]
+    assert not lane.offers_all_products

@@ -26,6 +26,7 @@ from sales_core.contracts import (
     FactEvidence,
     FactSource,
     FactStatus,
+    LaneRoute,
     LLMResponse,
     Message,
     MessageId,
@@ -263,6 +264,7 @@ def request(
     attributes: Mapping[str, str] | None = None,
     locale: str | None = None,
     now: datetime = NOW,
+    lane: LaneRoute | None = None,
 ) -> BrainRequest:
     return BrainRequest(
         client=make_client_context(),
@@ -271,6 +273,7 @@ def request(
         action=make_action(action_type=action),
         now=now,
         facts=tuple(facts),
+        lane=lane,
     )
 
 

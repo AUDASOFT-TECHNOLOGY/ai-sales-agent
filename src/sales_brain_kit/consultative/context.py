@@ -17,6 +17,7 @@ from sales_brain_kit.consultative.interest import derive_interests
 from sales_brain_kit.consultative.language import LanguagePolicy, resolve_language
 from sales_brain_kit.consultative.market import MarketContext, resolve_market
 from sales_brain_kit.consultative.register import Register, resolve_register
+from sales_brain_kit.consultative.scope import scope_to_lane
 from sales_brain_kit.consultative.selection import ProductSelection, select_products
 from sales_brain_kit.consultative.strategy import ConversationPlan, plan_conversation
 from sales_brain_kit.settings import ConsultativeSalesSettings
@@ -44,6 +45,7 @@ class CommercialContext:
 
 def build_context(request: BrainRequest, settings: ConsultativeSalesSettings) -> CommercialContext:
     prospect = request.prospect
+    settings = scope_to_lane(settings, request.lane)  # from here on, only the lane's products exist
     hypotheses = settings.discovery.hypotheses
     fields = declared_fields(settings)
     catalog = ProductCatalog(settings.catalog, settings.communication.languages.default)

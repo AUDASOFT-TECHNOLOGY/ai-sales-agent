@@ -37,7 +37,7 @@ from sales_core.contracts.ids import (
     MessageId,
     ProspectId,
 )
-from sales_core.contracts.lane import LaneRoute
+from sales_core.contracts.lane import ALL_PRODUCTS, LaneRoute
 from sales_core.contracts.llm import LLMMessage, LLMRequest, LLMResponse
 from sales_core.contracts.messaging import InboundEvent, InboundMessage, OutboundMessage, SendResult
 from sales_core.contracts.payment import (
@@ -63,6 +63,7 @@ from sales_core.contracts.payment import (
 from sales_core.contracts.prospect import ContactInfo, Prospect, Scheduling
 
 __all__ = [
+    "ALL_PRODUCTS",
     "CONFIRMATION_KEYS",
     "CONFIRMED_VALUE",
     "CONFIRMING_SOURCES",

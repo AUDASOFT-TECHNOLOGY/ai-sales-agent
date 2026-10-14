@@ -14,3 +14,17 @@ class BrainOutputError(ValueError):
     def __init__(self, problems: Sequence[str]) -> None:
         self.problems = tuple(problems)
         super().__init__("; ".join(self.problems))
+
+
+class LaneScopeError(ValueError):
+    """The lane of the prospect lists products the client's catalog does not have.
+
+    This is a configuration fault, not a model failure: no model is asked and no decision exists.
+    """
+
+    def __init__(self, lane_id: str, missing: Sequence[str]) -> None:
+        self.lane_id = lane_id
+        self.missing = tuple(missing)
+        super().__init__(
+            f"lane {lane_id!r} offers products that are not in the catalog: {', '.join(missing)}"
+        )

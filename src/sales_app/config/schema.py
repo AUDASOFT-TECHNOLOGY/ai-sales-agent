@@ -20,6 +20,7 @@ from sales_app.brain_registry import BRAIN_KEY_PATTERN
 from sales_app.config.email_settings import EmailChannelSettings
 from sales_app.config.telegram_settings import TelegramChannelSettings
 from sales_core.approval import ApprovalMode
+from sales_core.contracts import ALL_PRODUCTS
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
@@ -175,7 +176,8 @@ class SourceInstance(_Section):
 
 class LaneSection(_Section):
     """One commercial lane: the people of one source, the channel they are written to on, and the
-    products offered to them (ids of the Brain's catalog). Several lanes may share a channel; a
+    products offered to them (ids of the Brain's catalog, or `ALL` for the whole catalog, new
+    products included). Several lanes may share a channel; a
     source belongs to at most one lane, so a person is never in two."""
 
     id: Annotated[str, StringConstraints(pattern=_LANE_ID)]
@@ -187,12 +189,23 @@ class LaneSection(_Section):
         min_length=1
     )  # explicit: a lane with no product sells nothing
 
+    @field_validator("products", mode="before")
+    @classmethod
+    def _all_as_text(cls, value: object) -> object:
+        return (value,) if value == ALL_PRODUCTS else value  # `products: ALL` is `[ALL]`
+
     @field_validator("products")
     @classmethod
     def _distinct_products(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(value)) != len(value):
             raise ValueError("lists a product twice")
+        if ALL_PRODUCTS in value and len(value) > 1:
+            raise ValueError(f"{ALL_PRODUCTS} stands for every product: do not list others with it")
         return value
+
+    @property
+    def offers_all_products(self) -> bool:
+        return self.products in ((), (ALL_PRODUCTS,))  # () only for the implicit lane
 
 
 class LLMSection(_Section):
