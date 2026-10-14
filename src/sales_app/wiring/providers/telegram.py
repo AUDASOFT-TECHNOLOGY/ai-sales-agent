@@ -51,7 +51,7 @@ WEBHOOK_PATH = "/webhooks/telegram"
 
 
 def _settings(config: ClientConfig) -> TelegramChannelSettings:
-    return TelegramChannelSettings.model_validate(config.spec.channel_settings)
+    return TelegramChannelSettings.model_validate(config.spec.channel_settings_for(KEY))
 
 
 def build_channel(config: ClientConfig) -> TelegramChannel:

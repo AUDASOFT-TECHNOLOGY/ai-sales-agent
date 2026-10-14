@@ -11,12 +11,13 @@ store and its consent registry. Both are optional because a deployment may have 
 database, no registry set up): a client that needs one then does not run, and says so.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from sales_app.config import ClientConfig
-from sales_app.config.runtime_config import channel_provider_key
-from sales_app.inbox import InboxPoller
+from sales_app.config.runtime_config import channel_provider_keys
+from sales_app.config.schema import SourceInstance
+from sales_app.inbox import Fetched, InboxPoller
 from sales_app.settings import Settings
 from sales_app.sourcing.consent import ConsentWriter
 from sales_app.sourcing.ports import OperationalStore, ProspectSource
@@ -67,24 +68,64 @@ class IntegrationBuilders:
     # One client's operational store / consent registry, or None when the deployment has none.
     operational_stores: Callable[[str], OperationalStore] | None = None
     consent: Callable[[str], ConsentWriter] | None = None
+    # How to build one named instance of a source, by provider key, for a client that runs several
+    # (`sources`): `build(config, instance)`. A provider missing here can only be a client's one
+    # source.
+    source_instances: Mapping[str, Callable[[ClientConfig, SourceInstance], ProspectSource]] = (
+        field(default_factory=dict)
+    )
 
     # ---- polling the channels that do not call us ------------------------------------------
+
+    def _inbox_providers(self, config: ClientConfig) -> list[ChannelProvider]:
+        """The channels of this client that have to be polled, once each however many lanes share
+        them (a mailbox is read once, not once per lane)."""
+        found = (self.channels.get(key) for key in channel_provider_keys(config))
+        return [p for p in found if p is not None and p.build_inbox is not None]
 
     def polls_inbox(self, config: ClientConfig) -> bool:
         """Whether this client's replies are fetched by the scheduler. Never in a dry run, which
         does not talk to the outside: a message read there would be marked read and then dropped."""
         if config.effective_mode is ApprovalMode.DRY_RUN:
             return False
-        key = channel_provider_key(config)
-        provider = self.channels.get(key) if key is not None else None
-        return provider is not None and provider.build_inbox is not None
+        return bool(self._inbox_providers(config))
 
     def open_inbox(self, config: ClientConfig) -> InboxPoller:
-        key = channel_provider_key(config)
-        provider = self.channels.get(key) if key is not None else None
-        if provider is None or provider.build_inbox is None:
+        providers = self._inbox_providers(config)
+        if not providers:
             raise LookupError("this client's channel has no inbox to poll")
-        return provider.build_inbox(config)
+        pollers = [provider.build_inbox(config) for provider in providers]  # type: ignore[misc]
+        return pollers[0] if len(pollers) == 1 else _MergedInbox(pollers)
+
+
+class _MergedInbox:
+    """The inboxes of a client that has several channels to poll, read as one. A handle says which
+    inbox it came from, so each message is acknowledged where it was found."""
+
+    def __init__(self, pollers: Sequence[InboxPoller]) -> None:
+        self._pollers = tuple(pollers)
+
+    def fetch(self, limit: int = 50) -> Sequence[Fetched]:
+        found: list[Fetched] = []
+        for index, poller in enumerate(self._pollers):
+            found.extend(_Tagged(index, item) for item in poller.fetch(limit - len(found)))
+            if len(found) >= limit:
+                break
+        return found
+
+    def acknowledge(self, handle: str) -> None:
+        index, _, inner = handle.partition(":")
+        self._pollers[int(index)].acknowledge(inner)
+
+    def close(self) -> None:
+        for poller in self._pollers:
+            poller.close()
+
+
+class _Tagged:
+    def __init__(self, index: int, item: Fetched) -> None:
+        self.handle = f"{index}:{item.handle}"
+        self.message = item.message
 
 
 def default_builders(
@@ -132,6 +173,7 @@ def default_builders(
         llms={d.key: d.build for d in runnable(ProviderKind.LLM)},
         channels={d.key: channel_provider(d) for d in runnable(ProviderKind.CHANNEL)},
         sources={d.key: d.build for d in sources if d.product is Product.PROSPECT_SOURCE},
+        source_instances={d.key: d.build_instance for d in sources if d.build_instance is not None},
         operational_stores=operational_stores,
         consent=consent,
     )

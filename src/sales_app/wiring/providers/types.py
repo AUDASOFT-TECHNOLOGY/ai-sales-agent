@@ -152,7 +152,7 @@ class ProviderDescriptor:
       declared ones, and give them their upstream ids.
     - `build` makes the thing the runtime uses (a repository, a prospect source, a channel, a model
       client; `product` says which, for a source). A provider with no `build` is known but cannot be
-      run yet.
+      run yet. `build_instance` builds a source for a client that runs several (see its field).
     """
 
     key: str
@@ -168,6 +168,10 @@ class ProviderDescriptor:
     can_host_store: bool = False
     build: Callable[[Any], Any] | None = None
     product: Product = Product.REPOSITORY  # what `build` makes, for a source provider
+    # For a source that a client may configure several times (`sources`): builds one named instance
+    # as `build_instance(config, instance)`, whose prospects' ids carry the instance's id. None: the
+    # provider can only be the client's one source.
+    build_instance: Callable[[Any, Any], Any] | None = None
     channel: ChannelSupport | None = None
     models: tuple[ModelDescriptor, ...] = ()  # the models it serves, by Revansa's stable key
     model_list: ModelList | None = None  # where the Admin keeps its models (Settings), if it can

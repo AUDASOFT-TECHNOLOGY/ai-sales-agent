@@ -4,7 +4,7 @@ Nothing here raises for a bad client: every problem is collected, so one run rep
 """
 
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -90,16 +90,16 @@ class ClientConfig:
     @property
     def telegram_bot_id(self) -> str | None:
         """The bot this client talks through, when its channel is Telegram and it has one."""
-        if self.spec.channel_provider != "telegram":
+        if "telegram" not in self.spec.channel_providers:
             return None
         return bot_id_of(self.secrets.get_optional(TELEGRAM_BOT_TOKEN))
 
     @property
     def mailbox_key(self) -> str | None:
         """The mailbox this client reads, when its channel is e-mail and it has one set up."""
-        if self.spec.channel_provider != "email":
+        if "email" not in self.spec.channel_providers:
             return None
-        return mailbox_key_of(self.spec.channel_settings)
+        return mailbox_key_of(self.spec.channel_settings_for("email"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,9 +316,10 @@ def _resolve_secrets(
         return (env.get(variable, "").strip() or None) if variable else None
 
     whatsapp = spec.whatsapp
-    channel = spec.channel_provider
+    channels = spec.channel_providers  # one for a client with no lanes, else each lane's
     # A client on e-mail asks for its mailbox's credentials and none of Meta's; every other channel
-    # keeps asking for what it always did.
+    # keeps asking for what it always did. A client with lanes asks for what each of its channels
+    # needs, and nothing for a channel none of its lanes uses.
     whatsapp_wanted = (
         [
             (WHATSAPP_ACCESS_TOKEN, "WhatsApp access token", client, whatsapp.token_env, live),
@@ -331,24 +332,33 @@ def _resolve_secrets(
             ),
             (WHATSAPP_APP_SECRET, "Meta app secret", GLOBAL_SCOPE, whatsapp.app_secret_env, live),
         ]
-        if channel not in ("email", "telegram")
+        if any(c not in ("email", "telegram") for c in channels)
         else []
     )
     email_wanted = (
-        [(EMAIL_PASSWORD, "Email password", client, None, live)] if channel == "email" else []
+        [(EMAIL_PASSWORD, "Email password", client, None, live)] if "email" in channels else []
     )
     telegram_wanted = (
         [
             (TELEGRAM_BOT_TOKEN, "Telegram bot token", client, None, live),
             (TELEGRAM_WEBHOOK_SECRET, "Telegram webhook secret", client, None, live),
         ]
-        if channel == "telegram"
+        if "telegram" in channels
         else []
     )
     # A client whose prospects live elsewhere does not use the spreadsheet, so it needs no Google
     # access; it needs the credential its own source declares, from the credential store only.
-    sheets_used = not spec.source_apart_from_store
-    source_credential = SOURCE_CREDENTIALS.get(spec.source_provider) if not sheets_used else None
+    if spec.sources is not None:  # lanes: every source says what it needs, once per provider
+        providers = tuple(dict.fromkeys(source.provider for source in spec.sources))
+        sheets_used = spec.sheets.provider in providers
+        source_credentials = [SOURCE_CREDENTIALS[p] for p in providers if p in SOURCE_CREDENTIALS]
+    else:
+        sheets_used = not spec.source_apart_from_store
+        source_credentials = (
+            [SOURCE_CREDENTIALS[spec.source_provider]]
+            if not sheets_used and spec.source_provider in SOURCE_CREDENTIALS
+            else []
+        )
     wanted = [
         (OPENAI_API_KEY, "OpenAI API key", GLOBAL_SCOPE, spec.llm.api_key_env, True),
         (
@@ -358,11 +368,7 @@ def _resolve_secrets(
             spec.sheets.credentials_env,
             sheets_used,
         ),
-        *(
-            [(source_credential[0], source_credential[1], client, None, True)]
-            if source_credential is not None
-            else []
-        ),
+        *((key, label, client, None, True) for key, label in source_credentials),
         *whatsapp_wanted,
         *email_wanted,
         *telegram_wanted,
@@ -375,27 +381,26 @@ def _resolve_secrets(
             values[key] = value
         elif required:
             missing.append(f"{label} is not configured")
-    if channel == "email" and live:
+    if "email" in channels and live:
         try:
-            EmailChannelSettings.model_validate(spec.channel_settings)
+            EmailChannelSettings.model_validate(spec.channel_settings_for("email"))
         except ValueError:
             missing.append("Email settings are incomplete")
-    if channel == "telegram" and live:
+    if "telegram" in channels and live:
         try:
-            TelegramChannelSettings.model_validate(spec.channel_settings)
+            TelegramChannelSettings.model_validate(spec.channel_settings_for("telegram"))
         except ValueError:
             missing.append("Telegram settings are incomplete")
     granted = effective_channels(
         secret_store.get(GLOBAL_SCOPE, CHANNELS_ALLOWED) if secret_store is not None else None,
         secret_store.get(client, CHANNELS_ACCESS) if secret_store is not None else None,
     )
-    if channel in GOVERNED and channel not in granted:
-        # Judged on every resolution, so a channel the Admin forbids afterwards stops a client that
-        # had already set it up. Even a dry run is refused: the channel is not this client's.
-        missing.append(f"The {channel} channel is not authorized for this account")
-    for lane in spec.lanes or ():
-        if lane.channel in GOVERNED and lane.channel not in granted:
-            missing.append(f"The {lane.channel} channel is not authorized for this account")
+    for channel in channels:
+        if channel in GOVERNED and channel not in granted:
+            # Judged on every resolution, so a channel the Admin forbids afterwards stops a client
+            # that had already set it up. Even a dry run is refused: the channel is not this
+            # client's.
+            missing.append(f"The {channel} channel is not authorized for this account")
     # Not a secret: the platform-wide API version, else the one this client's file names.
     stored_version = secret_store.get(GLOBAL_SCOPE, WHATSAPP_API_VERSION) if secret_store else None
     values[WHATSAPP_API_VERSION] = stored_version or whatsapp.api_version
@@ -417,26 +422,36 @@ def _resolve_secrets(
     return Secrets(values), missing
 
 
+def _spreadsheets(client: ClientConfig) -> list[str]:
+    """The spreadsheets a client reads: its store's own, unless its prospects live elsewhere, or
+    each Google Sheets source of a client with lanes (its `sheets` section is then unused)."""
+    spec = client.spec
+    if spec.sources is not None:
+        return [
+            str(source.settings["spreadsheet_id"])
+            for source in spec.sources
+            if source.provider == spec.sheets.provider and source.settings.get("spreadsheet_id")
+        ]
+    return [] if spec.source_apart_from_store else [spec.sheets.spreadsheet_id]
+
+
 def _cross_client_errors(clients: list[ClientConfig]) -> list[str]:
     """Two clients sharing an account is almost always a copy-paste mistake."""
-    checks: list[tuple[str, Callable[[ClientConfig], str | None]]] = [
-        ("WhatsApp phone_number_id", lambda c: c.phone_number_id),
-        (  # a client whose prospects live elsewhere does not use its spreadsheet
-            "spreadsheet_id",
-            lambda c: None if c.spec.source_apart_from_store else c.spec.sheets.spreadsheet_id,
-        ),
-        ("email mailbox", lambda c: c.mailbox_key),
-        ("Telegram bot", lambda c: c.telegram_bot_id),
-        ("whatsapp.token_env", lambda c: c.spec.whatsapp.token_env),
-        ("whatsapp.phone_number_id_env", lambda c: c.spec.whatsapp.phone_number_id_env),
+    checks: list[tuple[str, Callable[[ClientConfig], Iterable[str | None]]]] = [
+        ("WhatsApp phone_number_id", lambda c: [c.phone_number_id]),
+        ("spreadsheet_id", _spreadsheets),
+        ("email mailbox", lambda c: [c.mailbox_key]),
+        ("Telegram bot", lambda c: [c.telegram_bot_id]),
+        ("whatsapp.token_env", lambda c: [c.spec.whatsapp.token_env]),
+        ("whatsapp.phone_number_id_env", lambda c: [c.spec.whatsapp.phone_number_id_env]),
     ]
     errors: list[str] = []
     for label, getter in checks:
         owners: dict[str, list[str]] = defaultdict(list)
         for client in clients:
-            value = getter(client)
-            if value:
-                owners[value].append(client.client_id)
+            for value in dict.fromkeys(getter(client)):  # once per client, however often it says it
+                if value:
+                    owners[value].append(client.client_id)
         for value, ids in owners.items():
             if len(ids) > 1:
                 errors.append(f"{label} {value!r} is used by several clients: {', '.join(ids)}")

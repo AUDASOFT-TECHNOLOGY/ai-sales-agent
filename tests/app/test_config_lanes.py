@@ -1,9 +1,9 @@
 """A client's `sources` and `lanes`: the model, the legacy client that becomes one `default` lane, and
 every refusal.
 
-Nothing here runs a client: the configuration is read, validated and (once) offered to the runtime,
-which refuses it on purpose until a later step can run several lanes. Providers are judged by their
-descriptors only, so no HubSpot account, spreadsheet or mailbox is involved.
+Nothing here runs a client but one check that the runtime needs the operational store for lanes (the
+running of lanes is `test_lane_runtime.py`). Providers are judged by their descriptors only, so no
+HubSpot account, spreadsheet or mailbox is involved.
 """
 
 from copy import deepcopy
@@ -25,7 +25,7 @@ from sales_app.config.lanes import (
 from sales_app.config.normalize import NormalizationError, normalize
 from sales_app.config.resolution import check_document
 from sales_app.config_store import InMemoryConfigStore
-from sales_app.errors import ClientUnavailableError
+from sales_app.errors import RuntimeBuildError
 from sales_app.secret_store import GLOBAL_SCOPE, InMemorySecretStore, client_scope
 from sales_app.wiring import build_runtime
 from sales_core.approval import ApprovalMode
@@ -39,6 +39,12 @@ SOURCES = [
     {"id": "hubspot", "provider": "hubspot", "settings": HUBSPOT},
     {"id": "sheet_b", "provider": "google_sheets", "settings": {"spreadsheet_id": "sheet-b"}},
 ]
+EMAIL_SETTINGS = {
+    "from_address": "sales@example.org",
+    "username": "sales@example.org",
+    "smtp_host": "smtp.example.org",
+    "imap_host": "imap.example.org",
+}
 LANES = [
     {"id": "a", "source": "sheet_a", "channel": "whatsapp", "products": ["a", "b"]},
     {"id": "crm", "source": "hubspot", "channel": "email", "products": ["c"]},
@@ -208,12 +214,23 @@ def test_a_lane_needs_a_catalog():
     assert any("is not a product of the catalog" in e for e in problems_of(raw))
 
 
-def test_lanes_replace_the_single_source_and_channel_instead_of_contradicting_them():
-    for legacy in (
-        {"source": {"provider": "hubspot", "settings": HUBSPOT}},
-        {"channel": {"provider": "email"}},
-    ):
-        assert any("replace `source` and `channel`" in e for e in problems_of(with_lanes(**legacy)))
+def test_lanes_replace_the_single_source_instead_of_contradicting_it():
+    errors = problems_of(with_lanes(source={"provider": "hubspot", "settings": HUBSPOT}))
+    assert any("lanes replace `source`" in e for e in errors)
+
+
+def test_with_lanes_the_channel_section_only_holds_the_settings_of_a_channel_a_lane_uses():
+    mailbox = {"provider": "email", "settings": EMAIL_SETTINGS}
+    check = import_document("alpha", with_lanes(channel=mailbox))
+    assert check.errors == (), check.errors
+    assert check.spec.channel_settings_for("email") == EMAIL_SETTINGS
+    assert check.spec.channel_settings_for("telegram") == {}  # the other channels run on defaults
+    assert check.document["channel"] == mailbox  # and the document keeps it
+
+    unused = {"provider": "telegram"}
+    lanes = [lane for lane in LANES if lane["channel"] != "telegram"]
+    errors = problems_of(with_lanes(lanes=lanes, sources=SOURCES[:2], channel=unused))
+    assert any("channel: with lanes it only holds the settings" in e for e in errors), errors
 
 
 def test_an_unknown_or_unsuitable_provider_is_refused():
@@ -279,7 +296,7 @@ def test_the_canonical_form_does_not_silently_drop_lanes():
         normalize(yaml.safe_load(yaml.safe_dump(with_lanes())))
 
 
-def test_the_runtime_refuses_a_client_with_lanes_and_never_runs_it_on_a_guess(tmp_path):
+def test_a_client_with_lanes_needs_the_operational_store_and_is_never_run_on_a_guess(tmp_path):
     from app_support import write_client
 
     wiring = with_lanes()
@@ -292,8 +309,8 @@ def test_the_runtime_refuses_a_client_with_lanes_and_never_runs_it_on_a_guess(tm
         tmp_path, "alpha", ceiling=ApprovalMode.APPROVAL, env=env_for("alpha"), store=store
     )
     assert resolved.config is not None, resolved.errors
-    builders, made = fake_builders(FakeClock())
-    with pytest.raises(ClientUnavailableError, match="cannot be run yet"):
+    builders, made = fake_builders(FakeClock())  # a deployment with no database
+    with pytest.raises(RuntimeBuildError, match="operational store.*SALES_AGENT_DATABASE_URL"):
         build_runtime(resolved.config, builders, FakeClock())
     assert made.repositories == {} and made.channels == {}  # nothing was built
 

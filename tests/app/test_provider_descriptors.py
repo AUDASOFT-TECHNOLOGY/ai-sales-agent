@@ -442,6 +442,7 @@ class TestTheBuildersTheRuntimeUsesAreUnchanged:
             "sources",
             "operational_stores",
             "consent",
+            "source_instances",  # E5: added last, with a default, so older callers are unchanged
         ]
 
     def test_the_channel_provider_keeps_its_fields_and_gains_the_inbox(self):

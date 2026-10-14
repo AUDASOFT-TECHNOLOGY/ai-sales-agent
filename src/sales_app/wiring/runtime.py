@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from sales_app.brain_registry import BrainRegistry, installed_brains
 from sales_app.config import ClientConfig
@@ -20,9 +21,23 @@ from sales_app.sourcing.composite import CompositeRepository
 from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
 from sales_core.approval import ApprovalMode
-from sales_core.contracts import ClientContext
-from sales_core.engine import Engine, EngineConfig, InboundPolicy, UnknownSenderPolicy
-from sales_core.ports import Brain, Clock, FactsReader, FactsWriter, LLMProvider, SalesRepository
+from sales_core.contracts import Channel, ClientContext, LaneRoute
+from sales_core.engine import (
+    ChannelRouter,
+    Engine,
+    EngineConfig,
+    InboundPolicy,
+    UnknownSenderPolicy,
+)
+from sales_core.ports import (
+    Brain,
+    Clock,
+    FactsReader,
+    FactsWriter,
+    LLMProvider,
+    MessagingChannel,
+    SalesRepository,
+)
 from sales_integrations.system import DisabledChannel
 
 log = logging.getLogger(__name__)
@@ -251,48 +266,27 @@ def _build_brain(section: BrainSection, llm: LLMProvider, brains: BrainRegistry 
     return load_brain(section.factory, llm, section.settings)
 
 
-def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> SalesRepository:
-    """What the Core reads and writes for this client, from the source it chose.
-
-    The store's own provider as the source (a spreadsheet that holds everything) is used as it
-    always was. Any other source is composed with the client's operational store and consent
-    registry. There is no third way: a source that cannot be run, a deployment without a store or a
-    registry, a registry that is not ready, a store that cannot be used: each is an explicit error,
-    and the client never silently keeps running on the store's own provider instead.
-    """
-    spec, client_id = config.spec, config.client_id
-    if spec.lanes is not None:
-        # Only this client is affected: the others start, and this one is kept as not ready.
-        raise ClientUnavailableError(f"{client_id}: lanes: a client with lanes cannot be run yet")
-    if not spec.source_apart_from_store:
-        return _stage(
-            client_id,
-            "repository",
-            lambda: _choose(client_id, builders.repositories, spec.sheets.provider, "sheets")(
-                config
-            ),
-        )
-
-    provider = spec.source_provider
-    build_source = builders.sources.get(provider)
-    if build_source is None:
+def _require_deployment(config: ClientConfig, builders: IntegrationBuilders, what: str) -> None:
+    """What a source apart from the store needs of the deployment, checked before anything is
+    built: an operational store and a consent registry."""
+    client_id = config.client_id
+    if builders.operational_stores is None:
         raise RuntimeBuildError(
-            f"{client_id}: source: {provider!r} apart from the store "
-            f"({spec.sheets.provider!r}) cannot be run yet"
-        )
-    open_store, open_consent = builders.operational_stores, builders.consent
-    if open_store is None:
-        raise RuntimeBuildError(
-            f"{client_id}: operational store: source {provider!r} needs one, and this deployment "
+            f"{client_id}: operational store: {what} needs one, and this deployment "
             "has none (set SALES_AGENT_DATABASE_URL)"
         )
-    if open_consent is None:
+    if builders.consent is None:
         raise ClientUnavailableError(
-            f"{client_id}: consent registry: source {provider!r} needs one, and this deployment "
-            "has none"
+            f"{client_id}: consent registry: {what} needs one, and this deployment has none"
         )
 
-    source = _stage(client_id, "source", lambda: build_source(config))
+
+def _open_state(config: ClientConfig, builders: IntegrationBuilders):
+    """The client's operational store (verified) and its consent registry (healthy): the state
+    Revansa keeps itself for every source that is only a source. Each failure is explicit."""
+    client_id = config.client_id
+    open_store, open_consent = builders.operational_stores, builders.consent
+    assert open_store is not None and open_consent is not None  # `_require_deployment`
     store = _stage(client_id, "operational store", lambda: open_store(client_id))
     checked = _stage(client_id, "operational store", store.verify)
     problems = [p for p in checked if not p.startswith("warning:")]
@@ -309,7 +303,115 @@ def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> Sa
         raise ClientUnavailableError(
             f"{client_id}: consent registry: not ready ({snapshot.reason or snapshot.health.value})"
         )
+    return store, consent
+
+
+def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> SalesRepository:
+    """What the Core reads and writes for a client with one source, from the source it chose.
+
+    The store's own provider as the source (a spreadsheet that holds everything) is used as it
+    always was. Any other source is composed with the client's operational store and consent
+    registry. There is no third way: a source that cannot be run, a deployment without a store or a
+    registry, a registry that is not ready, a store that cannot be used: each is an explicit error,
+    and the client never silently keeps running on the store's own provider instead.
+    """
+    spec, client_id = config.spec, config.client_id
+    if not spec.source_apart_from_store:
+        return _stage(
+            client_id,
+            "repository",
+            lambda: _choose(client_id, builders.repositories, spec.sheets.provider, "sheets")(
+                config
+            ),
+        )
+
+    provider = spec.source_provider
+    build_source = builders.sources.get(provider)
+    if build_source is None:
+        raise RuntimeBuildError(
+            f"{client_id}: source: {provider!r} apart from the store "
+            f"({spec.sheets.provider!r}) cannot be run yet"
+        )
+    _require_deployment(config, builders, f"source {provider!r}")
+    source = _stage(client_id, "source", lambda: build_source(config))
+    store, consent = _open_state(config, builders)
     return _stage(client_id, "repository", lambda: CompositeRepository(source, store, consent))
+
+
+def _build_lane_parts(
+    config: ClientConfig, builders: IntegrationBuilders
+) -> tuple[SalesRepository, ChannelRouter]:
+    """The repository and the router of a client that runs lanes: one source per `sources` entry,
+    one channel per channel provider its lanes use, and the lanes that tie them together.
+
+    The client starts only if its whole configuration is valid. What is wrong with it that can be
+    known before any connection (the lanes themselves) is reported at once; what building reveals (a
+    source or a channel that cannot be made from its settings and credentials) is collected across
+    every source and channel and reported together, never one at a time. Lanes need Revansa's own
+    operational store (no source here holds the client's state) and the consent registry.
+    """
+    from sales_app.config.lanes import lane_problems  # here: it needs the provider registry
+
+    spec, client_id = config.spec, config.client_id
+    assert spec.lanes is not None and spec.sources is not None
+    invalid = [f"lanes: {problem}" for problem in lane_problems(spec)]
+    if invalid:
+        raise RuntimeBuildError(f"{client_id}: " + "; ".join(invalid))
+    _require_deployment(config, builders, "a client with lanes")
+
+    problems: list[str] = []
+    sources: dict[str, Any] = {}
+    for instance in spec.sources:
+        build = builders.source_instances.get(instance.provider)
+        if build is None:
+            problems.append(f"source {instance.id!r}: {instance.provider!r} cannot be run yet")
+            continue
+        try:
+            sources[instance.id] = build(config, instance)
+        except Exception as error:  # noqa: BLE001 - each builder words its own failure
+            problems.append(f"source {instance.id!r}: {error}")
+
+    adapters: dict[Channel, MessagingChannel] = {}
+    kinds: dict[str, Channel] = {}
+    for key in spec.channel_providers:
+        provider = builders.channels.get(key)
+        if provider is None:
+            problems.append(f"channel {key!r}: unknown channel provider")
+            continue
+        kinds[key] = provider.kind
+        if config.effective_mode is ApprovalMode.DRY_RUN:
+            adapters[provider.kind] = DisabledChannel(provider.kind)  # cannot send, by construction
+            continue
+        try:
+            adapters[provider.kind] = provider.build(config)
+        except Exception as error:  # noqa: BLE001
+            problems.append(f"channel {key!r}: {error}")
+    if problems:
+        raise RuntimeBuildError(
+            f"{client_id}: " + "; ".join(config.secrets.redact(p) for p in problems)
+        )
+
+    store, consent = _open_state(config, builders)
+    repository = _stage(
+        client_id, "repository", lambda: CompositeRepository(sources, store, consent)
+    )
+    router = _stage(
+        client_id,
+        "router",
+        lambda: ChannelRouter(
+            adapters,
+            [
+                LaneRoute(
+                    lane_id=lane.id,
+                    channel=kinds[lane.channel],
+                    product_ids=lane.products,
+                    source_id=lane.source,
+                )
+                for lane in spec.lanes or ()
+            ],
+        ),
+    )
+    return repository, router
 
 
 def build_runtime(
@@ -323,22 +425,28 @@ def build_runtime(
     """Assemble one client's Engine. Everything here comes from that client's own config."""
     spec, client_id = config.spec, config.client_id
 
-    repository = _build_repository(config, builders)
+    router: ChannelRouter | None = None
+    if spec.lanes is not None:
+        repository, router = _build_lane_parts(config, builders)
+    else:
+        repository = _build_repository(config, builders)
     llm = _stage(
         client_id,
         "llm",
         lambda: _choose(client_id, builders.llms, spec.llm.provider, "llm")(config),
     )
     brain = _stage(client_id, "brain", lambda: _build_brain(spec.brain, llm, brains))
-    channel_key = channel_provider_key(config)
-    if channel_key is None:
-        raise RuntimeBuildError(f"{client_id}: {NO_CHANNEL_REASON}")
-    what = "channel" if isinstance(config, CanonicalClientConfig) else "whatsapp"
-    provider = _choose(client_id, builders.channels, channel_key, what)
-    if config.effective_mode is ApprovalMode.DRY_RUN:
-        channel = DisabledChannel(provider.kind)  # a dry run cannot send, by construction
-    else:
-        channel = _stage(client_id, "channel", lambda: provider.build(config))
+    channel: MessagingChannel | None = None
+    if router is None:
+        channel_key = channel_provider_key(config)
+        if channel_key is None:
+            raise RuntimeBuildError(f"{client_id}: {NO_CHANNEL_REASON}")
+        what = "channel" if isinstance(config, CanonicalClientConfig) else "whatsapp"
+        provider = _choose(client_id, builders.channels, channel_key, what)
+        if config.effective_mode is ApprovalMode.DRY_RUN:
+            channel = DisabledChannel(provider.kind)  # a dry run cannot send, by construction
+        else:
+            channel = _stage(client_id, "channel", lambda: provider.build(config))
 
     engine = _stage(
         client_id,
@@ -353,6 +461,7 @@ def build_runtime(
             repository=repository,
             brain=brain,
             channel=channel,
+            router=router,
             clock=clock,
             facts=repository if isinstance(repository, FactsReader) else None,
             facts_writer=(

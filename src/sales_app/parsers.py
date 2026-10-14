@@ -7,7 +7,7 @@ request sees either the old parsers or the new ones, never a mixture.
 from collections.abc import Iterator, Mapping, Sequence
 
 from sales_app.config import ClientConfig
-from sales_app.config.runtime_config import channel_provider_key
+from sales_app.config.runtime_config import channel_provider_keys
 from sales_app.wiring import IntegrationBuilders
 from sales_core.ports import WebhookParser
 
@@ -52,7 +52,7 @@ def build_parsers(
         holders: dict[str, str] = {}  # routing key -> the one client it belongs to
         serving = False
         for config in [*installed, *configs]:
-            if channel_provider_key(config) != name:
+            if name not in channel_provider_keys(config):
                 continue
             serving = True
             key = provider.routing_key(config)

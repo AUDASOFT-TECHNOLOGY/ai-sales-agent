@@ -14,8 +14,8 @@ with no mapping does not run rather than run on a guess.
 """
 
 import re
-from collections.abc import Sequence
-from typing import Annotated
+from collections.abc import Mapping, Sequence
+from typing import Annotated, Any
 
 from pydantic import (
     BaseModel,
@@ -27,6 +27,7 @@ from pydantic import (
 )
 
 from sales_app.config import ClientConfig
+from sales_app.config.schema import SourceInstance
 from sales_app.config.secrets import HUBSPOT_ACCESS_TOKEN
 from sales_app.secret_store import ScopeKind
 from sales_app.sourcing.contacts import normalize_phone
@@ -210,11 +211,11 @@ def _refuses(value: str | None) -> bool:
     return value is not None and value.strip().lower() not in _FALSE_WORDS
 
 
-def build_source(config: ClientConfig) -> CrmProspectSource:
-    """This client's HubSpot source, from its own token and its operator's settings. Raises
-    `ValueError` (a fixed sentence, never a value) when either is missing or not acceptable."""
+def _build(
+    config: ClientConfig, raw_settings: Mapping[str, Any], namespace: str
+) -> CrmProspectSource:
     try:
-        settings = HubSpotSourceSettings.model_validate(dict(config.spec.source_settings))
+        settings = HubSpotSourceSettings.model_validate(dict(raw_settings))
     except ValidationError as error:
         problems = "; ".join(
             ".".join(str(part) for part in problem["loc"]) + f": {problem['msg']}"
@@ -227,8 +228,19 @@ def build_source(config: ClientConfig) -> CrmProspectSource:
         HubSpotReader(HubSpotClient(config.secrets.get(HUBSPOT_ACCESS_TOKEN)), settings),
         client_id=config.client_id,
         mapping=StatusMapping.from_config(settings.status_mapping),
-        namespace=KEY,
+        namespace=namespace,
     )
+
+
+def build_source(config: ClientConfig) -> CrmProspectSource:
+    """This client's HubSpot source, from its own token and its operator's settings. Raises
+    `ValueError` (a fixed sentence, never a value) when either is missing or not acceptable."""
+    return _build(config, config.spec.source_settings, KEY)
+
+
+def build_source_instance(config: ClientConfig, instance: SourceInstance) -> CrmProspectSource:
+    """One HubSpot source among a client's several: its prospects are `<instance id>:<native id>`."""
+    return _build(config, instance.settings, instance.id)
 
 
 DESCRIPTOR = ProviderDescriptor(
@@ -253,4 +265,5 @@ DESCRIPTOR = ProviderDescriptor(
     unique_across_clients=(UniquenessRule("credential", HUBSPOT_ACCESS_TOKEN, "HubSpot token"),),
     build=build_source,
     product=Product.PROSPECT_SOURCE,
+    build_instance=build_source_instance,
 )

@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from sales_app.config import ClientConfig
+from sales_app.config.schema import SourceInstance
 from sales_app.config.secrets import SHEETS_CREDENTIALS_FILE
 from sales_app.sourcing import (
     RowIssue,
@@ -235,6 +236,18 @@ def build_prospect_source(
     )
 
 
+def build_source_instance(config: ClientConfig, instance: SourceInstance) -> SheetsProspectSource:
+    """One spreadsheet among a client's several, read-only: its prospects are `<instance id>:<id>`.
+    Every instance reads under the deployment's one Google credential."""
+    return build_prospect_source(
+        GoogleSheetsApi.from_service_account_file(config.secrets.get(SHEETS_CREDENTIALS_FILE)),
+        client_id=config.client_id,
+        source_id=instance.id,
+        settings=instance.settings,
+        timezone=ZoneInfo(config.spec.timezone),
+    )
+
+
 DESCRIPTOR = ProviderDescriptor(
     key=KEY,
     kind=ProviderKind.SOURCE,
@@ -259,4 +272,5 @@ DESCRIPTOR = ProviderDescriptor(
     capabilities={"can_write_back": True, "can_host_store": True},
     unique_across_clients=(UniquenessRule("setting", "spreadsheet_id", "spreadsheet_id"),),
     build=build_repository,
+    build_instance=build_source_instance,
 )

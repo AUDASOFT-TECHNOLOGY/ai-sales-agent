@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from sales_app.brain_registry import BrainRegistry
 from sales_app.config import ClientConfig, LoadedConfig
-from sales_app.config.runtime_config import channel_provider_key
+from sales_app.config.runtime_config import channel_provider_keys
 from sales_app.errors import ClientUnavailableError, ConfigurationError, RuntimeBuildError
 from sales_app.wiring import ClientRuntime, IntegrationBuilders, build_runtime
 from sales_core.ports import Clock
@@ -168,7 +168,7 @@ class ClientRegistry:
             if self._routing is None:
                 return self._static_routes.get((provider, key))
             for config in self.configs():
-                if channel_provider_key(config) == provider and (
+                if provider in channel_provider_keys(config) and (
                     self._routing(provider, config) == key
                 ):
                     return config.client_id

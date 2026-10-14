@@ -356,6 +356,22 @@ class ClientFile(_Section):
         return dict(self.channel.settings) if self.channel is not None else {}
 
     @property
+    def channel_providers(self) -> tuple[str, ...]:
+        """Every channel provider the client talks through: each lane's, once (in lane order), or
+        the one channel of a client with no lanes."""
+        if self.lanes is None:
+            return (self.channel_provider,)
+        return tuple(dict.fromkeys(lane.channel for lane in self.lanes))
+
+    def channel_settings_for(self, provider: str) -> dict[str, Any]:
+        """The client's non-secret settings for one channel provider. With lanes the `channel`
+        section only carries the settings of the one channel it names (a mailbox's servers); any
+        other channel of the client has none and runs on its defaults."""
+        if self.channel is not None and self.channel.provider == provider:
+            return dict(self.channel.settings)
+        return {}
+
+    @property
     def source_provider(self) -> str:
         """The provider the prospects come from: the chosen one, else the store's own."""
         return self.source.provider if self.source is not None else self.sheets.provider
@@ -378,9 +394,14 @@ class ClientFile(_Section):
             return self
         if not self.lanes:
             raise ValueError("lanes: list at least one lane, or leave `sources` and `lanes` out")
-        if self.source is not None or self.channel is not None:
+        if self.source is not None:
+            raise ValueError("lanes replace `source`: a client has either lanes or a source")
+        if self.channel is not None and self.channel.provider not in {
+            lane.channel for lane in self.lanes
+        }:
             raise ValueError(
-                "lanes replace `source` and `channel`: a client has either lanes or those two"
+                "channel: with lanes it only holds the settings of a channel a lane uses "
+                f"({self.channel.provider!r} is used by none)"
             )
         source_ids = [s.id for s in self.sources]
         for duplicate in sorted({i for i in source_ids if source_ids.count(i) > 1}):

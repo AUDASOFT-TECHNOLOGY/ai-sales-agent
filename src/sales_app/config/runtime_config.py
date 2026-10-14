@@ -98,6 +98,16 @@ def channel_provider_key(config: ClientConfig) -> str | None:
     return config.spec.channel_provider
 
 
+def channel_provider_keys(config: ClientConfig) -> tuple[str, ...]:
+    """Every channel provider this client runs on: its lanes' (once each) or its one channel.
+
+    A client with no lanes is exactly `channel_provider_key`; one with lanes may use several."""
+    if config.spec.lanes is not None:
+        return config.spec.channel_providers
+    key = channel_provider_key(config)
+    return (key,) if key is not None else ()
+
+
 # ---- ClientSpec -> the legacy view the wiring reads ----------------------------------------------
 
 

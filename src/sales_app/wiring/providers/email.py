@@ -41,7 +41,7 @@ CHANNEL_KIND = "email"  # the Core's name for this channel
 
 
 def _settings(config: ClientConfig) -> EmailChannelSettings:
-    return EmailChannelSettings.model_validate(config.spec.channel_settings)
+    return EmailChannelSettings.model_validate(config.spec.channel_settings_for(KEY))
 
 
 def smtp_settings(settings: EmailChannelSettings, password: str) -> SmtpSettings:
