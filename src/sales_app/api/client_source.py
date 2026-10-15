@@ -171,6 +171,12 @@ class SourceTestResponse(BaseModel):
     lanes: list[LaneSourceTestResponse] | None = None  # one result per lane of a lane client
 
 
+def sheets_credentials_file(application: Application, client_id: str) -> str | None:
+    """The platform's service-account file for this client's spreadsheets, if it has one."""
+    config = application.registry.get_config(client_id)
+    return config.secrets.get_optional(SHEETS_CREDENTIALS_FILE) if config is not None else None
+
+
 # ---- helpers ----------------------------------------------------------------------------------
 
 
@@ -296,8 +302,7 @@ def create_client_source_router(
         ]
 
     def platform_sheets_file(client_id: str) -> str | None:
-        config = application.registry.get_config(client_id)
-        return config.secrets.get_optional(SHEETS_CREDENTIALS_FILE) if config is not None else None
+        return sheets_credentials_file(application, client_id)
 
     def current_state(
         client_id: str,

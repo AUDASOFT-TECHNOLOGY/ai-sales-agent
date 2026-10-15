@@ -52,8 +52,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 async function errorDetail(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json();
-    if (body && typeof body === "object" && typeof (body as { detail?: unknown }).detail === "string") {
-      return (body as { detail: string }).detail;
+    const detail = body && typeof body === "object" ? (body as { detail?: unknown }).detail : undefined;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      // A 422 lists every problem: plain sentences, or `{loc, msg}` rules that never repeat the input.
+      const lines = detail.flatMap((item): string[] => {
+        if (typeof item === "string") return [item];
+        if (item && typeof item === "object" && typeof (item as { msg?: unknown }).msg === "string") {
+          const loc = (item as { loc?: unknown }).loc;
+          const where = Array.isArray(loc) ? loc.filter((p) => p !== "body").join(".") : "";
+          return [where ? `${where}: ${(item as { msg: string }).msg}` : (item as { msg: string }).msg];
+        }
+        return [];
+      });
+      if (lines.length > 0) return lines.join("; ");
     }
   } catch {
     /* not JSON, or no `detail` string (e.g. a 422 list): fall through to the generic message */
@@ -214,4 +226,127 @@ export function clientProposals(): Promise<{ proposals: Proposal[] }> {
 
 export function clientDecideProposal(id: string, decision: ProposalDecision): Promise<{ id: string; decision: string }> {
   return request<{ id: string; decision: string }>(`/approvals/${encodeURIComponent(id)}/${decision}`, { method: "POST" });
+}
+
+/* ── Lanes (see src/sales_app/api/client_lanes.py) ──
+ * A lane = one source + one channel + its products. Every write names the version it was based on;
+ * the server validates, answers 409 on a conflict and writes nothing that is not valid. */
+
+/** The products value that means "the whole catalog, including what is added later". */
+export const ALL_PRODUCTS = "ALL";
+
+export interface Lane {
+  id: string;
+  position: number;
+  source: {
+    id: string;
+    source: string;
+    label: string;
+    google_sheets: { spreadsheet_id: string; prospects_tab: string } | null;
+  };
+  channel: { channel: string; label: string; authorized: boolean; problem: string | null };
+  products: string[];
+  offers_all_products: boolean;
+}
+
+export interface LanesState {
+  version: number | null;
+  /** False: the client runs one implicit `default` lane, shown read-only. */
+  editable: boolean;
+  lanes: Lane[];
+  source_options: ChannelOption[];
+  /** Only the channels this client may choose. */
+  channel_options: ChannelOption[];
+  catalog: Array<{ id: string; name: string | null }>;
+  /** The platform's address a spreadsheet must be shared with (an identifier, not a secret); null when unknown. */
+  share_with: string | null;
+}
+
+export interface SheetsChanges {
+  spreadsheet?: string;
+  prospects_tab?: string;
+}
+
+export interface LaneCreate {
+  expected_version: number | null;
+  id: string;
+  channel: string;
+  products: string[];
+  source: { id: string; provider: string; google_sheets?: SheetsChanges };
+}
+
+export interface LaneUpdate {
+  expected_version: number | null;
+  channel?: string;
+  products?: string[];
+  google_sheets?: SheetsChanges;
+}
+
+export function clientLanes(): Promise<LanesState> {
+  return request<LanesState>("/lanes");
+}
+
+export function clientCreateLane(body: LaneCreate): Promise<Lane> {
+  return request<Lane>("/lanes", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function clientUpdateLane(id: string, body: LaneUpdate): Promise<Lane> {
+  return request<Lane>(`/lanes/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) });
+}
+
+/** Answers the lanes that remain. */
+export function clientDeleteLane(id: string, expectedVersion: number | null): Promise<LanesState> {
+  const query = expectedVersion === null ? "" : `?expected_version=${expectedVersion}`;
+  return request<LanesState>(`/lanes/${encodeURIComponent(id)}${query}`, { method: "DELETE" });
+}
+
+/* ── Readiness and connection test (client_agent.py, client_source.py) ── */
+
+export interface ReadinessCheck {
+  id: string;
+  ok: boolean;
+  /** What to do next, only when the check is not ok. */
+  message: string | null;
+}
+
+export interface Readiness {
+  ready: boolean;
+  checks: ReadinessCheck[];
+}
+
+export interface SourceTest {
+  source: string;
+  ok: boolean;
+  message: string;
+  details: Record<string, string>;
+  checked_at: string;
+  /** One result per lane, for a client that runs lanes. */
+  lanes: Array<{ lane: string; ok: boolean; message: string }> | null;
+}
+
+export interface SourceState {
+  version: number | null;
+  credential: CredentialStatus | null;
+  last_test: { ok: boolean; checked_at: string; current: boolean } | null;
+}
+
+export function clientReadiness(): Promise<Readiness> {
+  return request<Readiness>("/readiness");
+}
+
+export function clientTestSources(): Promise<SourceTest> {
+  return request<SourceTest>("/source/test", { method: "POST" });
+}
+
+export function clientSourceState(): Promise<SourceState> {
+  return request<SourceState>("/source");
+}
+
+/** Write-only, like the channel's secrets: the answer says whether one is stored, never what it is. */
+export function clientSaveSourceToken(value: string): Promise<CredentialStatus> {
+  return request<CredentialStatus>("/source/credentials", { method: "PUT", body: JSON.stringify({ access_token: value }) });
+}
+
+export function clientRemoveSourceToken(): Promise<CredentialStatus> {
+  return request<CredentialStatus>("/source/credentials", { method: "DELETE" });
 }

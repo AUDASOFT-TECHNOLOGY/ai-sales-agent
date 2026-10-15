@@ -14,6 +14,7 @@ Nothing here reaches a CRM, a spreadsheet, a mailbox or a messaging service: the
 
 from copy import deepcopy
 
+import json
 import pytest
 from test_client_agent_api import AGENT, START, World, mark_source_tested
 
@@ -227,6 +228,18 @@ def test_a_client_with_lanes_reads_each_lane_with_its_own_source_channel_and_pro
     assert [o["key"] for o in body["channel_options"]] == ["whatsapp"]
     assert "google_sheets" in [o["key"] for o in body["source_options"]]
     assert alpha.get(f"{LANES}/second").json()["source"]["id"] == "x_two"
+
+
+def test_the_client_is_told_which_address_to_share_its_spreadsheets_with(
+    alpha, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)  # the platform's file is named by a relative path in the tests
+    assert alpha.get(LANES).json()["share_with"] is None  # no readable file: nothing is invented
+    private = {"client_email": "revansa@platform.iam.gserviceaccount.com", "private_key": "KEY"}
+    (tmp_path / "creds.json").write_text(json.dumps(private), encoding="utf-8")
+    response = alpha.get(LANES)
+    assert response.json()["share_with"] == "revansa@platform.iam.gserviceaccount.com"
+    assert "KEY" not in response.text  # only the address, never anything else of the file
 
 
 def test_a_lane_that_says_all_offers_the_whole_catalog(world, alpha):

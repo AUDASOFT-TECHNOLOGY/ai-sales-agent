@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from sales_app.api.admin_clients import client_wiring_and_document, publish_client_settings
 from sales_app.api.client import make_current_client_dependency
 from sales_app.api.client_agent import runs_lanes, source_provider, switch_available
+from sales_app.api.client_source import sheets_credentials_file
 from sales_app.bootstrap import Application
 from sales_app.channel_status import allowed_channels, channel_problem, channel_provider_of
 from sales_app.client_profiles import ClientProfile
@@ -141,6 +142,9 @@ class LanesResponse(BaseModel):
     source_options: list[OptionResponse]
     channel_options: list[OptionResponse]  # only the channels this client may choose
     catalog: list[CatalogProductResponse]
+    # The platform's address a spreadsheet must be shared with (an identifier, not a secret); None
+    # when the platform has no readable Google file for this client.
+    share_with: str | None = None
 
 
 # ---- helpers ----------------------------------------------------------------------------------
@@ -297,6 +301,9 @@ def create_client_lanes_router(application: Application) -> APIRouter:
             source_options=source_options(),
             channel_options=channel_options(client_id),
             catalog=_catalog(document),
+            share_with=google_sheets.service_account_email(
+                sheets_credentials_file(application, client_id)
+            ),
         )
 
     def require_lanes(document: Mapping[str, Any], version: int | None, expected: int | None):

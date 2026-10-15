@@ -12,6 +12,7 @@ import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
 import { ClientApprovalsPage } from "./client/ClientApprovalsPage";
 import { ClientAuthProvider } from "./client/ClientAuthContext";
 import { ClientChannelPage } from "./client/ClientChannelPage";
+import { ClientLanesPage } from "./client/ClientLanesPage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
 import { ClientProfilePage } from "./client/ClientProfilePage";
 import { ClientRoute } from "./client/ClientRoute";
@@ -99,6 +100,7 @@ export function App() {
               <Route path="profile" element={<ClientProfilePage />} />
               <Route path="approvals" element={<ClientApprovalsPage />} />
               <Route path="channel" element={<ClientChannelPage />} />
+              <Route path="lanes" element={<ClientLanesPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
             </Route>
