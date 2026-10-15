@@ -28,6 +28,7 @@ from sales_app.api.client_channel import (
     MailProbeFactory,
     create_client_channel_router,
 )
+from sales_app.api.client_lanes import create_client_lanes_router
 from sales_app.api.client_source import (
     SheetsProbeFactory,
     create_client_source_router,
@@ -89,6 +90,7 @@ def create_app(
     app.include_router(create_client_approvals_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))
     app.include_router(create_client_channel_router(application, mail_probe, bot_probe))
+    app.include_router(create_client_lanes_router(application))
 
     @app.get("/health")
     def health() -> dict[str, str]:

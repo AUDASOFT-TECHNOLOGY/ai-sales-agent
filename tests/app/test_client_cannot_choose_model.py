@@ -60,6 +60,12 @@ CLIENT_ROUTES = {
     # Telegram: connecting the client's own bot, and the links that let its prospects start it.
     ("POST", "/client/v1/channel/connect"),
     ("GET", "/client/v1/channel/invitations"),
+    # Lanes: each with its own source, channel and products (no model, no provider key).
+    ("GET", "/client/v1/lanes"),
+    ("POST", "/client/v1/lanes"),
+    ("GET", "/client/v1/lanes/{lane_id}"),
+    ("PUT", "/client/v1/lanes/{lane_id}"),
+    ("DELETE", "/client/v1/lanes/{lane_id}"),
 }
 
 

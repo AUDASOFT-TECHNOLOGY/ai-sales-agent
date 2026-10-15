@@ -39,6 +39,10 @@ from sales_app.api.admin_clients import (
 )
 from sales_app.api.client import make_current_client_dependency
 from sales_app.api.client_agent import (
+    lane_of_source,
+    lane_source_entries,
+    lane_sources_fingerprint,
+    runs_lanes,
     sheets_of,
     source_fingerprint,
     source_provider,
@@ -152,12 +156,19 @@ class SourceResponse(BaseModel):
     updated_by: Literal["client", "administrator"] | None = None
 
 
-class SourceTestResponse(BaseModel):
-    source: str
+class LaneSourceTestResponse(BaseModel):
+    lane: str
     ok: bool
+    message: str  # a fixed sentence, as for a single source
+
+
+class SourceTestResponse(BaseModel):
+    source: str  # the source tested, or `lanes` when the client runs several
+    ok: bool  # for lanes: every source passed
     message: str  # a fixed sentence: never a credential, never what the service said
     details: dict[str, str] = {}
     checked_at: datetime
+    lanes: list[LaneSourceTestResponse] | None = None  # one result per lane of a lane client
 
 
 # ---- helpers ----------------------------------------------------------------------------------
@@ -297,6 +308,21 @@ def create_client_source_router(
         current = application.config_store.current(client_id)
         return current, found[0], found[1], current.version if current is not None else None
 
+    def effective_provider(raw: Mapping[str, Any], document: Mapping[str, Any]) -> str:
+        """The source a client's source routes speak of. A client that runs lanes has several: the
+        one that needs a secret of the client's own (its token is what these routes write), else
+        the first."""
+        if not runs_lanes(document):
+            return source_provider(raw, document)
+        providers = [str(s.get("provider", "")) for s in lane_source_entries(document)]
+        with_secret = next((p for p in providers if _client_credential(registry.get(p))), None)
+        return with_secret or (providers[0] if providers else source_provider(raw, document))
+
+    def fingerprint_of(client_id: str, provider: str, document: Mapping[str, Any]) -> str:
+        if runs_lanes(document):
+            return lane_sources_fingerprint(application, client_id, document)
+        return source_fingerprint(application, client_id, provider, document)
+
     def credential_status(client_id: str, declaration: CredentialDeclaration):
         try:
             status = application.credentials.status(client_scope(client_id), declaration.key)
@@ -308,10 +334,17 @@ def create_client_source_router(
 
     def source_response(client_id: str) -> SourceResponse:
         current, raw, document, version = current_state(client_id)
-        provider = source_provider(raw, document)
+        lanes = runs_lanes(document)
+        provider = effective_provider(raw, document)
         descriptor = registry.get(provider)
         spreadsheet_id, prospects_tab = sheets_of(document)
         declaration = _client_credential(descriptor)
+        runnable = descriptor is not None and descriptor.runnable
+        if lanes:  # runnable only if every source of every lane is
+            runnable = bool(lane_source_entries(document)) and all(
+                (d := registry.get(str(s.get("provider", "")))) is not None and d.runnable
+                for s in lane_source_entries(document)
+            )
         try:
             check = application.source_checks.get(client_id)
         except (SourceCheckStoreCorruptError, SourceCheckStoreUnavailableError):
@@ -321,7 +354,7 @@ def create_client_source_router(
         return SourceResponse(
             version=version,
             source=provider,
-            runnable=descriptor is not None and descriptor.runnable,
+            runnable=runnable,
             options=source_options(),
             google_sheets=(
                 SheetsSourceResponse(
@@ -329,7 +362,7 @@ def create_client_source_router(
                     prospects_tab=prospects_tab,
                     share_with=google_sheets.service_account_email(platform_sheets_file(client_id)),
                 )
-                if provider == SHEETS
+                if provider == SHEETS and not lanes  # a lane client's spreadsheets: `/lanes`
                 else None
             ),
             credential=credential_status(client_id, declaration) if declaration else None,
@@ -337,8 +370,7 @@ def create_client_source_router(
                 LastTestResponse(
                     ok=check.ok,
                     checked_at=check.checked_at,
-                    current=check.fingerprint
-                    == source_fingerprint(application, client_id, provider, document),
+                    current=check.fingerprint == fingerprint_of(client_id, provider, document),
                 )
                 if check is not None
                 else None
@@ -393,6 +425,10 @@ def create_client_source_router(
 
         try:
             _, raw, document, version = current_state(client_id)
+            if runs_lanes(document):
+                raise HTTPException(
+                    409, "your account runs lanes: change its sources in your lane settings"
+                )
             if version != body.expected_version:
                 raise HTTPException(
                     409, "the settings changed since they were loaded; reload and retry"
@@ -445,7 +481,7 @@ def create_client_source_router(
 
     def declared_credential(client_id: str) -> CredentialDeclaration:
         _, raw, document, _ = current_state(client_id)
-        declaration = _client_credential(registry.get(source_provider(raw, document)))
+        declaration = _client_credential(registry.get(effective_provider(raw, document)))
         if declaration is None:
             raise HTTPException(409, "the source you chose needs no access token from you")
         return declaration
@@ -529,6 +565,58 @@ def create_client_source_router(
             return check_hubspot(access_token=token, http=http)
         return ConnectionResult(False, "There is no connection check for this source yet.")
 
+    def run_lane_checks(client_id: str, document: Mapping[str, Any]) -> SourceTestResponse:
+        """One real, read-only call per source of the client's lanes, each with its own settings.
+        The token a source needs is the client's one, used only for the sources that need it."""
+        results: list[LaneSourceTestResponse] = []
+        for source in lane_source_entries(document):
+            lane = lane_of_source(document, source.get("id"))
+            provider = str(source.get("provider", ""))
+            settings = source.get("settings")
+            settings = settings if isinstance(settings, Mapping) else {}
+            nothing = ConnectionResult(False, "There is no connection check for this source yet.")
+            if provider == SHEETS:
+                path = platform_sheets_file(client_id)
+                probe = None
+                if path:
+                    try:
+                        probe = sheets_probe(path)
+                    except Exception:  # noqa: BLE001 - an unusable file is the platform's problem
+                        probe = None
+                result = check_google_sheets(
+                    api=probe,
+                    spreadsheet_id=str(settings.get("spreadsheet_id", "")) or None,
+                    prospects_tab=str(settings.get("prospects_tab", "Prospects")),
+                )
+            elif provider == hubspot.KEY:
+                try:
+                    token = application.credentials.reveal(
+                        client_scope(client_id), HUBSPOT_ACCESS_TOKEN
+                    )
+                except SecretStoreError:
+                    raise HTTPException(
+                        503, "credential storage is temporarily unavailable"
+                    ) from None
+                result = check_hubspot(access_token=token, http=http)
+            else:
+                result = nothing
+            results.append(LaneSourceTestResponse(lane=lane, ok=result.ok, message=result.message))
+        failed = [r.lane for r in results if not r.ok]
+        if not results:
+            message = "There is no source to test."
+        elif failed:
+            message = "These lanes cannot reach their source: " + ", ".join(failed)
+        else:
+            message = "Every source of your lanes answered."
+        return SourceTestResponse(
+            source="lanes",
+            ok=bool(results) and not failed,
+            message=message,
+            details={r.lane: r.message for r in results},
+            checked_at=application.clock.now(),
+            lanes=results,
+        )
+
     @router.post("/source/test", response_model=SourceTestResponse)
     def test_source(client: ClientProfile = Depends(get_current_client)) -> SourceTestResponse:
         client_id = client.client_id
@@ -544,20 +632,26 @@ def create_client_source_router(
             ):
                 raise HTTPException(429, "a test was just made: wait a few seconds")
             last_test[client_id] = now
-        provider = source_provider(raw, document)
-        wanted = source_fingerprint(application, client_id, provider, document)
-        result = run_check(client_id, provider, document)
-        at = application.clock.now()
+        if runs_lanes(document):
+            wanted = lane_sources_fingerprint(application, client_id, document)
+            response = run_lane_checks(client_id, document)
+        else:
+            provider = source_provider(raw, document)
+            wanted = source_fingerprint(application, client_id, provider, document)
+            result = run_check(client_id, provider, document)
+            response = SourceTestResponse(
+                source=provider,
+                ok=result.ok,
+                message=result.message,
+                details=dict(result.details),
+                checked_at=application.clock.now(),
+            )
         try:  # what was tested is kept with the result, so a later change cancels it
-            application.source_checks.set(client_id, fingerprint=wanted, ok=result.ok, at=at)
+            application.source_checks.set(
+                client_id, fingerprint=wanted, ok=response.ok, at=response.checked_at
+            )
         except (SourceCheckStoreCorruptError, SourceCheckStoreUnavailableError):
             raise HTTPException(503, "the connection test result could not be kept") from None
-        return SourceTestResponse(
-            source=provider,
-            ok=result.ok,
-            message=result.message,
-            details=dict(result.details),
-            checked_at=at,
-        )
+        return response
 
     return router

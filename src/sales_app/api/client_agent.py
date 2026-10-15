@@ -138,13 +138,19 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
     source_problem = "Choose where your prospects come from, in your data source settings."
     channel = "whatsapp"
     channel_issue: str | None = None
+    lane_channel_checks: tuple[_Check, ...] | None = None
     if found is not None:
         raw, document = found
-        channel = channel_provider_of(raw, document)
-        channel_issue = channel_problem(application, client_id, channel, document)
-        source_problem = _source_problem(
-            application, client_id, source_provider(raw, document), document
-        )
+        if runs_lanes(document):
+            # Every source and every channel of every lane is judged on its own configuration.
+            source_problem = _lane_sources_problem(application, client_id, document)
+            lane_channel_checks = _lane_channel_checks(application, profile, document)
+        else:
+            channel = channel_provider_of(raw, document)
+            channel_issue = channel_problem(application, client_id, channel, document)
+            source_problem = _source_problem(
+                application, client_id, source_provider(raw, document), document
+            )
         llm = document.get("llm")
         value = llm.get("model") if isinstance(llm, Mapping) else None
         model = value.strip() if isinstance(value, str) else ""
@@ -153,14 +159,16 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
     platform_ok = not [m for m in registry.missing(client_id) if not is_channel_reason(m)]
     # WhatsApp is connected by the administrator, so a client on it has only its number to give.
     # A client on any other channel has that channel's own check instead.
-    channel_check = (
-        _Check(
-            "whatsapp_number",
-            bool(profile.whatsapp_number) and not profile.whatsapp_reconnect_required,
-            "Your WhatsApp number is missing, or was changed and is not connected yet.",
+    channel_checks = lane_channel_checks or (
+        (
+            _Check(
+                "whatsapp_number",
+                bool(profile.whatsapp_number) and not profile.whatsapp_reconnect_required,
+                "Your WhatsApp number is missing, or was changed and is not connected yet.",
+            ),
         )
         if channel == "whatsapp"
-        else _Check("channel_ready", channel_issue is None, channel_issue or "")
+        else (_Check("channel_ready", channel_issue is None, channel_issue or ""),)
     )
     return (
         _Check(
@@ -189,7 +197,7 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
             platform_ok,
             "The platform connections for your agent are not complete. Contact your administrator.",
         ),
-        channel_check,
+        *channel_checks,
     )
 
 
@@ -244,6 +252,8 @@ def current_source_fingerprint(application: Application, client_id: str) -> str 
     if found is None:
         return None
     raw, document = found
+    if runs_lanes(document):
+        return lane_sources_fingerprint(application, client_id, document)
     return source_fingerprint(application, client_id, source_provider(raw, document), document)
 
 
@@ -301,6 +311,155 @@ def _source_problem(
     if not check.ok:
         return f"The last connection test of {descriptor.label} failed. Fix it, then test again."
     return None
+
+
+def runs_lanes(document: Mapping[str, Any]) -> bool:
+    """Whether the settings hold lanes (and their sources): the client then has no single source."""
+    return isinstance(document.get("lanes"), list | tuple) and isinstance(
+        document.get("sources"), list | tuple
+    )
+
+
+def lane_source_entries(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    sources = document.get("sources")
+    if not isinstance(sources, list | tuple):
+        return []
+    return [dict(s) for s in sources if isinstance(s, Mapping)]
+
+
+def _lane_entries(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    lanes = document.get("lanes")
+    if not isinstance(lanes, list | tuple):
+        return []
+    return [dict(lane) for lane in lanes if isinstance(lane, Mapping)]
+
+
+def lane_sources_fingerprint(
+    application: Application, client_id: str, document: Mapping[str, Any]
+) -> str:
+    """`source_fingerprint` for a client that runs lanes: one test covers every source, so it stays
+    valid only while every source, its spreadsheet and tab, and the moment each secret it needs was
+    last written are unchanged. Opaque, holds no secret."""
+    parts: list[dict[str, Any]] = []
+    for source in lane_source_entries(document):
+        provider = str(source.get("provider", ""))
+        settings = source.get("settings")
+        settings = settings if isinstance(settings, Mapping) else {}
+        item: dict[str, Any] = {"id": str(source.get("id", "")), "source": provider}
+        if provider == google_sheets.KEY:
+            item["spreadsheet_id"] = str(settings.get("spreadsheet_id", ""))
+            item["prospects_tab"] = str(settings.get("prospects_tab", "Prospects"))
+        descriptor = application.provider_registry.get(provider)
+        for credential in _client_credentials(descriptor) if descriptor is not None else ():
+            try:
+                status = application.credentials.status(client_scope(client_id), credential.key)
+                item[credential.key] = status.updated_at.isoformat() if status.updated_at else None
+            except SecretStoreError:
+                item[credential.key] = "unreadable"
+        parts.append(item)
+    parts.sort(key=lambda item: item["id"])
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def lane_of_source(document: Mapping[str, Any], source_id: object) -> str:
+    return next(
+        (
+            str(lane.get("id"))
+            for lane in _lane_entries(document)
+            if lane.get("source") == source_id
+        ),
+        str(source_id),
+    )
+
+
+def lane_source_static_problem(
+    application: Application, client_id: str, source: Mapping[str, Any]
+) -> str | None:
+    """What is missing from one lane's source before any connection is tried: the provider can run,
+    the secret it needs from the client is stored, and its settings are acceptable (a spreadsheet
+    for Sheets; for HubSpot, what the CRM's statuses mean, which is the Admin's)."""
+    provider = str(source.get("provider", ""))
+    descriptor = application.provider_registry.get(provider)
+    if descriptor is None or not descriptor.plays(ProviderKind.SOURCE):
+        return "the prospect source is not available"
+    if not descriptor.runnable or descriptor.build_instance is None:
+        return f"{descriptor.label} cannot run your agent yet"
+    for credential in _client_credentials(descriptor):
+        try:
+            stored = application.credentials.status(
+                client_scope(client_id), credential.key
+            ).configured
+        except SecretStoreError:
+            stored = False
+        if not stored:
+            return f"your {credential.label} is missing: add it in your data source settings"
+    model = descriptor.settings_models.get(ProviderKind.SOURCE)
+    if model is not None:
+        settings = source.get("settings")
+        try:
+            model.model_validate(dict(settings) if isinstance(settings, Mapping) else {})
+        except ValidationError:
+            if provider == google_sheets.KEY:
+                return "choose its spreadsheet in your lane settings"
+            return (
+                f"{descriptor.label} is not set up on the platform side yet: "
+                "contact your administrator"
+            )
+    return None
+
+
+def _lane_sources_problem(
+    application: Application, client_id: str, document: Mapping[str, Any]
+) -> str | None:
+    """Why the sources of a client's lanes cannot run its agent yet, or None. Every source must pass
+    its own checks, then the one connection test that covers them all must be current and
+    successful."""
+    sources = lane_source_entries(document)
+    if not sources:
+        return "Add a lane with a prospect source in your lane settings."
+    for source in sources:
+        problem = lane_source_static_problem(application, client_id, source)
+        if problem is not None:
+            return f"Lane {lane_of_source(document, source.get('id'))!r}: {problem}."
+    try:
+        check = application.source_checks.get(client_id)
+    except (SourceCheckStoreCorruptError, SourceCheckStoreUnavailableError):
+        return "The result of your connection test is temporarily unavailable. Try again."
+    if check is None or check.fingerprint != lane_sources_fingerprint(
+        application, client_id, document
+    ):
+        return (
+            "Test the connection to your sources: they have not been tested "
+            "since they were last changed."
+        )
+    if not check.ok:
+        return "The last connection test of your sources failed. Fix it, then test again."
+    return None
+
+
+def _lane_channel_checks(
+    application: Application, profile: ClientProfile, document: Mapping[str, Any]
+) -> tuple[_Check, ...]:
+    """The checks of every channel the lanes use: WhatsApp needs the client's number, every other
+    channel its own settings and secrets, and each must be allowed by the Admin."""
+    client_id = profile.client_id
+    channels = list(dict.fromkeys(str(lane.get("channel", "")) for lane in _lane_entries(document)))
+    checks: list[_Check] = []
+    if "whatsapp" in channels:
+        checks.append(
+            _Check(
+                "whatsapp_number",
+                bool(profile.whatsapp_number) and not profile.whatsapp_reconnect_required,
+                "Your WhatsApp number is missing, or was changed and is not connected yet.",
+            )
+        )
+    issue = next(
+        (p for c in channels if (p := channel_problem(application, client_id, c, document))),
+        None,
+    )
+    if issue is not None or any(c != "whatsapp" for c in channels):
+        checks.append(_Check("channel_ready", issue is None, issue or ""))
+    return tuple(checks)
 
 
 @contextlib.contextmanager

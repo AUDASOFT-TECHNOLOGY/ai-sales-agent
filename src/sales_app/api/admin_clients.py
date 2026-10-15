@@ -800,6 +800,7 @@ def publish_client_settings(
     note: str = "client settings",
     top_keys: tuple[str, ...] = CLIENT_SETTINGS_TOP_KEYS,
     sections: Mapping[str, tuple[str, ...]] = CLIENT_SETTINGS_SECTIONS,
+    drop: tuple[str, ...] = (),
 ) -> ConfigVersion:
     """Publish a client's own change on top of the settings in force, as a new version.
 
@@ -818,6 +819,8 @@ def publish_client_settings(
     if (current.version if current is not None else None) != expected_version:
         raise HTTPException(409, "the settings changed since they were loaded; reload and retry")
     document = thaw_document(base)
+    for key in drop:  # whole sections this change makes meaningless (lanes replace `source`)
+        document.pop(key, None)
     for key in top_keys:
         if key in changes:
             document[key] = changes[key]
@@ -841,6 +844,22 @@ def publish_client_settings(
         raise HTTPException(
             409, "the settings changed since they were loaded; reload and retry"
         ) from error
+
+
+def _lane_hubspot_index(document: Mapping[str, Any]) -> int | None:
+    """The position of the HubSpot source among a lane client's `sources` (None: the client has no
+    lanes, or none on HubSpot). A client holds one HubSpot account, so there is at most one."""
+    sources = document.get("sources")
+    if not isinstance(sources, list | tuple) or not isinstance(document.get("lanes"), list | tuple):
+        return None
+    return next(
+        (
+            i
+            for i, source in enumerate(sources)
+            if isinstance(source, Mapping) and source.get("provider") == hubspot.KEY
+        ),
+        None,
+    )
 
 
 def create_admin_clients_router(application: Application) -> APIRouter:
@@ -1150,6 +1169,11 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         if found is None:
             raise HTTPException(404, "no such client")
         raw, document = found
+        index = _lane_hubspot_index(document)
+        if index is not None:  # a client on lanes: the settings are those of its HubSpot source
+            lane_source = document["sources"][index]
+            settings = lane_source.get("settings")
+            return raw, document, hubspot.KEY, thaw_document(settings) if settings else None
         section = document.get("source")
         section = section if isinstance(section, Mapping) else {}
         provider = str(section.get("provider") or "")
@@ -1178,7 +1202,15 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             # The client chooses its source; the operator only settles what a chosen one means.
             raise HTTPException(409, "this client has not chosen HubSpot as its source")
         settings = body.model_dump(mode="json", exclude_none=True)
-        document = {**base_document, "source": {"provider": provider, "settings": settings}}
+        index = _lane_hubspot_index(base_document)
+        if index is not None:
+            # One HubSpot account per client: the mapping is that of the lane source that uses it,
+            # and every other source and lane stays as it is.
+            sources = thaw_document(base_document["sources"])
+            sources[index]["settings"] = settings
+            document = {**base_document, "sources": sources}
+        else:
+            document = {**base_document, "source": {"provider": provider, "settings": settings}}
         check = validate_settings_document(client_id, raw, document)
         if check.errors or check.document is None:
             raise HTTPException(400, "; ".join(check.errors) or "invalid configuration")
