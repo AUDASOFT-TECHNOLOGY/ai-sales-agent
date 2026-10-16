@@ -169,13 +169,73 @@ class TestServe:
         assert cli.main(["serve"]) == cli.EXIT_CONFIG
         assert "unknown timezone" in capsys.readouterr().err
 
-    def test_no_enabled_clients_prevents_startup(self, environment, fakes, monkeypatch, capsys):
+    def test_zero_enabled_clients_still_serves_the_admin_and_runs_no_agent(
+        self, environment, fakes, monkeypatch, capsys
+    ):
         import uvicorn
 
         write_client(environment, "alpha", raw="enabled: false\n")
-        monkeypatch.setattr(uvicorn, "run", lambda *a, **k: pytest.fail("must not start"))
-        assert cli.main(["serve"]) == cli.EXIT_CONFIG
-        assert "no enabled clients" in capsys.readouterr().err
+        made, seen = fakes
+        started = {}
+        monkeypatch.setattr(uvicorn, "run", lambda app, **kw: started.update(app=app, **kw))
+        assert cli.main(["serve"]) == cli.EXIT_OK
+        assert seen["require_clients"] is False
+        assert "/admin/v1/auth/login" in _route_paths(started["app"])
+        assert "serving the Admin API only" in capsys.readouterr().out
+        assert made.channels == {} and made.repositories == {}  # nothing was even built
+
+    def test_zero_enabled_clients_means_the_scheduler_has_nothing_to_run(self, environment):
+        write_client(environment, "alpha", raw="enabled: false\n")
+        builders, made = fake_builders()
+        application = build_application(
+            Settings(), env={}, builders=builders, require_clients=False
+        )
+        assert application.registry.runtimes() == []
+        assert application.scheduler.tick() == []
+        assert made.channels == {} and made.repositories == {}
+
+    def test_zero_enabled_clients_the_admin_can_still_sign_in(self, environment):
+        from datetime import UTC, datetime
+
+        from fastapi.testclient import TestClient
+
+        from sales_app.admin_auth import (
+            AdminRole,
+            AdminUser,
+            InMemoryAdminSessionStore,
+            InMemoryAdminUserStore,
+        )
+        from sales_app.admin_auth.passwords import hash_password
+        from sales_app.api import create_app
+
+        users = InMemoryAdminUserStore()
+        users.create(
+            AdminUser(
+                id="a1",
+                username="root",
+                password_hash=hash_password("correct-horse-battery-staple"),
+                role=AdminRole.OWNER,
+                created_at=datetime.now(UTC),
+            )
+        )
+        builders, _ = fake_builders()
+        application = build_application(
+            Settings(),
+            env={},
+            builders=builders,
+            require_clients=False,
+            admin_user_store=users,
+            admin_session_store=InMemoryAdminSessionStore(),
+        )
+        client = TestClient(create_app(application, run_scheduler=False), base_url="https://t")
+        wrong = client.post("/admin/v1/auth/login", json={"username": "root", "password": "x"})
+        assert wrong.status_code == 401  # authentication is not bypassed
+        ok = client.post(
+            "/admin/v1/auth/login",
+            json={"username": "root", "password": "correct-horse-battery-staple"},
+        )
+        assert ok.status_code == 200
+        assert client.get("/admin/v1/auth/me").status_code == 200
 
     def test_a_second_instance_is_refused(self, environment, fakes, tmp_path, capsys):
         write_client(environment, "alpha")

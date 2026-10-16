@@ -105,7 +105,12 @@ def _serve(settings: Settings) -> int:
 
     try:
         with InstanceLock(settings.lock_file):
-            application = build_application(settings)
+            # The Admin must be able to sign in and manage clients before any is enabled: zero
+            # enabled clients is valid here. The scheduler only walks enabled clients' runtimes and
+            # no webhook parser exists without one, so nothing runs and nothing is sent.
+            application = build_application(settings, require_clients=False)
+            if not application.registry.runtimes():
+                log.warning("no enabled client: serving the Admin API only, no agent will run")
             _announce(application)
             # One worker on purpose: the Engine's single-writer guarantee is in-process.
             uvicorn.run(
