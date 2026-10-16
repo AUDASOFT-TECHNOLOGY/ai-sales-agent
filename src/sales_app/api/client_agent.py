@@ -334,6 +334,16 @@ def _lane_entries(document: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [dict(lane) for lane in lanes if isinstance(lane, Mapping)]
 
 
+def _plain(value: Any) -> Any:
+    """Settings as plain dicts and lists: a stored document holds read-only mappings, which JSON
+    cannot write."""
+    if isinstance(value, Mapping):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_plain(v) for v in value]
+    return value
+
+
 def lane_sources_fingerprint(
     application: Application, client_id: str, document: Mapping[str, Any]
 ) -> str:
@@ -349,6 +359,8 @@ def lane_sources_fingerprint(
         if provider == google_sheets.KEY:
             item["spreadsheet_id"] = str(settings.get("spreadsheet_id", ""))
             item["prospects_tab"] = str(settings.get("prospects_tab", "Prospects"))
+            if settings.get("writeback"):  # the columns written to are part of what was tested
+                item["writeback"] = _plain(settings["writeback"])
         descriptor = application.provider_registry.get(provider)
         for credential in _client_credentials(descriptor) if descriptor is not None else ():
             try:

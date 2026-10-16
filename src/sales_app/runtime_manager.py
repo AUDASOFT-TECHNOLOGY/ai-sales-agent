@@ -225,7 +225,7 @@ class RuntimeManager:
             self._set(client_id, APPLIED)
             self._queue_parsers()  # a phone number id may have changed
 
-        if runtime.stage(config, built.engine, installed):
+        if runtime.stage(config, built.engine, installed, built.writeback):
             return None
         return waiter
 

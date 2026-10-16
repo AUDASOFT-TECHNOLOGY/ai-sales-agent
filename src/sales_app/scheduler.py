@@ -29,6 +29,9 @@ log = logging.getLogger(__name__)
 BACKOFF_BASE_SECONDS = 30
 BACKOFF_MAX_SECONDS = 900
 INBOX_EVERY_MINUTES = 2  # how often a mailbox is read; not tied to the outbound window
+SYNC_EVERY_MINUTES = 10  # how often results are written back into the sources
+SYNC_BACKOFF_BASE_SECONDS = 60
+SYNC_BACKOFF_MAX_SECONDS = 1800
 
 
 class Job(StrEnum):
@@ -37,6 +40,7 @@ class Job(StrEnum):
     DISPATCH = "dispatch"  # send what humans approved since the last run
     RECOVER = "recover"  # process stored replies that were never handled
     INBOX = "inbox"  # fetch the replies of a channel that does not call us (a mailbox)
+    SYNC = "sync"  # write results back into the sources that are allowed to receive them
 
 
 class InboxSupport(Protocol):
@@ -65,19 +69,38 @@ class Scheduler:
         may_run: Callable[[str], bool] | None = None,
         inbox: InboxSupport | None = None,
         inbox_every_minutes: int = INBOX_EVERY_MINUTES,
+        sync_every_minutes: int = SYNC_EVERY_MINUTES,
     ) -> None:
         self._registry = registry
         self._clock = clock
         self._may_run = may_run  # the client's own switch; None: nothing to ask
         self._inbox = inbox
         self._inbox_every = inbox_every_minutes
+        self._sync_every = sync_every_minutes
         self._executor = executor
         self._owns_executor = executor is None
 
     # ---- what is due ---------------------------------------------------------------------
 
     def due_jobs(self, runtime: ClientRuntime, now: datetime) -> list[Job]:
-        """Jobs that should start now for this client. Pure: no side effects."""
+        """Jobs that should start now for this client. Pure: no side effects.
+
+        The write-back comes last and on its own clock: it is due whatever the outbound window, and
+        a client whose sending is backing off is still written back (and the reverse)."""
+        jobs = self._due_work(runtime, now)
+        if self._sync_due(runtime, now):
+            jobs = [*jobs, Job.SYNC]
+        return jobs
+
+    def _sync_due(self, runtime: ClientRuntime, now: datetime) -> bool:
+        if runtime.writeback is None or runtime.suspended:
+            return False
+        state = runtime.state
+        if state.sync_blocked_until is not None and now < state.sync_blocked_until:
+            return False
+        return _elapsed(state.last_sync_at, now, self._sync_every)
+
+    def _due_work(self, runtime: ClientRuntime, now: datetime) -> list[Job]:
         state = runtime.state
         if state.blocked_until is not None and now < state.blocked_until:
             return []
@@ -180,7 +203,7 @@ class Scheduler:
             for job in jobs:
                 result = self._execute(runtime, job, now)
                 results.append(result)
-                if not result.ok and job is not Job.INBOX:
+                if not result.ok and job not in (Job.INBOX, Job.SYNC):
                     break  # a failing client waits for its backoff before anything else
         finally:
             runtime.state.end()
@@ -202,6 +225,8 @@ class Scheduler:
                     reports = [engine.dispatch()]
                 elif job is Job.INBOX:
                     reports = [self._poll(runtime, engine)]
+                elif job is Job.SYNC:
+                    return self._sync(runtime, now)
                 else:
                     reports = [engine.recover_pending_replies()]
         except ClientNotReadyError as error:
@@ -209,9 +234,16 @@ class Scheduler:
             logger.warning("job %s skipped: %s", job.value, error)
             return JobResult(runtime.client_id, job, ok=False, errors=(str(error),))
         except Exception as error:
-            logger.exception("job %s failed", job.value)
+            if job is Job.SYNC:  # the type only: the message of what failed may carry a value
+                logger.error("job %s failed (%s)", job.value, type(error).__name__)
+            else:
+                logger.exception("job %s failed", job.value)
             if job is Job.INBOX:
                 self._block_inbox(runtime, now)
+            elif job is Job.SYNC:  # counted only: what it raised may carry a value
+                self._block_sync(runtime, now)
+                runtime.health.record_writeback_failure(now)
+                return JobResult(runtime.client_id, job, ok=False, errors=("write-back failed",))
             else:
                 self._block(runtime, now)
             runtime.health.record_failure(job.value, now, f"{type(error).__name__}: {error}")
@@ -224,6 +256,34 @@ class Scheduler:
         runtime.health.record_success(job.value, now, errors)
         logger.info("job %s finished (%d reported problems)", job.value, len(errors))
         return JobResult(runtime.client_id, job, ok=True, errors=errors)
+
+    def _sync(self, runtime: ClientRuntime, now: datetime) -> JobResult:
+        """One write-back run. Called inside the lease, so the syncers are the ones of the Engine in
+        force. Each source runs on its own; what comes back is counters and fixed sentences."""
+        writeback = runtime.writeback
+        if writeback is None:
+            return JobResult(runtime.client_id, Job.SYNC, ok=True)
+        summary = writeback.run()
+        runtime.state.last_sync_at = now
+        if summary.all_failed:
+            self._block_sync(runtime, now)
+        else:
+            runtime.state.sync_blocked_until = None
+            runtime.state.sync_failures = 0
+        runtime.health.record_writeback(now, summary, failed=summary.all_failed)
+        return JobResult(
+            runtime.client_id, Job.SYNC, ok=not summary.all_failed, errors=summary.errors
+        )
+
+    @staticmethod
+    def _block_sync(runtime: ClientRuntime, now: datetime) -> None:
+        state = runtime.state
+        state.last_sync_at = now
+        state.sync_failures += 1
+        delay = min(
+            SYNC_BACKOFF_BASE_SECONDS * 2 ** (state.sync_failures - 1), SYNC_BACKOFF_MAX_SECONDS
+        )
+        state.sync_blocked_until = now + timedelta(seconds=delay)
 
     def _poll(self, runtime: ClientRuntime, engine):
         """One poll of the client's inbox, with the config in force for this lease."""

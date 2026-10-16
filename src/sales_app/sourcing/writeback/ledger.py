@@ -5,8 +5,9 @@ current state of the source and of Revansa (see `planning`), so losing the ledge
 records what happened so that the synchroniser can back off after a failure, stop retrying a write a
 person has overruled, and leave a trail for the operator.
 
-An entry holds only: the client, the prospect's public id (an opaque CRM id), the field (the status),
-the two statuses of the write, the outcome with a fixed failure code, and times. Never a name, a
+An entry holds only: the client, the prospect's public id (an opaque CRM id), the field, the two
+values of the write (a status, or for the other fields a short canonical text: a date, a count, a
+next action; see `planning.value_text`), the outcome with a fixed failure code, and times. Never a name, a
 contact, a message or anything the source or its service said. The id of a local prospect (it embeds
 the sender's number or address) is refused: a local prospect is never written back. The caller makes
 `attempt_id` out of ids and counters, never out of a contact.
@@ -28,6 +29,10 @@ from sales_app.sourcing.writeback.policy import WRITEBACK_FIELDS
 from sales_core.contracts import ClientId, ProspectId, ProspectStatus
 
 ATTEMPT_ID_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,128}")  # applied with `fullmatch`
+MAX_VALUE_CHARS = 255  # a canonical value is a date, a count or a type and a date: never longer
+
+# What a write replaces and puts: the status itself for the status, a canonical text for the rest.
+LedgerValue = ProspectStatus | str
 
 
 class Outcome(StrEnum):
@@ -57,8 +62,9 @@ class WriteAttempt:
 
     - `attempt_id` identifies the try: recording it twice records it once (a retry after a failure
       of unknown outcome cannot duplicate it).
-    - `new` and `expected` are the statuses of the planned write (`expected` is what the source held
-      when it was read).
+    - `new` and `expected` are the values of the planned write (`expected` is what the source held
+      when it was read): a `ProspectStatus` for the status, a canonical text (possibly empty: an
+      empty cell) for any other field.
     - `code` is set exactly when the outcome is `DEFERRED` or `FAILED`; `not_before` may only
       accompany `DEFERRED`: the earliest time to try again, when the source said.
     """
@@ -66,8 +72,8 @@ class WriteAttempt:
     client_id: ClientId
     attempt_id: str
     prospect_id: ProspectId  # the public id the Core sees
-    new: ProspectStatus
-    expected: ProspectStatus
+    new: LedgerValue
+    expected: LedgerValue
     outcome: Outcome
     at: datetime
     field: ProspectField = ProspectField.STATUS
@@ -85,8 +91,15 @@ class WriteAttempt:
             raise ValueError("a local prospect is never written back")
         if self.field not in WRITEBACK_FIELDS:
             raise ValueError("this field is never written back")
-        if self.new is self.expected:
-            raise ValueError("a write changes the status: new and expected differ")
+        for value in (self.new, self.expected):
+            if not isinstance(value, str) or (self.field is ProspectField.STATUS) != isinstance(
+                value, ProspectStatus
+            ):
+                raise ValueError("a value does not fit the field it is recorded for")
+            if len(value) > MAX_VALUE_CHARS:
+                raise ValueError("a value is too long to be recorded")
+        if self.new == self.expected:
+            raise ValueError("a write changes the field: new and expected differ")
         for name in ("at", "not_before"):
             value = getattr(self, name)
             if value is not None and value.tzinfo is None:

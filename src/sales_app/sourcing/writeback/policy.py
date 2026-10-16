@@ -1,8 +1,10 @@
 """What an operator allows Revansa to write back into a client's source.
 
 Nothing is written unless the operator said so: the default policy is empty. Today only the status
-can be written back, and only to tighten it (see `planning`); the identity of a person (name,
-contact, channel, language) can never be, whatever the policy says or the source declares writable.
+can be written back, and only to tighten it (see `planning`), plus four copies of Revansa's own
+bookkeeping a spreadsheet may show (last contact, last reply, follow-up count, next action), each
+with its own rule of non-overwriting (see `planning`). The identity of a person (name, contact,
+channel, language) can never be, whatever the policy says or the source declares writable.
 """
 
 from dataclasses import dataclass
@@ -12,7 +14,15 @@ from sales_app.sourcing.ports import SourceCapabilities
 
 # The fields that may ever be written back. Revansa's own fields only, so that what a write-back
 # ledger or a log holds can never be a name, a number or an address.
-WRITEBACK_FIELDS = frozenset({ProspectField.STATUS})
+WRITEBACK_FIELDS = frozenset(
+    {
+        ProspectField.STATUS,
+        ProspectField.LAST_CONTACTED_AT,
+        ProspectField.LAST_INBOUND_AT,
+        ProspectField.FOLLOW_UP_COUNT,
+        ProspectField.NEXT_ACTION,
+    }
+)
 assert not WRITEBACK_FIELDS & SOURCE_ONLY_FIELDS
 
 
@@ -25,7 +35,8 @@ class WriteBackPolicyError(ValueError):
 class WriteBackPolicy:
     """The operator's decision, built explicitly: empty (nothing is written) by default.
 
-    - `fields`: the fields Revansa may write into the source. Only `WRITEBACK_FIELDS` are accepted.
+    - `fields`: the fields Revansa may write into the source. Only `WRITEBACK_FIELDS` are accepted;
+      each one needs a column the operator named (the source checks it before anything is written).
     - `propagate_opt_out`: also write `OPTED_OUT` into the source, for a contact that opted out in
       Revansa or in the consent registry. A separate choice, off by default; it needs the status
       to be writable and a source that can express "do not contact".
@@ -38,7 +49,7 @@ class WriteBackPolicy:
         fields = frozenset(self.fields)
         object.__setattr__(self, "fields", fields)
         if not fields <= WRITEBACK_FIELDS:
-            raise WriteBackPolicyError("only the status can be written back to a source")
+            raise WriteBackPolicyError("this field can never be written back to a source")
         if self.propagate_opt_out and ProspectField.STATUS not in fields:
             raise WriteBackPolicyError("propagating an opt-out needs the status to be written back")
 

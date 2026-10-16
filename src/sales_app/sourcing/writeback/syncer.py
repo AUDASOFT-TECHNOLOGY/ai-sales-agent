@@ -1,4 +1,4 @@
-"""Bringing a source's statuses in line with Revansa's, one pass at a time.
+"""Bringing a source in line with what Revansa decided and did, one pass at a time.
 
 `run_once()` reads the source and Revansa's own state, plans the writes that **tighten** a status
 (see `planning`), holds back those a recent attempt makes unwise, and sends the rest. What to write is
@@ -6,8 +6,9 @@ recomputed on every pass from what the source holds now, so nothing depends on a
 finished: a pass interrupted anywhere is simply followed by another.
 
 - **Off by default.** An empty policy sends nothing and asks nothing: not even a read.
-- **Never loosens, never overwrites.** Every write names the status the source held when it was read;
+- **Never loosens, never overwrites.** Every write names the value the source held when it was read;
   the source refuses it if a person changed it since (`SourceConflictError`), and nothing is written.
+  What may be written, field by field, is decided in `planning`.
 - **A refused batch is not a lost batch.** Writes go out in batches; if one is refused the same
   writes are tried one at a time, so one person's edit blocks only that prospect.
 - **Failures are told apart.** A source that cannot be reached or asks to wait is tried again later
@@ -28,10 +29,11 @@ already applied and nothing is sent twice.
 """
 
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from types import MappingProxyType
+from typing import Any
 
 from sales_app.sourcing.consent import ConsentWriter
 from sales_app.sourcing.errors import (
@@ -44,16 +46,27 @@ from sales_app.sourcing.errors import (
     SourceUnavailableError,
     StoreError,
 )
+from sales_app.sourcing.fields import ProspectField
 from sales_app.sourcing.identifiers import to_public_id
-from sales_app.sourcing.ports import OperationalStore, ProspectSource
+from sales_app.sourcing.ports import (
+    OperationalStore,
+    ProspectChange,
+    ProspectSource,
+    WriteBackReadable,
+)
 from sales_app.sourcing.writeback.ledger import (
     FailureCode,
     Outcome,
     WriteAttempt,
     WriteBackLedger,
 )
-from sales_app.sourcing.writeback.planning import PlannedWrite, SkipReason, plan_status_writes
-from sales_app.sourcing.writeback.policy import WriteBackPolicy
+from sales_app.sourcing.writeback.planning import (
+    PlannedWrite,
+    SkipReason,
+    plan_field_writes,
+    value_text,
+)
+from sales_app.sourcing.writeback.policy import WriteBackPolicy, WriteBackPolicyError
 from sales_core.contracts import ProspectId
 
 
@@ -106,6 +119,8 @@ class WriteBackSyncer:
         if min(cooldown, backoff_base, backoff_cap) <= timedelta(0):
             raise ValueError("delays must be positive")
         policy.validate_for(source.capabilities)  # a policy the source cannot honour fails now
+        if policy.fields - {ProspectField.STATUS} and not isinstance(source, WriteBackReadable):
+            raise WriteBackPolicyError("the source cannot say what its cells hold")
         self._source = source
         self._store = store
         self._consent = consent
@@ -128,6 +143,7 @@ class WriteBackSyncer:
             return SyncReport(dry_run=self._dry_run)
         try:
             records = list(self._source.list_prospects())
+            values = self._read_values()
             states = self._store.list_states()
         except SourceError as error:
             return SyncReport(dry_run=self._dry_run, stopped=_code_of(error))
@@ -135,20 +151,22 @@ class WriteBackSyncer:
             return SyncReport(dry_run=self._dry_run, stopped=FailureCode.UNAVAILABLE)
 
         run = self._new_run_id()
-        recovered = 0 if self._dry_run else self._confirm_recovered(run, records)
+        recovered = 0 if self._dry_run else self._confirm_recovered(run, records, values)
 
         if self._policy.propagate_opt_out:
             snapshot = self._consent.snapshot()
             healthy, is_blocked = snapshot.healthy, snapshot.blocks
         else:  # the registry is not read at all
             healthy, is_blocked = False, _nobody
-        plan = plan_status_writes(
+        plan = plan_field_writes(
             records,
             states,
+            values,
             capabilities=self._source.capabilities,
             policy=self._policy,
             is_blocked=is_blocked,
             registry_healthy=healthy,
+            last_written=self._last_written,
         )
 
         now = self._clock()
@@ -176,12 +194,29 @@ class WriteBackSyncer:
             stopped=stopped,
         )
 
+    # ---- reading --------------------------------------------------------------------------
+
+    def _read_values(self) -> Mapping[str, Mapping[ProspectField, Any]]:
+        """What the source holds in the fields other than the status; nothing is asked if the
+        policy does not allow any."""
+        if not self._policy.fields - {ProspectField.STATUS}:
+            return {}
+        assert isinstance(self._source, WriteBackReadable)  # checked at construction
+        return self._source.read_writeback_values()
+
+    def _last_written(self, public_id: str, field: ProspectField) -> str | None:
+        """What Revansa last wrote (and the source accepted) in this field of this prospect."""
+        for entry in reversed(self._ledger.entries(ProspectId(public_id))):
+            if entry.field is field and entry.outcome is Outcome.APPLIED:
+                return str(entry.new)
+        return None
+
     # ---- holding back ---------------------------------------------------------------------
 
     def _held_back(self, write: PlannedWrite, now: datetime) -> bool:
-        """Whether a recent attempt on this prospect makes another one unwise for now."""
+        """Whether a recent attempt on this field of this prospect makes another one unwise."""
         public_id = ProspectId(write.public_id)
-        latest = self._ledger.latest(public_id)
+        latest = self._ledger.latest(public_id, write.field)
         if latest is None:
             return False
         if latest.outcome is Outcome.DEFERRED:
@@ -189,13 +224,15 @@ class WriteBackSyncer:
                 return now < latest.not_before
             streak = 0
             for entry in reversed(self._ledger.entries(public_id)):
+                if entry.field is not write.field:
+                    continue
                 if entry.outcome is not Outcome.DEFERRED:
                     break
                 streak += 1
             delay = min(self._backoff_base * 2 ** (streak - 1), self._backoff_cap)
             return now < latest.at + delay
         # applied (and a person undid it), conflicted or failed: not the same write again at once
-        return latest.new is write.new and now < latest.at + self._cooldown
+        return latest.new == write.ledger_new and now < latest.at + self._cooldown
 
     # ---- sending --------------------------------------------------------------------------
 
@@ -204,7 +241,7 @@ class WriteBackSyncer:
     ) -> FailureCode | None:
         """Send a batch. Returns why the pass must stop, or None."""
         try:
-            self._source.update_prospects([write.to_change() for _, write in batch])
+            self._source.update_prospects(_changes(write for _, write in batch))
         except (SourceConflictError, KeyError) as error:
             if len(batch) == 1:
                 is_conflict = isinstance(error, SourceConflictError)
@@ -255,10 +292,11 @@ class WriteBackSyncer:
                     client_id=self._ledger.client_id,
                     attempt_id=f"{run}-{index}",  # a run and a counter: never from a person's data
                     prospect_id=ProspectId(write.public_id),
-                    new=write.new,
-                    expected=write.expected,
+                    new=write.ledger_new,
+                    expected=write.ledger_expected,
                     outcome=outcome,
                     at=now,
+                    field=write.field,
                     code=code,
                     not_before=not_before,
                 )
@@ -278,34 +316,53 @@ class WriteBackSyncer:
 
     # ---- recovering a lost answer -----------------------------------------------------------
 
-    def _confirm_recovered(self, run: str, records: Sequence) -> int:
-        """A write recorded as deferred whose status the source now holds did happen: say so."""
+    def _confirm_recovered(
+        self, run: str, records: Sequence, values: Mapping[str, Mapping[ProspectField, Any]]
+    ) -> int:
+        """A write recorded as deferred whose value the source now holds did happen: say so."""
         found = []
         for index, record in enumerate(records):
             try:
                 public = ProspectId(to_public_id(self._namespace, record.prospect_id))
             except InvalidNativeIdError:
                 continue
-            latest = self._ledger.latest(public)
-            if (
-                latest is not None
-                and latest.outcome is Outcome.DEFERRED
-                and record.status is latest.new
-            ):
-                found.append(
-                    WriteAttempt(
-                        client_id=self._ledger.client_id,
-                        attempt_id=f"{run}-r{index}",
-                        prospect_id=public,
-                        new=latest.new,
-                        expected=latest.expected,
-                        outcome=Outcome.APPLIED,
-                        at=self._clock(),
+            held = values.get(record.prospect_id, {})
+            for each in self._policy.fields:
+                latest = self._ledger.latest(public, each)
+                if latest is None or latest.outcome is not Outcome.DEFERRED:
+                    continue
+                if each is ProspectField.STATUS:
+                    current = record.status
+                elif each in held:
+                    current = value_text(each, held[each])
+                else:
+                    continue
+                if current == latest.new:
+                    found.append(
+                        WriteAttempt(
+                            client_id=self._ledger.client_id,
+                            attempt_id=f"{run}-r{index}-{each.value}",
+                            prospect_id=public,
+                            new=latest.new,
+                            expected=latest.expected,
+                            outcome=Outcome.APPLIED,
+                            at=self._clock(),
+                            field=each,
+                        )
                     )
-                )
         if found:
             self._ledger.append(found)
         return len(found)
+
+
+def _changes(writes: Iterable[PlannedWrite]) -> list[ProspectChange]:
+    """One change per prospect, however many of its fields are written in this batch."""
+    merged: dict[str, tuple[dict, dict]] = {}
+    for write in writes:
+        new, expected = merged.setdefault(write.prospect_id, ({}, {}))
+        new[write.field] = write.new
+        expected[write.field] = write.expected
+    return [ProspectChange(prospect_id=p, new=n, expected=e) for p, (n, e) in merged.items()]
 
 
 def _nobody(contact) -> bool:

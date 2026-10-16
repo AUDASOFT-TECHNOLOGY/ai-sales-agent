@@ -93,7 +93,9 @@ def test_a_lane_and_a_channel_round_trip_through_the_documents():
 def test_no_migration_was_needed():
     from sales_app.persistence.schema import head_revision
 
-    assert head_revision() == "0004"  # the lane lives in the existing JSON documents
+    # The lane lives in the existing JSON documents: lanes added no revision of their own. The head
+    # is 0005, the write-back ledger (E9), which has nothing to do with lanes.
+    assert head_revision() == "0005"
 
 
 # ---- a lane is kept across a restart ---------------------------------------------------------------

@@ -33,3 +33,15 @@ class SheetConflictError(SheetsError):
 
 class SheetDataError(SheetsError):
     """A row the adapter cannot safely interpret was needed for the operation (fail closed)."""
+
+
+class SheetFieldConflictError(SheetConflictError):
+    """A targeted write found a cell that no longer holds what it was read as.
+
+    Names the prospect's id and the column keys, never a value. Nothing was written.
+    """
+
+    def __init__(self, prospect_id: str, fields: Sequence[str]) -> None:
+        super().__init__("a cell changed since it was read; nothing was written")
+        self.prospect_id = prospect_id
+        self.fields = tuple(fields)

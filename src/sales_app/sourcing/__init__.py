@@ -47,6 +47,7 @@ from sales_app.sourcing.ports import (
     ProspectSource,
     ProspectState,
     SourceCapabilities,
+    WriteBackReadable,
 )
 from sales_app.sourcing.problems import ProblemCode, SourceProblem
 from sales_app.sourcing.sheets_source import (
@@ -54,6 +55,7 @@ from sales_app.sourcing.sheets_source import (
     RowProblem,
     SheetsProspectSource,
     SheetsReader,
+    SheetsWriter,
 )
 from sales_app.sourcing.statuses import (
     CONTACTABLE,
@@ -85,6 +87,7 @@ __all__ = [
     "RowProblem",
     "SheetsProspectSource",
     "SheetsReader",
+    "SheetsWriter",
     "SourceAuthError",
     "SourceCapabilities",
     "SourceConflictError",
@@ -100,6 +103,7 @@ __all__ = [
     "StatusResolution",
     "StoreError",
     "StoreUnavailableError",
+    "WriteBackReadable",
     "changed_fields",
     "contact_keys",
     "effective_status",

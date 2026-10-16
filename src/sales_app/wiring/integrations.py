@@ -30,6 +30,7 @@ from sales_app.wiring.providers import (
     openai,
     whatsapp,
 )
+from sales_app.wiring.writeback import WritebackSupport
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import Channel, InboundMessage
 from sales_core.ports import LLMProvider, MessagingChannel, SalesRepository, WebhookParser
@@ -74,6 +75,8 @@ class IntegrationBuilders:
     source_instances: Mapping[str, Callable[[ClientConfig, SourceInstance], ProspectSource]] = (
         field(default_factory=dict)
     )
+    # Writing results back into the sources that ask for it (off unless the deployment says so).
+    writeback: WritebackSupport | None = None
 
     # ---- polling the channels that do not call us ------------------------------------------
 
@@ -135,6 +138,7 @@ def default_builders(
     registry: ProviderRegistry | None = None,
     operational_stores: Callable[[str], OperationalStore] | None = None,
     consent: Callable[[str], ConsentWriter] | None = None,
+    writeback: WritebackSupport | None = None,
 ) -> IntegrationBuilders:
     """The builders of every provider the runtime can run today (those with a factory).
 
@@ -176,4 +180,5 @@ def default_builders(
         source_instances={d.key: d.build_instance for d in sources if d.build_instance is not None},
         operational_stores=operational_stores,
         consent=consent,
+        writeback=writeback,
     )

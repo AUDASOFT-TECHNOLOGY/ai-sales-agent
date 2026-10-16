@@ -443,6 +443,7 @@ class TestTheBuildersTheRuntimeUsesAreUnchanged:
             "operational_stores",
             "consent",
             "source_instances",  # E5: added last, with a default, so older callers are unchanged
+            "writeback",  # E9: the same, and None (off) unless the deployment builds it
         ]
 
     def test_the_channel_provider_keeps_its_fields_and_gains_the_inbox(self):

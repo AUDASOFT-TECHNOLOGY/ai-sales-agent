@@ -1,6 +1,6 @@
 """The write-back ledger contract (11.2.5b), checked on the in-memory implementation.
 
-A durable ledger will be added to the `ledger` fixture and must pass every test unchanged.
+The durable (SQL) ledger runs every test unchanged, through the same fixture.
 """
 
 import dataclasses
@@ -10,8 +10,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from factories import CLIENT
 
+from sales_app.persistence import create_database_engine, upgrade_database
+from sales_app.persistence.writeback_ledger_rows import SqlWriteBackLedgerRows
 from sales_app.sourcing import ProspectField
 from sales_app.sourcing.writeback import (
+    DurableWriteBackLedger,
     FailureCode,
     InMemoryWriteBackLedger,
     LedgerEntry,
@@ -40,9 +43,22 @@ def attempt(attempt_id="a-1", pid="fake_crm:1", **overrides):
     return WriteAttempt(**(values | overrides))
 
 
-@pytest.fixture(params=["memory"])
-def ledger(request):
-    return InMemoryWriteBackLedger(CLIENT)
+@pytest.fixture(params=["memory", "sql"])
+def build(request, tmp_path):
+    """A way to open the ledger of any client, over the same storage."""
+    if request.param == "memory":
+        stores: dict = {}
+        yield lambda client: stores.setdefault(client, InMemoryWriteBackLedger(client))
+        return
+    engine = create_database_engine(f"sqlite:///{(tmp_path / 'ledger.db').as_posix()}")
+    upgrade_database(engine)
+    yield lambda client: DurableWriteBackLedger(SqlWriteBackLedgerRows(engine, client))
+    engine.dispose()
+
+
+@pytest.fixture
+def ledger(build):
+    return build(CLIENT)
 
 
 # ---- the contract ---------------------------------------------------------------------------
@@ -114,8 +130,8 @@ def test_an_attempt_of_another_client_is_refused_and_nothing_is_written(ledger):
     assert ledger.entries() == ()
 
 
-def test_two_clients_have_two_separate_ledgers():
-    mine, other = InMemoryWriteBackLedger(CLIENT), InMemoryWriteBackLedger(OTHER)
+def test_two_clients_have_two_separate_ledgers(build):
+    mine, other = build(CLIENT), build(OTHER)
     mine.append([attempt("a")])
     other.append([attempt("a", client_id=OTHER, outcome=Outcome.CONFLICT)])
     assert [e.outcome for e in mine.entries()] == [Outcome.APPLIED]
@@ -247,12 +263,12 @@ def test_nothing_personal_is_in_the_entries_or_any_representation(ledger):
         assert leak not in text
 
 
-def test_a_refusal_never_repeats_what_it_was_given():
+def test_a_refusal_never_repeats_what_it_was_given(build):
     for bad in ({"attempt_id": PHONE}, {"prospect_id": ProspectId("inbound-1-21699888777")}):
         with pytest.raises(ValueError) as caught:
             attempt(**bad)
         assert PHONE not in str(caught.value) and "21699888777" not in str(caught.value)
-    ledger = InMemoryWriteBackLedger(CLIENT)
+    ledger = build(CLIENT)
     with pytest.raises(ValueError) as caught:
         ledger.append([attempt("p21699888777", client_id=OTHER)])
     assert "21699888777" not in str(caught.value)

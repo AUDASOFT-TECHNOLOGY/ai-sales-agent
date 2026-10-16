@@ -50,8 +50,13 @@ class SourceCapabilities:
     - `owned`: the fields whose truth lives in the source and which it returns reliably. It always
       owns what a person is (`SOURCE_ONLY_FIELDS`); a spreadsheet that also holds Revansa's own
       state lists those fields too, and then nothing is kept apart for them.
-    - `writable`: what its interface can technically accept (a subset of `owned`). Whether a field
-      is actually written is the operator's decision (write-back is off by default).
+    - `mirrored`: Revansa's own fields of which the source holds a **copy** for its users (a column
+      of a spreadsheet). The truth stays in the operational store: a mirrored field is never read
+      back as the truth (`merge` ignores it) and is only ever written back under the operator's
+      policy. Empty for every source that holds no such copy.
+    - `writable`: what its interface can technically accept (a subset of `owned` and `mirrored`).
+      Whether a field is actually written is the operator's decision (write-back is off by
+      default).
     - `can_create`: whether it can create a prospect. Unknown senders are created in the store
       either way; a source is never asked to.
     - `id_namespace`: the prefix of its public ids (`<namespace>:<native id>`), or None to leave
@@ -63,6 +68,7 @@ class SourceCapabilities:
 
     owned: frozenset[ProspectField]
     writable: frozenset[ProspectField] = frozenset()
+    mirrored: frozenset[ProspectField] = frozenset()
     can_create: bool = False
     id_namespace: str | None = None
     atomic_compare_and_set: bool = False
@@ -71,11 +77,14 @@ class SourceCapabilities:
     def __post_init__(self) -> None:
         object.__setattr__(self, "owned", frozenset(self.owned))
         object.__setattr__(self, "writable", frozenset(self.writable))
+        object.__setattr__(self, "mirrored", frozenset(self.mirrored))
         check_namespace(self.id_namespace)
         if not SOURCE_ONLY_FIELDS <= self.owned:
             raise ValueError("a source always owns name, contact, channel and language")
-        if not self.writable <= self.owned:
-            raise ValueError("a source can only write fields it owns")
+        if self.mirrored & SOURCE_ONLY_FIELDS:
+            raise ValueError("what a person is can never be a copy of Revansa's")
+        if not self.writable <= self.owned | self.mirrored:
+            raise ValueError("a source can only write fields it owns or holds a copy of")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -200,6 +209,21 @@ class ProspectSource(Protocol):
         """Check the connection and the layout without writing. Empty means ready; 'warning:' is
         soft."""
         ...
+
+
+@runtime_checkable
+class WriteBackReadable(Protocol):
+    """A source that can say what it holds, right now, in the fields Revansa may write back.
+
+    Only the fields the source *mirrors* are given here (the status is already in the records it
+    lists): the write-back needs them to decide whether a cell may be written and to name what it
+    expects to replace. Native ids, typed values: a date is a `datetime` (aware), a count an `int`,
+    the next action a `(type, due date)` pair; an empty cell is `None` (a pair of `None`), except a count, which reads
+    as 0 as it always has.
+    A record that cannot be read is absent, and nothing is written for it.
+    """
+
+    def read_writeback_values(self) -> Mapping[str, Mapping[ProspectField, Any]]: ...
 
 
 @runtime_checkable

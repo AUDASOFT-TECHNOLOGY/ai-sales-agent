@@ -60,15 +60,22 @@ def test_the_default_policy_writes_nothing():
     assert not policy.allows(STATUS)
 
 
-def test_only_the_status_can_ever_be_written_back():
-    assert WRITEBACK_FIELDS == {STATUS}
+def test_only_the_status_and_four_copies_of_revansas_bookkeeping_can_ever_be_written_back():
+    mirrored = {
+        ProspectField.LAST_CONTACTED_AT,
+        ProspectField.LAST_INBOUND_AT,
+        ProspectField.FOLLOW_UP_COUNT,
+        ProspectField.NEXT_ACTION,
+    }
+    assert WRITEBACK_FIELDS == {STATUS} | mirrored
     assert not WRITEBACK_FIELDS & SOURCE_ONLY_FIELDS
     for field in ProspectField:
-        if field is not STATUS:
+        if field not in WRITEBACK_FIELDS:  # identity, stage, conversation, chat, lane: never
             with pytest.raises(WriteBackPolicyError):
                 WriteBackPolicy.of(field)
     with pytest.raises(WriteBackPolicyError):
         WriteBackPolicy.of(STATUS, ProspectField.PHONE)
+    assert WriteBackPolicy.of(*WRITEBACK_FIELDS).enabled
 
 
 def test_propagating_an_opt_out_needs_the_status():

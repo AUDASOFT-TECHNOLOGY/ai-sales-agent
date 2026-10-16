@@ -20,6 +20,7 @@ from sales_app.errors import ClientNotReadyError, ClientUnavailableError, Runtim
 from sales_app.sourcing.composite import CompositeRepository
 from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
+from sales_app.wiring.writeback import ClientWriteback, WritebackSummary, build_client_writeback
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import Channel, ClientContext, LaneRoute
 from sales_core.engine import (
@@ -43,6 +44,7 @@ from sales_integrations.system import DisabledChannel
 log = logging.getLogger(__name__)
 
 INBOX_JOB = "inbox"  # the scheduler's job that reads a mailbox (`sales_app.scheduler.Job.INBOX`)
+SYNC_JOB = "sync"  # the job that writes results back into the sources (`Job.SYNC`)
 
 
 class ClientHealth:
@@ -59,6 +61,29 @@ class ClientHealth:
         # mailbox that cannot be read, and the mailbox's failures must not inflate the backoff of
         # the jobs that send (`consecutive_failures` stays theirs).
         self._inbox_failures = 0
+        # Write-back is followed on its own too, and only as counters: its failures must neither
+        # inflate the backoff of the jobs that send nor paint the client as down.
+        self._sync_failures = 0
+        self._writeback: dict[str, int] | None = None
+
+    def record_writeback(
+        self, at: datetime, summary: WritebackSummary, *, failed: bool = False
+    ) -> None:
+        """One write-back run, as counters (integers) and nothing else."""
+        with self._lock:
+            self._sync_failures = self._sync_failures + 1 if failed else 0
+            self._last_runs[SYNC_JOB] = at.isoformat()
+            self._writeback = {**summary.counters(), "consecutive_failures": self._sync_failures}
+
+    def record_writeback_failure(self, at: datetime) -> None:
+        """A write-back run that raised: counted, with no message (it could carry a value)."""
+        with self._lock:
+            self._sync_failures += 1
+            self._last_runs[SYNC_JOB] = at.isoformat()
+            self._writeback = {
+                **(self._writeback or {}),
+                "consecutive_failures": self._sync_failures,
+            }
 
     def record_success(self, job: str, at: datetime, errors: Sequence[str] = ()) -> None:
         with self._lock:
@@ -91,6 +116,8 @@ class ClientHealth:
             }
             if self._inbox_failures:  # only for a client whose mailbox is failing
                 snapshot["inbox_failures"] = self._inbox_failures
+            if self._writeback is not None:  # only for a client that writes results back
+                snapshot["writeback"] = dict(self._writeback)
             return snapshot
 
 
@@ -107,6 +134,11 @@ class ScheduleState:
     # from sending what its team approved.
     inbox_blocked_until: datetime | None = None
     inbox_failures: int = 0
+    # Write-back has its own rhythm and backoff too: it never delays, and is never delayed by, the
+    # jobs that send.
+    last_sync_at: datetime | None = None
+    sync_blocked_until: datetime | None = None
+    sync_failures: int = 0
     blocked_until: datetime | None = None  # backoff after a failed job
     _busy: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -140,14 +172,17 @@ class ClientRuntime:
     state: ScheduleState = field(default_factory=ScheduleState)
     stagger: timedelta = timedelta(0)  # spreads clients' triggers to spare API quotas
     missing: tuple[str, ...] = ()  # credentials the client lacks: it takes no new work
+    # The syncers of the sources that are written back to; None for a client that has none. Replaced
+    # with the Engine, never on its own.
+    writeback: ClientWriteback | None = None
     _gate: threading.Condition = field(
         default_factory=threading.Condition, init=False, repr=False, compare=False
     )
     _active: int = field(default=0, init=False, repr=False, compare=False)
     _draining: bool = field(default=False, init=False, repr=False, compare=False)
-    _pending: tuple[ClientConfig, Engine, Callable[[], None] | None] | None = field(
-        default=None, init=False, repr=False, compare=False
-    )
+    _pending: (
+        tuple[ClientConfig, Engine, Callable[[], None] | None, ClientWriteback | None] | None
+    ) = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def client_id(self) -> str:
@@ -192,12 +227,13 @@ class ClientRuntime:
         config: ClientConfig,
         engine: Engine,
         on_installed: Callable[[], None] | None = None,
+        writeback: ClientWriteback | None = None,
     ) -> bool:
         """Queue a replacement built offline and start draining. Returns True if it was installed
         at once (nothing was running). Otherwise it is installed when the last active lease ends,
         and `on_installed` is called then. A newer staged replacement supersedes an older one."""
         with self._gate:
-            self._pending = (config, engine, on_installed)
+            self._pending = (config, engine, on_installed, writeback)
             self._draining = True
             installed = self._install_if_idle()
             done = self._pending is None
@@ -226,8 +262,9 @@ class ClientRuntime:
     def _install_if_idle(self) -> Callable[[], None] | None:
         if self._pending is None or self._active:
             return None
-        config, engine, on_installed = self._pending
+        config, engine, on_installed, writeback = self._pending
         self.config, self.engine, self.missing = config, engine, ()
+        self.writeback = writeback
         self._pending = None
         self._draining = False
         self._gate.notify_all()
@@ -339,9 +376,9 @@ def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> Sa
 
 
 def _build_lane_parts(
-    config: ClientConfig, builders: IntegrationBuilders
-) -> tuple[SalesRepository, ChannelRouter]:
-    """The repository and the router of a client that runs lanes: one source per `sources` entry,
+    config: ClientConfig, builders: IntegrationBuilders, clock: Clock
+) -> tuple[SalesRepository, ChannelRouter, ClientWriteback | None]:
+    """The repository, the router and the write-back of a client that runs lanes: one source per `sources` entry,
     one channel per channel provider its lanes use, and the lanes that tie them together.
 
     The client starts only if its whole configuration is valid. What is wrong with it that can be
@@ -411,7 +448,14 @@ def _build_lane_parts(
             ],
         ),
     )
-    return repository, router
+    writeback, problems = build_client_writeback(
+        config, sources, store, consent, builders.writeback, clock
+    )
+    if problems:
+        raise RuntimeBuildError(
+            f"{client_id}: " + "; ".join(config.secrets.redact(p) for p in problems)
+        )
+    return repository, router, writeback
 
 
 def build_runtime(
@@ -426,8 +470,9 @@ def build_runtime(
     spec, client_id = config.spec, config.client_id
 
     router: ChannelRouter | None = None
+    writeback: ClientWriteback | None = None
     if spec.lanes is not None:
-        repository, router = _build_lane_parts(config, builders)
+        repository, router, writeback = _build_lane_parts(config, builders, clock)
     else:
         repository = _build_repository(config, builders)
     llm = _stage(
@@ -482,4 +527,4 @@ def build_runtime(
             ),
         ),
     )
-    return ClientRuntime(config=config, engine=engine, stagger=stagger)
+    return ClientRuntime(config=config, engine=engine, stagger=stagger, writeback=writeback)

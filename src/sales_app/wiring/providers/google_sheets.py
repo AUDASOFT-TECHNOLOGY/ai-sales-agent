@@ -6,23 +6,34 @@ settings it accepts, the credential it needs and what two clients must never sha
 """
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from sales_app.config import ClientConfig
 from sales_app.config.schema import SourceInstance
 from sales_app.config.secrets import SHEETS_CREDENTIALS_FILE
 from sales_app.sourcing import (
+    ProspectChange,
+    ProspectField,
     RowIssue,
     RowProblem,
     SheetsProspectSource,
     SourceAuthError,
+    SourceConflictError,
     SourceDataError,
     SourceRateLimitedError,
+    SourceReadOnlyError,
     SourceUnavailableError,
 )
 from sales_app.wiring.providers.types import (
@@ -33,14 +44,18 @@ from sales_app.wiring.providers.types import (
     UniquenessRule,
 )
 from sales_integrations.google_sheets import (
+    FieldWrite,
     GoogleSheetsApi,
     GoogleSheetsRepository,
+    SheetFieldConflictError,
     SheetsApi,
     SheetsApiError,
     SheetsError,
     SheetTabs,
     extract_spreadsheet_id,
 )
+from sales_integrations.google_sheets.codecs import format_datetime
+from sales_integrations.google_sheets.layout import PROSPECTS, header_for, normalize_header
 
 KEY = "google_sheets"
 
@@ -67,6 +82,55 @@ def _check_mapping(mapping: dict[str, str], tabs: tuple[str, ...]) -> dict[str, 
     return mapping
 
 
+WritebackColumn = Literal[
+    "status",
+    "last_contacted_at",
+    "last_inbound_at",
+    "follow_up_count",
+    "next_action_type",
+    "next_action_due_at",
+]
+# What each column of the prospects tab stands for when Revansa writes it back.
+_WRITEBACK_OF: Mapping[str, ProspectField] = {
+    "status": ProspectField.STATUS,
+    "last_contacted_at": ProspectField.LAST_CONTACTED_AT,
+    "last_inbound_at": ProspectField.LAST_INBOUND_AT,
+    "follow_up_count": ProspectField.FOLLOW_UP_COUNT,
+    "next_action_type": ProspectField.NEXT_ACTION,
+    "next_action_due_at": ProspectField.NEXT_ACTION,
+}
+
+
+class SheetsWritebackSettings(BaseModel):
+    """What the operator allows Revansa to write back into this spreadsheet, and where.
+
+    Off unless this block exists. Every field written needs a column **named here**, which must
+    already exist in the prospects tab: nothing is created, nothing is guessed from a default name,
+    and a source whose column is missing or named twice is not ready and writes nothing. The next
+    action is two columns (its type and its due date) and is named whole or not at all.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    columns: dict[WritebackColumn, NonEmpty] = Field(min_length=1)
+    propagate_opt_out: bool = False
+
+    @model_validator(mode="after")
+    def _coherent(self) -> "SheetsWritebackSettings":
+        named = set(self.columns)
+        if ("next_action_type" in named) != ("next_action_due_at" in named):
+            raise ValueError(
+                "next_action_type and next_action_due_at are written together: name both or neither"
+            )
+        if self.propagate_opt_out and "status" not in named:
+            raise ValueError("propagating an opt-out needs the status column")
+        return self
+
+    @property
+    def fields(self) -> frozenset[ProspectField]:
+        return frozenset(_WRITEBACK_OF[key] for key in self.columns)
+
+
 class SheetsSourceSettings(BaseModel):
     """Where the prospects are in the spreadsheet."""
 
@@ -75,11 +139,48 @@ class SheetsSourceSettings(BaseModel):
     spreadsheet_id: NonEmpty
     prospects_tab: NonEmpty = "Prospects"
     column_mapping: dict[str, str] = Field(default_factory=dict)
+    writeback: SheetsWritebackSettings | None = None  # off by default
 
     @field_validator("column_mapping")
     @classmethod
     def _prospect_columns(cls, value: dict[str, str]) -> dict[str, str]:
         return _check_mapping(value, SOURCE_TABS)
+
+    @property
+    def effective_column_mapping(self) -> dict[str, str]:
+        """The one mapping the adapter reads and writes with: `column_mapping`, plus the columns
+        the write-back names (a header is named once, so it cannot be read from one column and
+        written to another)."""
+        mapping = dict(self.column_mapping)
+        if self.writeback is not None:
+            mapping.update({f"prospects.{k}": h for k, h in self.writeback.columns.items()})
+        return mapping
+
+    @model_validator(mode="after")
+    def _writeback_columns_agree(self) -> "SheetsSourceSettings":
+        if self.writeback is None:
+            return self
+        for key, header in self.writeback.columns.items():
+            named = self.column_mapping.get(f"prospects.{key}")
+            if named is not None and normalize_header(named) != normalize_header(header):
+                raise ValueError(
+                    "writeback.columns and column_mapping name different columns for one field"
+                )
+        mapping = self.effective_column_mapping
+        headers = [
+            normalize_header(header_for(PROSPECTS, c.field, mapping)) for c in PROSPECTS.columns
+        ]
+        if len(set(headers)) != len(headers):
+            raise ValueError("two fields of the prospects tab are given the same column")
+        return self
+
+
+def writeback_of(settings: Mapping[str, Any]) -> tuple[frozenset[ProspectField], bool]:
+    """The fields the operator allows to be written back to this spreadsheet, and whether an opt-out
+    is propagated. Nothing, for settings without a write-back block. Raises `ValueError` (pydantic's)
+    for settings that are not acceptable."""
+    section = SheetsSourceSettings.model_validate(dict(settings)).writeback
+    return (frozenset(), False) if section is None else (section.fields, section.propagate_opt_out)
 
 
 class SheetsStoreSettings(BaseModel):
@@ -152,11 +253,57 @@ class SheetsProspectReader:
     unless the operator asked for it with `assign_missing_ids`.
     """
 
-    def __init__(self, repository: GoogleSheetsRepository) -> None:
+    def __init__(
+        self,
+        repository: GoogleSheetsRepository,
+        *,
+        zone: ZoneInfo | None = None,
+        writable: Collection[ProspectField] = (),
+    ) -> None:
         self._repository = repository
+        self._writable = frozenset(writable)
+        self._zone = zone
+        if self._writable and zone is None:
+            raise ValueError("writing to a sheet needs the client's time zone")
 
     def __repr__(self) -> str:
         return "SheetsProspectReader()"
+
+    # ---- write-back: only when the operator turned it on ----------------------------------
+
+    def read_writeback_values(
+        self, fields: Collection[ProspectField]
+    ) -> Mapping[str, Mapping[ProspectField, Any]]:
+        mirrored = [f for f in fields if f is not ProspectField.STATUS and f in self._writable]
+        held = _translated(self._repository.read_mirrored)
+        return {
+            native_id: {f: values[f.value] for f in mirrored} for native_id, values in held.items()
+        }
+
+    def write_fields(self, changes: Sequence[ProspectChange]) -> None:
+        if not all(set(change.new) <= self._writable for change in changes):
+            raise SourceReadOnlyError("a field of this change cannot be written")
+        writes = [
+            FieldWrite(c.prospect_id, self._cells(c.new), self._cells(c.expected)) for c in changes
+        ]
+        _translated(lambda: self._repository.write_fields(writes))
+
+    def _cells(self, values: Mapping[ProspectField, Any]) -> dict[str, str]:
+        """Typed values as the text of the columns they go to; an empty value is an empty cell."""
+        assert self._zone is not None
+        cells: dict[str, str] = {}
+        for field, value in values.items():
+            if field is ProspectField.NEXT_ACTION:
+                action, due = value
+                cells["next_action_type"] = "" if action is None else str(action)
+                cells["next_action_due_at"] = format_datetime(due, self._zone)
+            elif field is ProspectField.FOLLOW_UP_COUNT:
+                cells[field.value] = "" if value is None else str(int(value))
+            elif field is ProspectField.STATUS:
+                cells[field.value] = str(value)
+            else:
+                cells[field.value] = format_datetime(value, self._zone)
+        return cells
 
     def list_prospects(self) -> Sequence[Any]:
         return _translated(self._repository.list_prospects)
@@ -195,6 +342,8 @@ def _issue_of(message: str) -> RowIssue:
 def _translated[T](call: Callable[[], T]) -> T:
     try:
         return call()
+    except SheetFieldConflictError as error:
+        raise SourceConflictError(error.prospect_id, error.fields) from None
     except SheetsApiError as error:
         if error.status in (401, 403):
             raise SourceAuthError("Google Sheets refused the credentials or the access") from None
@@ -214,7 +363,8 @@ def build_prospect_source(
     timezone: ZoneInfo,
     assign_missing_ids: bool = False,
 ) -> SheetsProspectSource:
-    """A read-only prospect source over one spreadsheet, from the operator's settings for it.
+    """A read-only prospect source over one spreadsheet, from the operator's settings for it. It
+    writes only if those settings carry a `writeback` block (see `SheetsWritebackSettings`).
 
     `source_id` is the source's name in the client's configuration and the prefix of its prospects'
     ids; None keeps the ids as the sheet has them (a client's historical spreadsheet). The client's
@@ -222,17 +372,21 @@ def build_prospect_source(
     two sources of one client are two spreadsheets under the same credential.
     """
     section = SheetsSourceSettings.model_validate(dict(settings))
+    writable = section.writeback.fields if section.writeback is not None else frozenset()
     repository = GoogleSheetsRepository(
         api,
         client_id=client_id,  # the Core's ClientId is a plain str at run time
         spreadsheet_id=extract_spreadsheet_id(section.spreadsheet_id),
         timezone=timezone,
         tabs=SheetTabs(prospects=section.prospects_tab),
-        column_mapping=section.column_mapping,
+        column_mapping=section.effective_column_mapping,
         assign_missing_ids=assign_missing_ids,
     )
     return SheetsProspectSource(
-        SheetsProspectReader(repository), client_id=client_id, namespace=source_id
+        SheetsProspectReader(repository, zone=timezone, writable=writable),
+        client_id=client_id,
+        namespace=source_id,
+        writable=writable,
     )
 
 

@@ -44,6 +44,7 @@ from sales_integrations.google_sheets.api import SheetsApi
 from sales_integrations.google_sheets.errors import (
     SheetConflictError,
     SheetDataError,
+    SheetFieldConflictError,
     SheetLayoutError,
     SheetsApiError,
 )
@@ -68,6 +69,19 @@ class RowProblem:
     tab: str
     row: int
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class FieldWrite:
+    """Cells of one prospect's row to change, each only if it still holds what it was read as.
+
+    `new` and `expected` hold the same column keys (`codecs.MIRRORED_KEYS`) with the canonical text
+    of the value to put and of the value it replaces; an empty text is an empty cell.
+    """
+
+    prospect_id: str
+    new: Mapping[str, str]
+    expected: Mapping[str, str]
 
 
 @dataclass(slots=True)
@@ -248,6 +262,65 @@ class GoogleSheetsRepository:
                 self._prospect_snaps[prospect_id] = _Snapshot(
                     prospect, plan.raw_after(prospect_id, self)
                 )
+
+    def read_mirrored(self) -> dict[str, dict[str, Any]]:
+        """The columns Revansa mirrors, as the sheet holds them now, by prospect id.
+
+        Only rows the adapter accepts as prospects (the others are never contacted, so nothing is
+        written for them). Dates and counts are typed; an empty cell is `None`.
+        """
+        with self._lock:
+            _, accepted = self._prospects()
+            return {p.prospect_id: codecs.mirrored_values(p) for _, p in accepted}
+
+    def write_fields(self, writes: Sequence[FieldWrite]) -> None:
+        """Change only the named cells, each only if it still holds what the caller read.
+
+        Everything is checked before the first request: the columns exist, each id is on exactly one
+        row, and every cell to change still holds its expected value (else `SheetFieldConflictError`
+        and nothing is written). The changes then go out in one request, and a cell that already
+        holds its new value is not sent. No other cell, and no row, is touched: a person's own
+        columns and edits survive.
+
+        **This is not an atomic compare-and-set.** Google Sheets offers none: the check reads the
+        row, the write follows in a separate request, and a person who edits one of these cells in
+        between is overwritten. The window is the time of one API round trip; nothing here can
+        close it.
+        """
+        if not writes:
+            return
+        with self._lock:
+            seen: set[str] = set()
+            for write in writes:
+                if write.prospect_id in seen:
+                    raise ValueError("a prospect appears twice in one call")
+                seen.add(write.prospect_id)
+                if not write.new or set(write.new) != set(write.expected):
+                    raise ValueError("a write needs the expected value of each cell it changes")
+                if not set(write.new) <= codecs.MIRRORED_KEYS:
+                    raise ValueError("this column is never written")
+            table = self._read_table("prospects")
+            wanted = {key for write in writes for key in write.new}
+            if any(table.position(key) is None for key in wanted):
+                raise SheetLayoutError(["a column to write to is missing from the prospects tab"])
+            rows = self._rows_by_id(table, "prospect_id")
+            updates: list[tuple[str, list[list[str]]]] = []
+            for write in writes:
+                row = self._single_row(rows, write.prospect_id, "prospect")
+                stale = sorted(
+                    key
+                    for key, expected in write.expected.items()
+                    if not codecs.same_cell(key, table.cell(row, key), expected, self._zone)
+                )
+                if stale:
+                    raise SheetFieldConflictError(write.prospect_id, stale)
+                for key, value in write.new.items():
+                    if not codecs.same_cell(key, table.cell(row, key), value, self._zone):
+                        position = table.position(key)
+                        assert position is not None
+                        updates.append((cell_ref(table.title, position, row.number), [[value]]))
+            if updates:
+                self._api.write(self._sid, updates)
 
     # ---- actions -----------------------------------------------------------------------
 

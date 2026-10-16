@@ -41,6 +41,7 @@ from sales_app.sourcing.ports import OperationalStore
 from sales_app.sourcing.sql_store import SqlOperationalStore
 from sales_app.wiring import IntegrationBuilders, default_builders
 from sales_app.wiring.providers import ProviderRegistry, default_registry
+from sales_app.wiring.writeback import WritebackSupport, default_policies, sql_ledgers
 from sales_core.approval import ApprovalMode
 from sales_core.ports import Clock
 from sales_integrations.system import SystemClock
@@ -252,6 +253,7 @@ def _assemble(
         consent=lambda client_id: open_file_registry(
             settings.secrets_dir, secrets, audit, client_id
         ),
+        writeback=_writeback_support(settings, account_stores),
     )
 
     llm_registry = build_llm_registry(settings.allowed_llm_models)
@@ -335,6 +337,19 @@ def _operational_stores(
     if engine is None:
         return None
     return lambda client_id: SqlOperationalStore(SqlOperationalRows(engine, client_id))
+
+
+def _writeback_support(
+    settings: Settings, account_stores: AccountStores | None
+) -> WritebackSupport:
+    """Write-back as this deployment offers it: off unless `SALES_AGENT_WRITEBACK_ENABLED`, and its
+    ledger in the database (without one, a source that asks for write-back is refused)."""
+    engine = account_stores.engine if account_stores is not None else None
+    return WritebackSupport(
+        enabled=settings.writeback_enabled,
+        open_ledger=sql_ledgers(engine) if engine is not None else None,
+        policies=default_policies(),
+    )
 
 
 def _may_work(store: AgentStateStore, clients_dir: Path, client_id: str) -> bool:

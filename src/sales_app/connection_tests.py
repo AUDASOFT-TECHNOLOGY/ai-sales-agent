@@ -17,7 +17,7 @@ themselves when Meta calls Revansa's webhook, so no check exists for them and no
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -310,7 +310,11 @@ _SHEETS_REFUSALS = {
 
 
 def check_google_sheets(
-    *, api: SheetsProbe | None, spreadsheet_id: str | None, prospects_tab: str | None
+    *,
+    api: SheetsProbe | None,
+    spreadsheet_id: str | None,
+    prospects_tab: str | None,
+    writeback_headers: Sequence[str] = (),
 ) -> ConnectionResult:
     """Reads the spreadsheet's tab list with the platform's service account and checks that the
     prospects tab is there. Nothing is written and no cell is read. A failure never carries what
@@ -335,9 +339,42 @@ def check_google_sheets(
             "The spreadsheet is reachable, but the prospects tab was not found in it.",
             {"missing_tab": prospects_tab[:128]},
         )
+    if writeback_headers and prospects_tab:
+        problem = _writeback_columns(api, spreadsheet_id, prospects_tab, writeback_headers)
+        if problem is not None:
+            return problem
     return ConnectionResult(
         True, "Google Sheets gave the platform access to this spreadsheet and its prospects tab."
     )
+
+
+def _writeback_columns(
+    api: Any, spreadsheet_id: str, tab: str, headers: Sequence[str]
+) -> ConnectionResult | None:
+    """The columns chosen for write-back must each be in the tab's header row, once. Only the header
+    row is read, and nothing of it is returned but the names the operator chose. None: all there."""
+    read = getattr(api, "read", None)
+    if read is None:
+        return ConnectionResult(False, "The columns chosen for write-back cannot be checked here.")
+    try:
+        (values,) = read(spreadsheet_id, ["'" + tab.replace("'", "''") + "'!1:1"])
+    except Exception as error:  # noqa: BLE001 - whatever failed, the answer is a fixed sentence
+        return _sheets_failure(error)
+
+    def norm(text: object) -> str:
+        return re.sub(r"\s+", " ", str(text)).strip().casefold()
+
+    present = [norm(cell) for cell in (values[0] if values else [])]
+    missing = [h for h in headers if present.count(norm(h)) == 0]
+    twice = [h for h in headers if present.count(norm(h)) > 1]
+    if missing or twice:
+        message = (
+            "The spreadsheet does not have the columns chosen for write-back."
+            if missing
+            else "A column chosen for write-back appears more than once in the spreadsheet."
+        )
+        return ConnectionResult(False, message, {"columns": ", ".join(missing or twice)[:256]})
+    return None
 
 
 def _sheets_failure(error: Exception) -> ConnectionResult:

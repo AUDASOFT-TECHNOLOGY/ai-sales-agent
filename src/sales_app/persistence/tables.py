@@ -240,3 +240,27 @@ op_local_contacts = Table(
     Column("contact_key", String(320), primary_key=True),
     Column("prospect_id", String(255), nullable=False),
 )
+
+# The write-back ledger: what Revansa tried to write into a client's source, and how each try ended.
+# A journal, not the truth: what to write is recomputed from the source and from `op_prospect_states`.
+# `sequence` is the client's own count (1, 2, 3, ...), so it is part of the key and not a global
+# counter; a retry of an attempt (same `attempt_id`) is recorded once. It holds a prospect's public
+# id, a field name and two short canonical values (a status, a date, a count): never a name, a
+# contact or anything the source said.
+op_writeback_ledger = Table(
+    "op_writeback_ledger",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("sequence", Integer, primary_key=True, autoincrement=False),
+    Column("attempt_id", String(128), nullable=False),
+    Column("prospect_id", String(255), nullable=False),
+    Column("field", String(32), nullable=False),
+    Column("new_value", String(255), nullable=False),
+    Column("expected_value", String(255), nullable=False),
+    Column("outcome", String(16), nullable=False),
+    Column("code", String(16)),
+    Column("at", UtcDateTime, nullable=False),
+    Column("not_before", UtcDateTime),
+    UniqueConstraint("client_id", "attempt_id", name="uq_op_writeback_ledger_attempt"),
+    Index("ix_op_writeback_ledger_prospect", "client_id", "prospect_id", "field", "sequence"),
+)

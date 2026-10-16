@@ -180,6 +180,16 @@ def sheets_credentials_file(application: Application, client_id: str) -> str | N
 # ---- helpers ----------------------------------------------------------------------------------
 
 
+def _writeback_headers(settings: Mapping[str, Any]) -> tuple[str, ...]:
+    """The columns the operator chose for write-back in a source's settings, if any. They are the
+    operator's: the client's routes cannot set them."""
+    block = settings.get("writeback")
+    columns = block.get("columns") if isinstance(block, Mapping) else None
+    if not isinstance(columns, Mapping):
+        return ()
+    return tuple(str(header) for header in columns.values())
+
+
 def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
 
@@ -592,6 +602,7 @@ def create_client_source_router(
                     api=probe,
                     spreadsheet_id=str(settings.get("spreadsheet_id", "")) or None,
                     prospects_tab=str(settings.get("prospects_tab", "Prospects")),
+                    writeback_headers=_writeback_headers(settings),
                 )
             elif provider == hubspot.KEY:
                 try:

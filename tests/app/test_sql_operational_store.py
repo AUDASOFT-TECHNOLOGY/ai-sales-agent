@@ -352,13 +352,14 @@ class TestFailuresStaySafe:
 
 
 class TestMigration:
-    def test_the_head_is_0004_and_creates_exactly_the_operational_tables(self):
+    def test_revision_0004_creates_exactly_the_operational_tables(self):
         engine = create_database_engine("sqlite://")
         upgrade_database(engine, "0003")
         before = set(inspect(engine).get_table_names())
         assert not before & OP_TABLES
-        upgrade_database(engine)
-        assert head_revision() == current_revision(engine) == "0004"
+        upgrade_database(engine, "0004")
+        assert current_revision(engine) == "0004"
+        assert head_revision() == "0005"  # the write-back ledger comes after them
         assert OP_TABLES <= set(inspect(engine).get_table_names())
         assert OP_TABLES <= set(metadata.tables)
 

@@ -447,3 +447,57 @@ def row_values(table: Table, encoded: Mapping[str, str]) -> list[str]:
     return [
         encoded.get(by_position.get(position, ""), "") for position in range(len(table.headers))
     ]
+
+
+# ---- targeted writes ------------------------------------------------------------------------------
+
+MIRRORED_KEYS = frozenset(
+    {
+        "status",
+        "last_contacted_at",
+        "last_inbound_at",
+        "follow_up_count",
+        "next_action_type",
+        "next_action_due_at",
+    }
+)
+_MOMENT_KEYS = frozenset({"last_contacted_at", "last_inbound_at", "next_action_due_at"})
+
+
+def _count(raw: Any) -> int:
+    """A count as `decode_prospect` reads it: an empty cell is 0."""
+    return parse_int(raw, "follow_up_count")
+
+
+def same_cell(key: str, raw: Any, text: str, zone: ZoneInfo) -> bool:
+    """Whether a cell holds the value `text` stands for, however a person typed it.
+
+    `raw` is the cell as the API gave it (a number stays a number), `text` the canonical form the
+    adapter writes. A cell that cannot be interpreted is never "the same": the caller then refuses
+    to write over it.
+    """
+    try:
+        if key in _MOMENT_KEYS:
+            return parse_datetime(raw, zone, key) == parse_datetime(text, zone, key)
+        if key == "follow_up_count":
+            return _count(raw) == _count(text)
+        if key == "status":
+            return (parse_enum(raw, ProspectStatus, key) or ProspectStatus.NEW) == (
+                parse_enum(text, ProspectStatus, key) or ProspectStatus.NEW
+            )
+        if key == "next_action_type":
+            return parse_enum(raw, SalesActionType, key) == parse_enum(text, SalesActionType, key)
+    except ValueError:
+        return False
+    return text_of(raw) == text_of(text)
+
+
+def mirrored_values(prospect: Prospect) -> dict[str, Any]:
+    """What a decoded row holds in the columns Revansa mirrors, as typed values."""
+    schedule = prospect.schedule
+    return {
+        "last_contacted_at": schedule.last_contacted_at,
+        "last_inbound_at": schedule.last_inbound_at,
+        "follow_up_count": schedule.follow_up_count,
+        "next_action": (schedule.next_action_type, schedule.next_action_due_at),
+    }

@@ -158,17 +158,68 @@ def test_the_write_back_knows_no_provider_no_wiring_no_persistence_and_no_engine
             assert not module.startswith(forbidden), (path.name, module)
 
 
+# The only modules outside the package that may import it, and why. The runtime and the scheduler do
+# not: they reach it through this one door (`ClientWriteback`), which hands back counters.
+ALLOWED_IMPORTERS = {
+    "sales_app/wiring/writeback.py",  # builds a client's syncers and runs them, one door for all
+}
+
+
 def test_nothing_else_depends_on_the_write_back():
     """The write-back sits above the sourcing contracts: they never import it, so the composite and
-    the registry keep working, and keep their own rules, without it."""
+    the registry keep working, and keep their own rules, without it. Outside the package, exactly
+    the modules of `ALLOWED_IMPORTERS` import it: a new importer is a decision, made here."""
+    importers = set()
     for path in SRC.rglob("*.py"):
         if WRITEBACK in path.parents or path == WRITEBACK:
             continue
         for module, _ in imported(path):
-            assert not module.startswith("sales_app.sourcing.writeback"), (
-                path.relative_to(SRC).as_posix(),
-                module,
-            )
+            if module.startswith("sales_app.sourcing.writeback"):
+                importers.add(path.relative_to(SRC).as_posix())
+    assert importers == ALLOWED_IMPORTERS
+
+
+def test_the_runtime_the_scheduler_and_the_composition_reach_the_write_back_only_through_its_door():
+    for relative in (
+        "sales_app/wiring/runtime.py",
+        "sales_app/wiring/integrations.py",
+        "sales_app/scheduler.py",
+        "sales_app/bootstrap.py",
+        "sales_app/runtime_manager.py",
+    ):
+        for module, _ in imported(SRC / relative):
+            assert not module.startswith("sales_app.sourcing.writeback"), (relative, module)
+    assert "sales_app.wiring.writeback" in {
+        m for m, _ in imported(SRC / "sales_app/wiring/runtime.py")
+    }
+
+
+def test_the_door_logs_only_a_fixed_message_and_the_type_of_an_exception_and_never_prints():
+    door = SRC / "sales_app/wiring/writeback.py"
+    for module, _ in imported(door):
+        assert module.split(".")[0] not in {"warnings", "traceback", "pprint"}, module
+    logged = []
+    for node in ast.walk(parse(door)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            assert node.func.id not in {"print", "breakpoint", "input", "open"}
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "log"
+        ):
+            # never `exception` (it prints the traceback and the message of what was raised)
+            assert node.func.attr in {"debug", "info", "warning", "error"}, node.func.attr
+            message, *arguments = node.args
+            assert isinstance(message, ast.Constant) and isinstance(message.value, str)
+            for argument in arguments:  # only `type(<anything>).__name__`
+                assert isinstance(argument, ast.Attribute) and argument.attr == "__name__"
+                assert isinstance(argument.value, ast.Call)
+                assert isinstance(argument.value.func, ast.Name)
+                assert argument.value.func.id == "type"
+            assert not node.keywords
+            logged.append(node)
+    assert len(logged) == 1  # the one place a pass that raised is told
 
 
 # ---- the consent registry -----------------------------------------------------------------

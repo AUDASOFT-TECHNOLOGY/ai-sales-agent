@@ -1,7 +1,7 @@
 """An in-memory write-back ledger: for tests and for a run that needs no memory of its own.
 
-Nothing survives the process. A durable ledger is a later increment; it must pass the same contract
-tests (`tests/app/test_writeback_ledger.py`).
+Nothing survives the process. The durable one is `durable.DurableWriteBackLedger`; both pass the same
+contract tests (`tests/app/test_writeback_ledger.py`).
 """
 
 from collections.abc import Sequence
