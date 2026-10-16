@@ -424,6 +424,26 @@ def test_the_whole_path_from_the_sheet_to_telegram_and_back(room):
     assert r.bots["alpha"].to(CHAT) == r.sent("alpha") and len(r.sent("alpha")) == 3
 
 
+def test_a_chat_id_typed_in_the_sheet_is_not_proof_that_the_person_started_the_bot(room):
+    """Regression: a legacy client keeps the link in its sheet, so anyone able to edit the sheet
+    could write a chat id and make Revansa speak first. Only a message the person sent counts."""
+    r = room
+    r.add_prospect("alpha", telegram_chat_id=str(CHAT))
+    for _ in range(3):
+        assert all(x.ok for x in r.tick())
+        if r.actions("alpha"):  # even if a person approves whatever was planned
+            r.approve("alpha")
+    assert r.sent("alpha") == [] and r.bots["alpha"].to(CHAT) == []
+    assert not [a for a in r.actions("alpha") if a["status"] == "sent"]
+    assert r.prospect("alpha")["status"] == "new"  # waiting, not paused or lost
+
+    # The person really writes: that message is the proof, and the conversation can go on.
+    assert r.says("alpha", CHAT, "Hello, I am interested.", mid=1).json() == {"received": 1}
+    r.approve("alpha")
+    assert all(x.ok for x in r.tick())
+    assert [m["chat_id"] for m in r.sent("alpha")] == [str(CHAT)]
+
+
 def test_a_prospect_who_has_not_started_the_bot_waits_and_is_never_lost(room):
     r = room
     r.add_prospect("alpha", "p1")

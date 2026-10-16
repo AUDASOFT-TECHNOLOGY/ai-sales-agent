@@ -16,6 +16,9 @@ from sales_core.contracts import (
     ActionStatus,
     Channel,
     ContactInfo,
+    Direction,
+    Message,
+    MessageId,
     ProspectId,
     ProspectStatus,
     SalesActionType,
@@ -48,8 +51,30 @@ def telegram_harness(*prospects, **kw):
 
 
 def message(text="Hello", *, chat=CHAT, external_id="1", **claims):
+    # The Telegram adapter names a message `<chat id>:<message id>`: that is what proves who wrote.
     return replace(
-        inbound(text, sender=chat, external_id=external_id, channel=Channel.TELEGRAM), **claims
+        inbound(text, sender=chat, external_id=f"{chat}:{external_id}", channel=Channel.TELEGRAM),
+        **claims,
+    )
+
+
+def said_hello(h, prospect_id, chat=CHAT):
+    """The person wrote first, as the Engine stores it after an authenticated webhook."""
+    pid = ProspectId(prospect_id)
+    h.repo.append_messages(
+        [
+            Message(
+                message_id=MessageId(f"in:telegram:{chat}:hello"),
+                client_id=h.prospect(prospect_id).client_id,
+                prospect_id=pid,
+                conversation_id=h.repo.get_conversation(pid).conversation_id,
+                direction=Direction.INBOUND,
+                channel=Channel.TELEGRAM,
+                text="hello",
+                timestamp=NOW,
+                external_id=f"{chat}:hello",
+            )
+        ]
     )
 
 
@@ -134,6 +159,7 @@ def h_client():
 class TestWaitingProspects:
     def test_a_prospect_who_never_said_hello_is_neither_planned_nor_paused_nor_asked_about(self):
         h = telegram_harness(telegram_prospect("p1"), telegram_prospect("p2", chat=CHAT))
+        said_hello(h, "p2")
         report = h.engine.prepare()
         assert report.ok
         assert [a.prospect_id for a in h.repo.list_actions()] == ["p2"]
@@ -153,6 +179,7 @@ class TestWaitingProspects:
             telegram_prospect("p3", status=ProspectStatus.OPTED_OUT),
             telegram_prospect("p4", status=ProspectStatus.CLOSED),
         )
+        said_hello(h, "p2")
         assert [p.prospect_id for p in h.engine.prospects_awaiting_opt_in()] == ["p1"]
 
     def test_there_is_nobody_to_invite_on_a_channel_that_can_start(self):
@@ -161,6 +188,7 @@ class TestWaitingProspects:
 
     def test_an_approved_action_for_someone_not_linked_is_cancelled_and_the_prospect_kept(self):
         h = telegram_harness(telegram_prospect("p1", chat=CHAT))
+        said_hello(h, "p1")
         h.engine.prepare()
         h.approve("p1")
         h.repo.update_prospects([telegram_prospect("p1")])  # the link was lost before sending
@@ -288,6 +316,7 @@ class TestSpontaneousMessages:
 class TestOutbound:
     def test_the_chat_id_is_what_the_channel_is_given(self):
         h = telegram_harness(telegram_prospect("p1", chat=CHAT), mode=ApprovalMode.AUTONOMOUS)
+        said_hello(h, "p1")
         h.engine.run_cycle()
         (sent,) = h.channel.sent
         assert sent.recipient == CHAT and sent.channel is Channel.TELEGRAM
@@ -295,6 +324,7 @@ class TestOutbound:
 
     def test_a_person_who_blocked_the_bot_is_a_permanent_failure_the_engine_pauses_on(self):
         h = telegram_harness(telegram_prospect("p1", chat=CHAT), mode=ApprovalMode.AUTONOMOUS)
+        said_hello(h, "p1")
         h.channel.fail_next(transient=False, error_code="403", error_message="bot was blocked")
         h.engine.run_cycle()
         assert h.status("p1") is ActionStatus.FAILED
@@ -303,3 +333,72 @@ class TestOutbound:
 
 def test_a_fake_channel_can_be_a_telegram_channel():
     assert FakeMessagingChannel(Channel.TELEGRAM).channel is Channel.TELEGRAM
+
+
+class TestInitiationIsProved:
+    """An address on the prospect (typed in a sheet, imported from a CRM) never lets Revansa write
+    first on Telegram: only a message the person sent us does."""
+
+    def test_a_chat_id_nobody_proved_sends_nothing_and_calls_no_brain(self):
+        h = telegram_harness(telegram_prospect("p1", chat=CHAT), mode=ApprovalMode.AUTONOMOUS)
+        report = h.engine.run_cycle()
+        assert report.ok and h.channel.attempts == ()
+        assert h.brain.calls == []
+        assert h.prospect("p1").status is not ProspectStatus.PAUSED  # still waiting, not lost
+
+    def test_such_a_prospect_is_still_listed_as_one_to_invite(self):
+        h = telegram_harness(telegram_prospect("p1", chat=CHAT))
+        assert [p.prospect_id for p in h.engine.prospects_awaiting_opt_in()] == ["p1"]
+
+    def test_an_action_approved_without_proof_is_cancelled_at_the_last_gate(self):
+        h = telegram_harness(telegram_prospect("p1", chat=CHAT))
+        said_hello(h, "p1")
+        h.engine.prepare()
+        h.approve("p1")
+        h.repo.update_prospects([telegram_prospect("p1", chat=OTHER_CHAT)])  # address replaced
+        report = h.engine.dispatch()
+        assert report.ok and h.channel.attempts == ()
+        assert h.status("p1") is ActionStatus.CANCELLED
+
+    def test_a_hello_from_another_chat_proves_nothing_for_this_address(self):
+        h = telegram_harness(telegram_prospect("p1", chat=CHAT), mode=ApprovalMode.AUTONOMOUS)
+        said_hello(h, "p1", chat=OTHER_CHAT)
+        h.engine.run_cycle()
+        assert h.channel.attempts == ()
+
+    def test_a_message_on_another_channel_proves_nothing(self):
+        h = telegram_harness(telegram_prospect("p1", chat=CHAT), mode=ApprovalMode.AUTONOMOUS)
+        h.engine.receive_inbound(
+            replace(inbound("hi", sender=CHAT, external_id=f"{CHAT}:9"), channel=Channel.WHATSAPP)
+        )
+        h.engine.run_cycle()
+        assert h.channel.attempts == ()
+
+    def test_a_signed_invitation_is_the_proof_and_the_conversation_then_goes_on(self):
+        h = telegram_harness(telegram_prospect("p1"), mode=ApprovalMode.AUTONOMOUS)
+        h.engine.receive_inbound(message("", linked_prospect_id="p1"))
+        assert h.prospect("p1").contact.telegram_chat_id == CHAT
+        h.engine.run_cycle()
+        (sent,) = h.channel.sent
+        assert sent.recipient == CHAT
+
+    def test_a_shared_phone_number_is_the_proof_too(self):
+        h = telegram_harness(telegram_prospect("p1"), mode=ApprovalMode.AUTONOMOUS)
+        h.engine.receive_inbound(message("", shared_phone="+15550000001"))
+        h.engine.run_cycle()
+        assert [m.recipient for m in h.channel.sent] == [CHAT]
+
+    def test_a_person_who_writes_first_is_answered_on_their_chat(self):
+        h = telegram_harness(
+            inbound=ENGAGE,
+            brain=ScriptedBrain(lambda request: send("Welcome")),
+            mode=ApprovalMode.AUTONOMOUS,
+        )
+        receipt, _ = receive(h, message("Is this still available?"))
+        assert receipt.status is InboundStatus.STORED
+        assert [m.recipient for m in h.channel.sent] == [CHAT]
+
+    def test_email_and_whatsapp_need_no_such_proof(self):
+        h = build(prospects=[prospect("p1")], mode=ApprovalMode.AUTONOMOUS)
+        h.engine.run_cycle()
+        assert len(h.channel.sent) == 1

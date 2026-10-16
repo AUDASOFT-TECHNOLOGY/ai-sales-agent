@@ -4,9 +4,8 @@ import { motion } from "motion/react";
 import { ChevronsLeft, ChevronsRight, ClipboardCheck, History, LogOut, MessageSquare, Rocket, Search, SlidersHorizontal, Send, UserRound, Users, Radar, Workflow } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
-import { TENANT } from "../mock/data";
-import { useStore } from "../mock/store";
-import { Pulse, useAgentLabel } from "../agent/Pulse";
+import { useClientAgentStatus, type ClientAgentStatus } from "../client/useClientAgentStatus";
+import { Pulse } from "../agent/Pulse";
 import { Button, IconButton } from "../ui/Button";
 import { Segmented } from "../ui/Controls";
 import { PopoverCard, Tip } from "../ui/Overlays";
@@ -25,18 +24,19 @@ const NAV: Array<{ to: string; key: MessageKey; icon: typeof Rocket; group?: "ru
   { to: "/conversations", key: "nav.conversations", icon: MessageSquare, group: "run" },
   { to: "/approvals", key: "nav.approvals", icon: ClipboardCheck, group: "run" },
   { to: "/history", key: "nav.history", icon: History, group: "run" },
-  { to: "/configure", key: "nav.configure", icon: SlidersHorizontal, group: "shape" },
+  { to: "/agent", key: "nav.agent", icon: Rocket, group: "shape" },
+  { to: "/settings", key: "nav.settings", icon: SlidersHorizontal, group: "shape" },
   { to: "/channel", key: "nav.channel", icon: Send, group: "shape" },
   { to: "/lanes", key: "nav.lanes", icon: Workflow, group: "shape" },
 ];
 
 const TITLE: Record<string, MessageKey> = {
-  "/setup": "nav.setup",
+  "/agent": "agent.title",
+  "/settings": "settings.title",
   "/dashboard": "nav.command",
   "/prospects": "prospects.title",
   "/conversations": "convo.title",
   "/history": "nav.history",
-  "/configure": "configure.title",
   "/notifications": "notifications.title",
   "/profile": "profile.title",
   "/approvals": "approvals.title",
@@ -57,19 +57,18 @@ function Aurora() {
   );
 }
 
-function Rail({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+function Rail({ collapsed, onToggle, agent }: { collapsed: boolean; onToggle: () => void; agent: ClientAgentStatus }) {
   const { t } = useI18n();
-  const { state, agentState } = useStore();
-  const label = useAgentLabel(agentState, state.needs.length);
-  const setupDone = state.live;
-  const item = (to: string, key: MessageKey, Icon: typeof Rocket, badge?: number) => (
+  const { profile } = useClientAuth();
+  const label = t(agent.label);
+  const name = profile?.name ?? "";
+  const item = (to: string, key: MessageKey, Icon: typeof Rocket) => (
     <li key={to}>
       <Tip label={collapsed ? t(key) : ""}>
         <span className="rail__wrap">
           <NavLink to={to} className={({ isActive }) => cx("rail__item", isActive && "is-active")} aria-label={collapsed ? t(key) : undefined}>
             <Icon size={22} aria-hidden />
             <span className="rail__label">{t(key)}</span>
-            {badge ? <span className="rail__badge tabular">{badge}</span> : null}
           </NavLink>
         </span>
       </Tip>
@@ -80,16 +79,15 @@ function Rail({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => voi
       <div className="rail__brand">
         {collapsed ? <BrandMark size={34} /> : <Wordmark />}
       </div>
-      <NavLink to="/dashboard" className="rail__agent" aria-label={`${TENANT.name}: ${label}`}>
-        <Pulse state={agentState} size={collapsed ? 40 : 56} count={state.live ? state.needs.length : 0} />
+      <NavLink to="/dashboard" className="rail__agent" aria-label={`${name}: ${label}`}>
+        <Pulse state={agent.pulse} size={collapsed ? 40 : 56} />
         <span className="rail__agent-text">
-          <span className="t-label">{TENANT.name}</span>
+          <span className="t-label">{name}</span>
           <span className="c-3 t-body-sm">{label}</span>
         </span>
       </NavLink>
       <nav className="rail__nav" aria-label={t("nav.primary")}>
-        {!setupDone ? <ul>{item("/setup", "nav.setup", Rocket)}</ul> : null}
-        <ul>{NAV.filter((n) => n.group === "run").map((n) => item(n.to, n.key, n.icon, n.to === "/dashboard" && state.live ? state.needs.length : undefined))}</ul>
+        <ul>{NAV.filter((n) => n.group === "run").map((n) => item(n.to, n.key, n.icon))}</ul>
         <hr className="divider rail__sep" />
         <ul>{NAV.filter((n) => n.group === "shape").map((n) => item(n.to, n.key, n.icon))}</ul>
       </nav>
@@ -107,12 +105,11 @@ function Rail({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => voi
   );
 }
 
-function ContextBar({ onPalette }: { onPalette: () => void }) {
+function ContextBar({ onPalette, agent }: { onPalette: () => void; agent: ClientAgentStatus }) {
   const { t, locale, setLocale } = useI18n();
   const { pathname } = useLocation();
-  const { state, agentState } = useStore();
   const { profile, logout } = useClientAuth();
-  const label = useAgentLabel(agentState, state.needs.length);
+  const label = t(agent.label);
   const initials = (profile?.name ?? "").trim().slice(0, 2).toUpperCase();
   const title = TITLE[pathname] ?? TITLE["/" + pathname.split("/")[1]!] ?? "command.title";
   const [scrolled, setScrolled] = useState(false);
@@ -187,15 +184,14 @@ function ContextBar({ onPalette }: { onPalette: () => void }) {
 
 function TabBar() {
   const { t } = useI18n();
-  const { state } = useStore();
   const tabs: Array<[string, MessageKey, typeof Rocket]> = [
     ["/dashboard", "nav.command", Radar],
     ["/prospects", "nav.prospects", Users],
     ["/conversations", "nav.chats", MessageSquare],
     ["/history", "nav.history", History],
-    ["/configure", "nav.configure", SlidersHorizontal],
+    ["/agent", "nav.agent", Rocket],
+    ["/settings", "nav.settings", SlidersHorizontal],
     ["/channel", "nav.channel", Send],
-    ...(state.live ? [] : ([["/setup", "nav.setup", Rocket]] as Array<[string, MessageKey, typeof Rocket]>)),
   ];
   return (
     <nav className="tabbar glass" data-level="2" aria-label={t("nav.primary")} style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}>
@@ -203,7 +199,6 @@ function TabBar() {
         <NavLink key={to} to={to} className={({ isActive }) => cx("tabbar__item", isActive && "is-active")}>
           <span className="tabbar__icon">
             <Icon size={22} aria-hidden />
-            {to === "/dashboard" && state.live && state.needs.length > 0 ? <span className="tabbar__dot tabular">{state.needs.length}</span> : null}
           </span>
           <span className="tabbar__label">{t(key)}</span>
         </NavLink>
@@ -223,6 +218,7 @@ export function AppShell() {
     }
   });
   const [palette, setPalette] = useState(false);
+  const agent = useClientAgentStatus();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -256,9 +252,9 @@ export function AppShell() {
         {t("nav.skip")}
       </a>
       <Aurora />
-      <Rail collapsed={collapsed} onToggle={toggle} />
+      <Rail collapsed={collapsed} onToggle={toggle} agent={agent} />
       <div className="shell__main">
-        <ContextBar onPalette={() => setPalette(true)} />
+        <ContextBar onPalette={() => setPalette(true)} agent={agent} />
         <motion.main key={pathname} id="main" tabIndex={-1} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}>
           <Suspense fallback={<ScreenFallback />}>
             <Outlet />

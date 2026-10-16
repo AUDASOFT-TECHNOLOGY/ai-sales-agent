@@ -9,6 +9,7 @@ import { AdminClientDetailPage } from "./admin/pages/AdminClientDetailPage";
 import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
 import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
 import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
+import { ClientAgentPage } from "./client/ClientAgentPage";
 import { ClientApprovalsPage } from "./client/ClientApprovalsPage";
 import { ClientAuthProvider } from "./client/ClientAuthContext";
 import { ClientChannelPage } from "./client/ClientChannelPage";
@@ -16,24 +17,17 @@ import { ClientLanesPage } from "./client/ClientLanesPage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
 import { ClientProfilePage } from "./client/ClientProfilePage";
 import { ClientRoute } from "./client/ClientRoute";
+import { ClientSettingsPage } from "./client/ClientSettingsPage";
 import { I18nProvider } from "./i18n";
-import { StoreProvider, useStore } from "./mock/store";
+import { StoreProvider } from "./mock/store";
 import { AppShell } from "./shell/AppShell";
 
 // Screens are split per route so the shell stays under the initial JavaScript budget (doc C7).
 const Dashboard = lazy(() => import("./screens/Dashboard").then((m) => ({ default: m.Dashboard })));
-const Configure = lazy(() => import("./screens/configure/Configure").then((m) => ({ default: m.Configure })));
 const Conversations = lazy(() => import("./screens/Conversations").then((m) => ({ default: m.Conversations })));
 const History = lazy(() => import("./screens/History").then((m) => ({ default: m.History })));
 const Notifications = lazy(() => import("./screens/Notifications").then((m) => ({ default: m.Notifications })));
 const Prospects = lazy(() => import("./screens/Prospects").then((m) => ({ default: m.Prospects })));
-const Runway = lazy(() => import("./screens/Runway").then((m) => ({ default: m.Runway })));
-
-/** Home is the Dashboard. The Launch Runway is only the first-run onboarding. */
-function Home() {
-  const { state } = useStore();
-  return <Navigate to={state.live ? "/dashboard" : "/setup"} replace />;
-}
 
 export function App() {
   return (
@@ -86,14 +80,15 @@ export function App() {
               }
             >
             <Route element={<AppShell />}>
-              <Route index element={<Home />} />
-              <Route path="setup" element={<Runway />} />
+              <Route index element={<Navigate to="/agent" replace />} />
+              <Route path="setup" element={<Navigate to="/agent" replace />} />
+              <Route path="agent" element={<ClientAgentPage />} />
+              <Route path="settings" element={<ClientSettingsPage />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="prospects" element={<Prospects />} />
               <Route path="conversations" element={<Conversations />} />
               <Route path="conversations/:id" element={<Conversations />} />
-              <Route path="configure" element={<Configure />} />
-              <Route path="configure/:section" element={<Configure />} />
+              <Route path="configure/*" element={<Navigate to="/settings" replace />} />
               <Route path="results" element={<Navigate to="/dashboard" replace />} />
               <Route path="history" element={<History />} />
               <Route path="notifications" element={<Notifications />} />

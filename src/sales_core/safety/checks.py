@@ -5,11 +5,18 @@ read state. Any doubt blocks (fail closed).
 """
 
 import string
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from sales_core.contracts import Channel, Prospect, ProspectStatus, SalesAction
+from sales_core.contracts import (
+    Channel,
+    Direction,
+    Message,
+    Prospect,
+    ProspectStatus,
+    SalesAction,
+)
 
 # "stop" is the near-universal opt-out word. Clients add their own (language-specific) words
 # through configuration; the Core hard-codes no language.
@@ -63,6 +70,23 @@ def awaits_opt_in(prospect: Prospect, channel: Channel) -> bool:
     """True if the prospect cannot be written to on `channel` only because they have not started
     the conversation there yet."""
     return channel in OPT_IN_CHANNELS and recipient_for(prospect, channel) is None
+
+
+def has_initiated(messages: Iterable[Message], channel: Channel, address: str) -> bool:
+    """True if this person wrote to us first, from `address`, on `channel`.
+
+    The proof is an inbound message the Engine stored after the channel adapter authenticated it
+    (a signed webhook): its `external_id` starts with the sender's address, which is how the
+    Telegram adapter names a message (`<chat id>:<message id>`). An address that merely sits on the
+    prospect, whatever its origin (a spreadsheet column, a CRM field, an import), is not proof.
+    """
+    prefix = f"{address.strip()}:"
+    return any(
+        m.direction is Direction.INBOUND
+        and m.channel is channel
+        and (m.external_id or "").startswith(prefix)
+        for m in messages
+    )
 
 
 def check_contactable(prospect: Prospect | None, channel: Channel) -> SafetyVerdict:

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CornerDownLeft, Pause, Play, Search } from "lucide-react";
+import { CornerDownLeft, Play, Search } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useStore } from "../mock/store";
 import { PaletteShell } from "../ui/Overlays";
@@ -19,7 +19,7 @@ interface Item {
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const { state, dispatch, toast } = useStore();
+  const { state } = useStore();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
 
@@ -31,18 +31,13 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         ["/prospects", "nav.prospects"],
         ["/conversations", "nav.conversations"],
         ["/history", "nav.history"],
-        ["/configure", "nav.configure"],
-        ...(state.live ? [] : [["/setup", "nav.setup"]]),
+        ["/agent", "nav.agent"],
+        ["/settings", "nav.settings"],
       ] as Array<[string, MessageKey]>
     ).map(([to, key]) => ({ id: to, group: t("palette.group.goTo"), label: t(key), run: go(to) }));
-    const actions: Item[] = [
-      state.paused
-        ? { id: "resume", group: t("palette.group.actions"), label: t("palette.resumeAgent"), icon: Play, run: () => { dispatch({ type: "pause", value: false }); toast({ tone: "info", title: t("palette.toast.agentResumed") }); } }
-        : { id: "pause", group: t("palette.group.actions"), label: t("palette.pauseAgent"), icon: Pause, run: () => { dispatch({ type: "pause", value: true }); toast({ tone: "attention", title: t("palette.toast.agentPaused.title"), body: t("palette.toast.agentPaused.body") }); } },
-    ];
     const people: Item[] = state.prospects.map((p) => ({ id: `p-${p.id}`, group: t("nav.prospects"), label: p.name, hint: p.place, run: go(`/prospects?open=${p.id}`) }));
-    return [...nav, ...actions, ...people];
-  }, [state.paused, state.live, state.prospects, navigate, dispatch, toast, t]);
+    return [...nav, ...people];
+  }, [state.prospects, navigate, t]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();

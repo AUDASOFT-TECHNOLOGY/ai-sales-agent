@@ -1,125 +1,147 @@
-import { useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Rows3, Search, Waves } from "lucide-react";
-import { useI18n } from "../i18n";
-import { useStore } from "../mock/store";
-import { Dossier, OpportunityRiver, ProspectLedger } from "../agent/Prospects";
-import { Segmented } from "../ui/Controls";
+/** The client's prospects, read from `GET /client/v1/prospects` (read-only, paginated by the server).
+ *  Everything shown is what the platform stores: no search, filter or sales stage is invented here,
+ *  because the server offers none. The page number lives in the URL (`?page=2`). */
 
-type View = "list" | "river";
-type Filter = "all" | "needs";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useI18n, type MessageKey } from "../i18n";
+import { useClientAuth } from "../client/ClientAuthContext";
+import { clientProspects, type ProspectRow } from "../client/api";
+import { crmFailureOf } from "../client/crmFailure";
+import { useFetched } from "../client/useFetched";
+import { Button } from "../ui/Button";
+import { Chip } from "../ui/Chip";
+import { Glass } from "../ui/Glass";
+
+export const PAGE_SIZE = 25;
+
+const STATUS_TINT: Record<ProspectRow["status"], "neutral" | "success" | "attention" | "danger"> = {
+  new: "neutral",
+  active: "success",
+  paused: "attention",
+  opted_out: "danger",
+  closed: "neutral",
+};
 
 export function Prospects() {
-  const { t, n } = useI18n();
-  const { state } = useStore();
+  const { t, n, d } = useI18n();
+  const { logout } = useClientAuth();
   const [params, setParams] = useSearchParams();
-  const view: View = params.get("view") === "list" ? "list" : "river";
-  const filter: Filter = params.get("filter") === "needs" ? "needs" : "all";
-  const product = params.get("product") ?? "all";
-  const q = params.get("q") ?? "";
-  const openId = params.get("open") ?? undefined;
+  const requested = Number.parseInt(params.get("page") ?? "1", 10);
+  const page = Number.isFinite(requested) && requested >= 1 ? requested : 1;
+  const [attempt, setAttempt] = useState(0);
 
-  const update = (patch: Record<string, string | null>) => {
-    const next = new URLSearchParams(params);
-    for (const [k, v] of Object.entries(patch)) {
-      if (v === null || v === "" || (k === "view" && v === "river") || (k === "filter" && v === "all") || (k === "product" && v === "all")) next.delete(k);
-      else next.set(k, v);
-    }
-    setParams(next, { replace: true });
-  };
+  // `attempt` makes a retry a new request.
+  const load = useCallback(() => clientProspects(PAGE_SIZE, (page - 1) * PAGE_SIZE).then((r) => ({ r, attempt })), [page, attempt]);
+  const { loading, value, error, failed } = useFetched(load);
+  const failure = useMemo(() => (failed ? crmFailureOf(error) : null), [failed, error]);
+  const signedOut = failure?.signedOut === true;
+  useEffect(() => {
+    if (signedOut) void logout();
+  }, [signedOut, logout]);
 
-  const products = useMemo(() => Array.from(new Set(state.prospects.map((p) => p.interest))).sort(), [state.prospects]);
-
-  const prospects = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return state.prospects.filter((p) => {
-      if (filter === "needs" && p.attention !== "waiting") return false;
-      if (product !== "all" && p.interest !== product) return false;
-      if (!needle) return true;
-      return `${p.name} ${p.place} ${p.interest}`.toLowerCase().includes(needle);
-    });
-  }, [state.prospects, filter, product, q]);
-
-  const selected = state.prospects.find((p) => p.id === openId);
-  const select = (id: string) => update({ open: id });
-
-  // What "N prospects" means changes with the filters — it is never tied to a date range (unlike
-  // the Dashboard's period-filtered KPIs), so say so plainly when no filter narrows it.
-  const total = state.prospects.length;
-  const filterBits: string[] = [];
-  if (filter === "needs") filterBits.push(t("prospects.filter.needYou"));
-  if (product !== "all") filterBits.push(t("prospects.filter.interestedIn", { product }));
-  if (q.trim()) filterBits.push(t("prospects.filter.matchQuery", { q: q.trim() }));
-  const countLabel =
-    filterBits.length > 0
-      ? t("prospects.countWithFilters", { shown: n(prospects.length), total: n(total), filters: filterBits.join(t("prospects.and")) })
-      : t("prospects.count", { n: n(total) });
+  const result = value?.r;
+  const go = (next: number) => setParams(next <= 1 ? {} : { page: String(next) }, { replace: true });
+  const lastPage = result ? Math.max(1, Math.ceil(result.total / PAGE_SIZE)) : page;
+  const when = (iso: string | null) => (iso ? d(iso, { dateStyle: "medium", timeStyle: "short" }) : "—");
 
   return (
     <div className="page page--focus prospects">
       <div className="page-head">
         <div>
           <h2 className="t-h1">{t("prospects.title")}</h2>
-          <p className="c-2 tabular">{countLabel}</p>
-        </div>
-        <div className="row row--wrap prospects__tools">
-          <label className="search-field well">
-            <Search size={18} aria-hidden className="c-3" />
-            <input value={q} onChange={(e) => update({ q: e.target.value })} placeholder={t("prospects.search")} aria-label={t("prospects.search")} />
-          </label>
-          <Segmented
-            layoutId="seg-filter"
-            label={t("common.filter")}
-            size="sm"
-            value={filter}
-            onChange={(v) => update({ filter: v })}
-            options={[
-              { value: "all", label: t("prospects.filter.all") },
-              { value: "needs", label: t("prospects.filter.needs") },
-            ]}
-          />
-          <label className="sr-only" htmlFor="prospects-product">
-            {t("prospects.catalogueProduct")}
-          </label>
-          <select id="prospects-product" className="input well prospects__product-select" value={product} onChange={(e) => update({ product: e.target.value })}>
-            <option value="all">{t("prospects.allProducts")}</option>
-            {products.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-          <Segmented
-            layoutId="seg-view"
-            label={t("common.view")}
-            size="sm"
-            value={view}
-            onChange={(v) => update({ view: v })}
-            options={[
-              { value: "list", label: t("prospects.ledger"), icon: <Rows3 size={16} aria-hidden /> },
-              { value: "river", label: t("prospects.river"), icon: <Waves size={16} aria-hidden /> },
-            ]}
-          />
+          {result ? <p className="c-2 tabular">{t("prospects.live.count", { n: n(result.total) })}</p> : null}
         </div>
       </div>
-      <div className="prospects__body">
-        <div className="prospects__main">
-          {view === "list" ? (
-            <ProspectLedger prospects={prospects} selectedId={openId} onSelect={select} />
-          ) : (
-            <OpportunityRiver prospects={prospects} selectedId={openId} onSelect={select} />
-          )}
-          {prospects.length === 0 ? (
-            <div className="empty">
-              <h3 className="t-h3">{t("prospects.empty.title")}</h3>
-              <button type="button" className="link-btn" onClick={() => update({ q: null, filter: null, product: null })}>
-                {t("prospects.empty.clear")}
-              </button>
+
+      {failure ? (
+        <>
+          <p className="admin-alert admin-alert--danger" role="alert">
+            {t(failure.key)}
+          </p>
+          <div>
+            <Button onClick={() => setAttempt((a) => a + 1)}>{t("lanes.retry")}</Button>
+          </div>
+        </>
+      ) : loading ? (
+        <p className="c-3" role="status">
+          {t("prospects.live.loading")}
+        </p>
+      ) : result && result.total === 0 ? (
+        <div className="empty" data-testid="prospects-empty">
+          <h3 className="t-h3">{t("prospects.live.empty")}</h3>
+        </div>
+      ) : result && result.prospects.length === 0 ? (
+        <div className="empty" data-testid="prospects-page-empty">
+          <h3 className="t-h3">{t("prospects.live.pastEnd")}</h3>
+          <button type="button" className="link-btn" onClick={() => go(lastPage)}>
+            {t("prospects.live.lastPage")}
+          </button>
+        </div>
+      ) : result ? (
+        <>
+          <Glass className="ledger" aria-label={t("prospects.title")}>
+            <div className="ledger__scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">{t("prospects.col.name")}</th>
+                    <th scope="col">{t("prospects.col.status")}</th>
+                    <th scope="col">{t("prospects.col.stage")}</th>
+                    <th scope="col">{t("prospects.col.last")}</th>
+                    <th scope="col">{t("prospects.col.next")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.prospects.map((p) => (
+                    <tr key={p.id} data-testid={`prospect-${p.id}`}>
+                      <th scope="row">
+                        <Link to={`/conversations/${encodeURIComponent(p.id)}`} className="ledger__name" aria-label={t("prospects.live.open", { name: p.display_name })}>
+                          <span>
+                            <span className="ledger__strong" dir="auto">
+                              {p.display_name}
+                            </span>
+                            <span className="c-3 t-body-sm" dir="auto">
+                              {p.email ?? p.phone ?? ""}
+                            </span>
+                          </span>
+                        </Link>
+                      </th>
+                      <td>
+                        <Chip tint={STATUS_TINT[p.status] ?? "neutral"}>{t(`crm.status.${p.status}` as MessageKey)}</Chip>
+                      </td>
+                      <td dir="auto">{p.stage ?? "—"}</td>
+                      <td>{when(p.last_contacted_at)}</td>
+                      <td>
+                        {p.next_action_type ? (
+                          <>
+                            {t(`crm.action.${p.next_action_type}` as MessageKey)}
+                            <span className="c-3 t-body-sm"> · {when(p.next_action_due_at)}</span>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ) : null}
-        </div>
-        <Dossier prospect={selected} inspector={false} onClose={() => update({ open: null })} />
-      </div>
+          </Glass>
+          <nav className="row row--wrap" aria-label={t("prospects.live.pages")}>
+            <Button leading={<ChevronLeft size={16} aria-hidden className="mirror" />} onClick={() => go(page - 1)} disabled={page <= 1}>
+              {t("prospects.live.previous")}
+            </Button>
+            <span className="c-2 tabular" data-testid="prospects-page">
+              {t("prospects.live.page", { page: n(page), pages: n(lastPage) })}
+            </span>
+            <Button trailing={<ChevronRight size={16} aria-hidden className="mirror" />} onClick={() => go(page + 1)} disabled={page >= lastPage}>
+              {t("prospects.live.next")}
+            </Button>
+          </nav>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -9,6 +9,7 @@ from sales_core.safety.checks import (
     awaits_opt_in,
     check_contactable,
     check_ready_to_send,
+    has_initiated,
     is_opt_out_message,
     recipient_for,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "awaits_opt_in",
     "check_contactable",
     "check_ready_to_send",
+    "has_initiated",
     "is_opt_out_message",
     "recipient_for",
 ]

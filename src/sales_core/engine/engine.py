@@ -81,12 +81,14 @@ from sales_core.ports import (
     SalesRepository,
 )
 from sales_core.safety import (
+    ALLOWED,
     OPT_IN_CHANNELS,
     BlockReason,
     SafetyVerdict,
     awaits_opt_in,
     check_contactable,
     check_ready_to_send,
+    has_initiated,
     is_opt_out_message,
     recipient_for,
 )
@@ -163,10 +165,25 @@ class Engine:
                 if (
                     channel in OPT_IN_CHANNELS
                     and p.status in _ACTIVE_STATUSES
-                    and awaits_opt_in(p, channel)
+                    and (awaits_opt_in(p, channel) or not self._initiated(p, channel))
                 ):
                     waiting.append(p)
             return tuple(waiting)
+
+    def list_prospects(self) -> tuple[Prospect, ...]:
+        """The client's prospects, by name then id so that pages are stable (read-only)."""
+        with self._lock:
+            own = (p for p in self._repo.list_prospects() if p.client_id == self._client.client_id)
+            return tuple(sorted(own, key=lambda p: (p.display_name.casefold(), p.prospect_id)))
+
+    def conversation_of(self, prospect_id: ProspectId) -> Conversation | None:
+        """The history of one of the client's prospects, oldest message first; None if the client
+        has no such prospect (read-only). An empty history is a valid answer, not None."""
+        with self._lock:
+            prospect = self._repo.get_prospect(prospect_id)
+            if prospect is None or prospect.client_id != self._client.client_id:
+                return None
+            return self._repo.get_conversation(prospect_id)
 
     @property
     def _dry_run(self) -> bool:
@@ -226,7 +243,25 @@ class Engine:
         channel = self._channel_of(action, prospect)
         if channel is None:
             return SafetyVerdict(BlockReason.NO_LANE)
-        return check_contactable(prospect, channel)
+        verdict = check_contactable(prospect, channel)
+        return verdict if not verdict.allowed else self._initiation_verdict(prospect, channel)
+
+    def _initiated(self, prospect: Prospect, channel: Channel) -> bool:
+        """Whether the person has proved they started the conversation on a channel where they
+        must (always True elsewhere). An address on the prospect is never the proof: only an
+        inbound message this Engine stored, from that address, is."""
+        if channel not in OPT_IN_CHANNELS:
+            return True
+        address = recipient_for(prospect, channel)
+        if address is None:
+            return True  # no address: `check_contactable` already says why
+        conversation = self._repo.get_conversation(prospect.prospect_id)
+        return has_initiated(conversation.messages, channel, address)
+
+    def _initiation_verdict(self, prospect: Prospect, channel: Channel) -> SafetyVerdict:
+        return (
+            ALLOWED if self._initiated(prospect, channel) else SafetyVerdict(BlockReason.NOT_LINKED)
+        )
 
     def _assign_lanes(self, prospects: list[Prospect], run: RunCollector) -> list[Prospect]:
         """Write down, once, the lane of every prospect that has none yet. A client with no lanes
@@ -493,6 +528,8 @@ class Engine:
             return
         channel = channel or self._router.any_channel
         verdict = check_ready_to_send(prospect, action, channel)
+        if verdict.allowed and prospect is not None:
+            verdict = self._initiation_verdict(prospect, channel)  # final gate, fresh history
         recipient = recipient_for(prospect, channel) if prospect is not None else None
         if not verdict.allowed or prospect is None or recipient is None or action.draft is None:
             blocked = verdict if not verdict.allowed else SafetyVerdict(BlockReason.NO_CONTACT)

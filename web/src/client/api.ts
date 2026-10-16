@@ -24,11 +24,14 @@ export interface ProfileChanges {
 
 export class ClientApiError extends Error {
   status: number;
+  /** What the server says is still missing, when it refuses an action for that reason (409 on start). */
+  reasons: ReadinessCheck[];
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, reasons: ReadinessCheck[] = []) {
     super(message);
     this.name = "ClientApiError";
     this.status = status;
+    this.reasons = reasons;
   }
 }
 
@@ -44,16 +47,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ClientApiError(0, "Could not reach the server.");
   }
   if (!response.ok) {
-    throw new ClientApiError(response.status, await errorDetail(response));
+    const { message, reasons } = await errorDetail(response);
+    throw new ClientApiError(response.status, message, reasons);
   }
   return (await response.json()) as T;
 }
 
-async function errorDetail(response: Response): Promise<string> {
+async function errorDetail(response: Response): Promise<{ message: string; reasons: ReadinessCheck[] }> {
+  const fallback = response.statusText || `request failed (${response.status})`;
   try {
     const body: unknown = await response.json();
     const detail = body && typeof body === "object" ? (body as { detail?: unknown }).detail : undefined;
-    if (typeof detail === "string") return detail;
+    if (typeof detail === "string") return { message: detail, reasons: [] };
+    if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+      // `{message, reasons}`: a refusal that lists what is missing (the agent cannot start yet).
+      const { message, reasons } = detail as { message?: unknown; reasons?: unknown };
+      return {
+        message: typeof message === "string" ? message : fallback,
+        reasons: Array.isArray(reasons) ? reasons.filter(isCheck) : [],
+      };
+    }
     if (Array.isArray(detail)) {
       // A 422 lists every problem: plain sentences, or `{loc, msg}` rules that never repeat the input.
       const lines = detail.flatMap((item): string[] => {
@@ -65,12 +78,16 @@ async function errorDetail(response: Response): Promise<string> {
         }
         return [];
       });
-      if (lines.length > 0) return lines.join("; ");
+      if (lines.length > 0) return { message: lines.join("; "), reasons: [] };
     }
   } catch {
     /* not JSON, or no `detail` string (e.g. a 422 list): fall through to the generic message */
   }
-  return response.statusText || `request failed (${response.status})`;
+  return { message: fallback, reasons: [] };
+}
+
+function isCheck(value: unknown): value is ReadinessCheck {
+  return !!value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string";
 }
 
 export function clientMe(): Promise<ClientProfile> {
@@ -349,4 +366,131 @@ export function clientSaveSourceToken(value: string): Promise<CredentialStatus> 
 
 export function clientRemoveSourceToken(): Promise<CredentialStatus> {
   return request<CredentialStatus>("/source/credentials", { method: "DELETE" });
+}
+
+/* ── Business settings and the agent's switch (client_agent.py) ──
+ * `commercial` is the Brain's own document and is replaced as a whole by a write: a screen edits the
+ * parts it knows and sends back everything else unchanged. */
+
+export interface ClientSettings {
+  timezone?: string;
+  opt_out_keywords?: string[];
+  schedule?: { daily_at?: string; days?: string[] };
+  commercial?: Record<string, unknown>;
+}
+
+export interface SettingsState {
+  /** Null: nothing published yet. A write names the version it was based on. */
+  version: number | null;
+  settings: ClientSettings;
+  updated_at: string | null;
+  updated_by: "client" | "administrator" | null;
+}
+
+export function clientSettings(): Promise<SettingsState> {
+  return request<SettingsState>("/settings");
+}
+
+export function clientSaveSettings(expectedVersion: number | null, settings: ClientSettings): Promise<SettingsState> {
+  return request<SettingsState>("/settings", {
+    method: "PUT",
+    body: JSON.stringify({ expected_version: expectedVersion, settings }),
+  });
+}
+
+export interface AgentState {
+  /** The client's own switch. */
+  state: "not_started" | "running" | "paused";
+  /** Works now: started by the client, enabled by the Admin and ready. */
+  active: boolean;
+  ready: boolean;
+  changed_at: string | null;
+  reasons: ReadinessCheck[];
+}
+
+export function clientAgent(): Promise<AgentState> {
+  return request<AgentState>("/agent");
+}
+
+export function clientStartAgent(): Promise<AgentState> {
+  return request<AgentState>("/agent/start", { method: "POST" });
+}
+
+export function clientPauseAgent(): Promise<AgentState> {
+  return request<AgentState>("/agent/pause", { method: "POST" });
+}
+
+/* ── Prospects and conversations, read-only (see src/sales_app/api/client_prospects.py) ──
+ * Only what the platform stores is returned; the server answers for this client alone. */
+
+export interface ProspectRow {
+  id: string;
+  display_name: string;
+  status: "new" | "active" | "paused" | "opted_out" | "closed";
+  stage: string | null;
+  locale: string | null;
+  lane_id: string | null;
+  phone: string | null;
+  email: string | null;
+  preferred_channel: string | null;
+  next_action_type: string | null;
+  next_action_due_at: string | null;
+  last_contacted_at: string | null;
+  last_inbound_at: string | null;
+  follow_up_count: number;
+}
+
+export interface ProspectsPage {
+  /** All the client's prospects, not just this page. */
+  total: number;
+  limit: number;
+  offset: number;
+  prospects: ProspectRow[];
+}
+
+export interface ConversationMessage {
+  id: string;
+  direction: "inbound" | "outbound";
+  channel: string;
+  text: string;
+  timestamp: string;
+}
+
+export interface ConversationHistory {
+  prospect_id: string;
+  conversation_id: string;
+  origin: "outbound" | "inbound" | "unknown";
+  /** Oldest first; empty when nothing was exchanged yet. */
+  messages: ConversationMessage[];
+}
+
+/** `limit` is 1..100, `offset` >= 0: the server refuses anything else. */
+export function clientProspects(limit: number, offset: number): Promise<ProspectsPage> {
+  return request<ProspectsPage>(`/prospects?limit=${limit}&offset=${offset}`);
+}
+
+export function clientConversation(prospectId: string): Promise<ConversationHistory> {
+  return request<ConversationHistory>(`/conversations/${encodeURIComponent(prospectId)}`);
+}
+
+/* ── Dashboard summary, read-only (see src/sales_app/api/client_prospects.py) ──
+ * Counts the server computed from the client's own prospects. No money, rate or funnel is here
+ * because the platform stores none; the agent's own state is `clientAgent()`. */
+
+export interface ClientSummary {
+  total_prospects: number;
+  /** Every status is present; 0 means the client really has none. */
+  by_status: Record<ProspectRow["status"], number>;
+  upcoming_actions: {
+    /** New or active prospects that have a next action recorded. */
+    scheduled: number;
+    /** Only the types present. */
+    by_type: Record<string, number>;
+    /** The earliest due date among them; null when nothing is scheduled. */
+    next_due_at: string | null;
+  };
+}
+
+export function clientSummary(): Promise<ClientSummary> {
+  return request<ClientSummary>("/summary");
 }
