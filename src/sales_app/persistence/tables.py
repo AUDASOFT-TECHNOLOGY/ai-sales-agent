@@ -16,10 +16,12 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
+    Numeric,
     String,
     Table,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import TypeDecorator
@@ -263,4 +265,115 @@ op_writeback_ledger = Table(
     Column("not_before", UtcDateTime),
     UniqueConstraint("client_id", "attempt_id", name="uq_op_writeback_ledger_attempt"),
     Index("ix_op_writeback_ledger_prospect", "client_id", "prospect_id", "field", "sequence"),
+)
+
+# The LLM usage register: one row per model call of a client's agent. Counts only, never a prompt or
+# an answer. A token count the provider did not report stays NULL: an unknown is not a zero.
+op_llm_usage = Table(
+    "op_llm_usage",
+    metadata,
+    Column("seq", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("occurred_at", UtcDateTime, nullable=False),
+    Column("provider", String(64), nullable=False),
+    Column("model", String(128), nullable=False),
+    Column("input_tokens", Integer),
+    Column("output_tokens", Integer),
+    Column("status", String(16), nullable=False),
+    Index("ix_op_llm_usage_client", "client_id", "occurred_at"),
+)
+
+# The Admin's price list for model calls (global, not per client): what a million input and a million
+# output tokens cost for a provider's model, in one currency. A model with no row has no known price.
+llm_pricing = Table(
+    "llm_pricing",
+    metadata,
+    Column("provider", String(64), primary_key=True),
+    Column("model", String(128), primary_key=True),
+    Column("input_per_million", Numeric(18, 6), nullable=False),
+    Column("output_per_million", Numeric(18, 6), nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+    Column("updated_by", String(255), nullable=False),
+)
+
+# Commercial plans (global) and the plan each client is on. An assignment keeps the plan's terms as
+# they were when it started and is never rewritten, only ended (`ended_at`), so a future invoice can
+# say which terms applied. `name_key` is the lower-cased name: names are unique ignoring case.
+plans = Table(
+    "plans",
+    metadata,
+    Column("plan_id", String(64), primary_key=True),
+    Column("name", String(80), nullable=False),
+    Column("name_key", String(80), nullable=False, unique=True),
+    Column("monthly_price", Numeric(18, 2), nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("included_credits", Integer, nullable=False),
+    Column("daily_quota", Integer, nullable=False),
+    Column("active", Boolean, nullable=False),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+    Column("updated_by", String(255), nullable=False),
+)
+
+client_plan_assignments = Table(
+    "client_plan_assignments",
+    metadata,
+    Column("seq", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("plan_id", String(64), ForeignKey("plans.plan_id"), nullable=False),
+    Column("plan_name", String(80), nullable=False),
+    Column("monthly_price", Numeric(18, 2), nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("included_credits", Integer, nullable=False),
+    Column("daily_quota", Integer, nullable=False),
+    Column("started_at", UtcDateTime, nullable=False),
+    Column("ended_at", UtcDateTime),
+    Column("assigned_by", String(255), nullable=False),
+    Index("ix_client_plan_assignments_client", "client_id", "started_at"),
+    Index(
+        "uq_client_plan_assignments_current",
+        "client_id",
+        unique=True,
+        postgresql_where=text("ended_at IS NULL"),
+        sqlite_where=text("ended_at IS NULL"),
+    ),
+)
+
+# Monthly invoices. One per client and period (the database refuses a second). An invoice carries its
+# own copy of every line (plan name, price, currency, credits, quota, days, amount), so editing a plan
+# afterwards changes nothing already invoiced. `status` is PENDING, PAID or FOR_FREE: a declaration by
+# the Admin, never a payment received.
+invoices = Table(
+    "invoices",
+    metadata,
+    Column("invoice_id", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("period", String(7), nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("amount", Numeric(18, 2), nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("created_by", String(255), nullable=False),
+    Column("status_changed_at", UtcDateTime),
+    Column("status_changed_by", String(255)),
+    UniqueConstraint("client_id", "period", name="uq_invoices_client_period"),
+    Index("ix_invoices_period", "period", "client_id"),
+)
+
+invoice_lines = Table(
+    "invoice_lines",
+    metadata,
+    Column("line_id", Integer, primary_key=True, autoincrement=True),
+    Column("invoice_id", Integer, ForeignKey("invoices.invoice_id"), nullable=False),
+    Column("plan_id", String(64), nullable=False),
+    Column("plan_name", String(80), nullable=False),
+    Column("monthly_price", Numeric(18, 2), nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("included_credits", Integer, nullable=False),
+    Column("daily_quota", Integer, nullable=False),
+    Column("days", Integer, nullable=False),
+    Column("days_in_period", Integer, nullable=False),
+    Column("amount", Numeric(18, 2), nullable=False),
+    Index("ix_invoice_lines_invoice", "invoice_id"),
 )

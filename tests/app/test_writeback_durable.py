@@ -201,11 +201,13 @@ class TestMigration:
         upgrade_database(engine, "0004")
         before = set(inspect(engine).get_table_names())
         assert "op_writeback_ledger" not in before
-        upgrade_database(engine)
-        assert head_revision() == current_revision(engine) == "0005"
+        upgrade_database(engine, "0005")
+        assert current_revision(engine) == "0005"
         after = set(inspect(engine).get_table_names())
         assert after - before == {"op_writeback_ledger"}
-        assert after - {"alembic_version"} == set(metadata.tables)
+        upgrade_database(engine)
+        assert head_revision() == current_revision(engine) == "0009"
+        assert set(inspect(engine).get_table_names()) - {"alembic_version"} == set(metadata.tables)
 
     def test_the_upgrade_keeps_what_was_there(self):
         engine = create_database_engine("sqlite://")

@@ -57,7 +57,9 @@ from sales_app.config_store import ConfigConflictError, ConfigVersion
 from sales_app.config_store.models import CLIENT_ID_PATTERN, thaw_document
 from sales_app.llm_models import check_model
 from sales_app.logs import client_logger
+from sales_app.plans import PlanInactiveError, PlanNotFoundError
 from sales_app.secret_store import client_scope
+from sales_app.sourcing.errors import StoreUnavailableError
 from sales_app.wiring import ClientRuntime
 from sales_app.wiring.providers import ProviderKind, hubspot
 
@@ -177,6 +179,7 @@ class CreateClientRequest(BaseModel):
     llm_model: str = Field(min_length=1)
     status: Literal["active", "inactive"]
     whatsapp_number: str = Field(min_length=1, max_length=40)
+    plan_id: str | None = None  # optional: the plan the client starts on (an active one)
 
 
 class UpdateClientRequest(BaseModel):
@@ -533,6 +536,32 @@ def _find_detail(application: Application, client_id: str) -> ClientDetailRespon
         return None  # not a client directory: 404
     # Disabled, or activated and awaiting a restart: what it will run on is its published settings.
     return _detail_from_raw(client_id, _published_view(application, client_id, raw))
+
+
+def _require_assignable_plan(application: Application, plan_id: str) -> None:
+    """400 unless `plan_id` is an active plan, checked before anything is created."""
+    if application.plans is None:
+        raise HTTPException(503, "plans need the database (set SALES_AGENT_DATABASE_URL)")
+    try:
+        plan = application.plans.get_plan(plan_id)
+    except StoreUnavailableError as error:
+        raise HTTPException(503, str(error)) from None
+    if plan is None:
+        raise HTTPException(400, "no such plan")
+    if not plan.active:
+        raise HTTPException(400, "this plan is deactivated: choose an active plan")
+
+
+def _assign_new_client(application: Application, client_id: str, plan_id: str, actor: str) -> None:
+    assert application.plans is not None  # `_require_assignable_plan`
+    try:
+        application.plans.assign(client_id, plan_id, at=application.clock.now(), by=actor)
+    except (StoreUnavailableError, PlanNotFoundError, PlanInactiveError):
+        raise HTTPException(
+            503,
+            "the client was created but its plan could not be assigned: "
+            "assign it from the client's page",
+        ) from None
 
 
 def _wiring_and_base_document(application: Application, client_id: str) -> tuple[dict, dict] | None:
@@ -1077,6 +1106,8 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             raise HTTPException(400, problem)
         if body.logo is not None:
             _check_logo(body.logo)
+        if body.plan_id is not None:
+            _require_assignable_plan(application, body.plan_id)
         whatsapp_number = _clean_whatsapp_number(body.whatsapp_number)
         if any(
             p.whatsapp_number and _digits(p.whatsapp_number) == _digits(whatsapp_number)
@@ -1115,6 +1146,8 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             shutil.rmtree(directory, ignore_errors=True)
             raise
         application.registry.add_disabled(client_id)
+        if body.plan_id is not None:
+            _assign_new_client(application, client_id, body.plan_id, admin.username)
         return _summary_from_raw(client_id, raw)
 
     @router.put("/clients/{client_id}/llm", response_model=ClientLLMResponse)

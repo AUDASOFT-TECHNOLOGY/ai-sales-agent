@@ -359,7 +359,9 @@ class TestMigration:
         assert not before & OP_TABLES
         upgrade_database(engine, "0004")
         assert current_revision(engine) == "0004"
-        assert head_revision() == "0005"  # the write-back ledger comes after them
+        assert (
+            head_revision() == "0009"
+        )  # the write-back ledger, the LLM usage and prices, the plans and the invoices come after
         assert OP_TABLES <= set(inspect(engine).get_table_names())
         assert OP_TABLES <= set(metadata.tables)
 

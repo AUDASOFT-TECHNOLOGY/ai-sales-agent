@@ -18,6 +18,7 @@ from sales_app.config import ClientConfig
 from sales_app.config.runtime_config import channel_provider_keys
 from sales_app.config.schema import SourceInstance
 from sales_app.inbox import Fetched, InboxPoller
+from sales_app.llm_usage import LLMUsageStore
 from sales_app.settings import Settings
 from sales_app.sourcing.consent import ConsentWriter
 from sales_app.sourcing.ports import OperationalStore, ProspectSource
@@ -77,6 +78,9 @@ class IntegrationBuilders:
     )
     # Writing results back into the sources that ask for it (off unless the deployment says so).
     writeback: WritebackSupport | None = None
+    # One client's LLM usage register, or None when the deployment has no database: calls are then
+    # simply not recorded.
+    llm_usage: Callable[[str], LLMUsageStore] | None = None
 
     # ---- polling the channels that do not call us ------------------------------------------
 
@@ -139,6 +143,7 @@ def default_builders(
     operational_stores: Callable[[str], OperationalStore] | None = None,
     consent: Callable[[str], ConsentWriter] | None = None,
     writeback: WritebackSupport | None = None,
+    llm_usage: Callable[[str], LLMUsageStore] | None = None,
 ) -> IntegrationBuilders:
     """The builders of every provider the runtime can run today (those with a factory).
 
@@ -181,4 +186,5 @@ def default_builders(
         operational_stores=operational_stores,
         consent=consent,
         writeback=writeback,
+        llm_usage=llm_usage,
     )

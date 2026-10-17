@@ -17,6 +17,7 @@ from sales_app.config.runtime_config import (
 )
 from sales_app.config.schema import BrainSection
 from sales_app.errors import ClientNotReadyError, ClientUnavailableError, RuntimeBuildError
+from sales_app.llm_usage import RecordingLLMProvider
 from sales_app.sourcing.composite import CompositeRepository
 from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
@@ -303,6 +304,25 @@ def _build_brain(section: BrainSection, llm: LLMProvider, brains: BrainRegistry 
     return load_brain(section.factory, llm, section.settings)
 
 
+def _record_usage(
+    config: ClientConfig, builders: IntegrationBuilders, llm: LLMProvider
+) -> LLMProvider:
+    """The client's model, recording each call in its usage register. A deployment with no register
+    (no database) gets the model as it is; a register that cannot be opened must not stop the client
+    either."""
+    if builders.llm_usage is None:
+        return llm
+    client_id, section = config.client_id, config.spec.llm
+    try:
+        store = builders.llm_usage(client_id)
+    except Exception as error:  # noqa: BLE001 - recording never blocks the client
+        log.warning("%s: LLM usage not recorded: %s", client_id, error.__class__.__name__)
+        return llm
+    return RecordingLLMProvider(
+        llm, store, client_id=client_id, provider=section.provider, model=section.model
+    )
+
+
 def _require_deployment(config: ClientConfig, builders: IntegrationBuilders, what: str) -> None:
     """What a source apart from the store needs of the deployment, checked before anything is
     built: an operational store and a consent registry."""
@@ -480,6 +500,7 @@ def build_runtime(
         "llm",
         lambda: _choose(client_id, builders.llms, spec.llm.provider, "llm")(config),
     )
+    llm = _record_usage(config, builders, llm)
     brain = _stage(client_id, "brain", lambda: _build_brain(spec.brain, llm, brains))
     channel: MessagingChannel | None = None
     if router is None:

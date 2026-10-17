@@ -11,6 +11,7 @@ from typing import Any
 
 from sales_app.admin_auth import AdminAuthService, AdminSessionStore, AdminUserStore
 from sales_app.agent_state import AgentStateStore, InMemoryAgentStateStore
+from sales_app.billing import InvoiceStore
 from sales_app.channel_policy import ChannelPolicyService
 from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore
@@ -18,9 +19,16 @@ from sales_app.config import build_llm_registry, clamp_mode, load_client_configs
 from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
 from sales_app.config_store import ConfigStore
 from sales_app.errors import ConfigurationError
+from sales_app.llm_pricing import LLMPricingStore
+from sales_app.llm_usage import LLMUsageStore
 from sales_app.parsers import ParserTable, build_parsers
 from sales_app.persistence import AccountStores, build_account_stores
+from sales_app.persistence.invoice_rows import SqlInvoiceStore
+from sales_app.persistence.llm_pricing_rows import SqlLLMPricingStore
+from sales_app.persistence.llm_usage_rows import SqlLLMUsageStore
 from sales_app.persistence.operational_rows import SqlOperationalRows
+from sales_app.persistence.plan_rows import SqlPlanStore
+from sales_app.plans import PlanStore
 from sales_app.registry import ClientRegistry
 from sales_app.runtime_manager import RuntimeManager
 from sales_app.scheduler import Scheduler
@@ -85,6 +93,13 @@ class Application:
     channel_policy: ChannelPolicyService | None = None
     # How each channel is run, kept for what the webhook route needs of it (answering a stranger).
     builders: IntegrationBuilders | None = None
+    # The Admin's price list for model calls; None when the deployment has no database (prices are
+    # then not kept, and the Admin API says so rather than keeping them only in memory).
+    llm_pricing: LLMPricingStore | None = None
+    # The commercial plans and each client's plan; None without a database (the Admin API says so).
+    plans: PlanStore | None = None
+    # The monthly invoices; None without a database (the Admin API says so).
+    invoices: InvoiceStore | None = None
 
     def agent_may_work(self, client_id: str) -> bool:
         """`_may_work`, failing closed: if either switch cannot be read, the answer is no."""
@@ -254,6 +269,7 @@ def _assemble(
             settings.secrets_dir, secrets, audit, client_id
         ),
         writeback=_writeback_support(settings, account_stores),
+        llm_usage=_llm_usage_stores(account_stores),
     )
 
     llm_registry = build_llm_registry(settings.allowed_llm_models)
@@ -325,6 +341,9 @@ def _assemble(
         source_checks=source_checks,
         channel_policy=channel_policy,
         builders=builders,
+        llm_pricing=_llm_pricing_store(account_stores),
+        plans=_plan_store(account_stores),
+        invoices=_invoice_store(account_stores),
     )
 
 
@@ -337,6 +356,32 @@ def _operational_stores(
     if engine is None:
         return None
     return lambda client_id: SqlOperationalStore(SqlOperationalRows(engine, client_id))
+
+
+def _invoice_store(account_stores: AccountStores | None) -> InvoiceStore | None:
+    engine = account_stores.engine if account_stores is not None else None
+    return SqlInvoiceStore(engine) if engine is not None else None
+
+
+def _plan_store(account_stores: AccountStores | None) -> PlanStore | None:
+    engine = account_stores.engine if account_stores is not None else None
+    return SqlPlanStore(engine) if engine is not None else None
+
+
+def _llm_pricing_store(account_stores: AccountStores | None) -> LLMPricingStore | None:
+    engine = account_stores.engine if account_stores is not None else None
+    return SqlLLMPricingStore(engine) if engine is not None else None
+
+
+def _llm_usage_stores(
+    account_stores: AccountStores | None,
+) -> Callable[[str], LLMUsageStore] | None:
+    """One client's LLM usage register in the deployment's database; None without one (calls are
+    then not recorded)."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None
+    return lambda client_id: SqlLLMUsageStore(engine, client_id)
 
 
 def _writeback_support(
