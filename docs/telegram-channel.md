@@ -126,8 +126,11 @@ The chat id is the one contact detail Revansa *learns* rather than being given, 
   in `SENDING` for a human (the outcome is partly unknown).
 - **No templates.** A WhatsApp template draft has nothing to say on Telegram and is refused.
 - **No reply threading.** Replies are not sent as Telegram "replies" to a given message.
-- **No user interface.** The Client API is complete; the web console is still a prototype with no
-  channel screen (e-mail has none either).
+- **Interface scope.** The Client console has a channel page
+  (`web/src/client/ClientChannelPage.tsx`): choose Telegram, edit the bot's sentences, save the token
+  (write-only), **Connect**, **Test**, and see the waiting prospects with their invitation links. The
+  agent is started from the agent page (`ClientAgentPage.tsx`), which lists what is still missing. It
+  covers the Client API above and nothing more; it has not been validated against a real bot.
 - **Webhook only.** Telegram refuses a bot webhook and polling at once: a bot connected here cannot
   also be read by another program with `getUpdates`.
 - **A bot's token can be moved to another deployment only by connecting it again there** (it takes
