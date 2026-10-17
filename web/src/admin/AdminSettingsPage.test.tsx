@@ -312,3 +312,130 @@ describe("AdminSettingsPage", () => {
     expect(screen.getByRole("note")).toHaveTextContent(/Only an owner/);
   });
 });
+
+const EMAIL_KEYS: [string, string][] = [
+  ["email.platform_domain", "Platform mail domain"],
+  ["email.platform_smtp_host", "Platform SMTP host"],
+  ["email.platform_smtp_port", "Platform SMTP port"],
+  ["email.platform_smtp_security", "Platform SMTP security"],
+  ["email.platform_imap_host", "Platform IMAP host"],
+  ["email.platform_imap_port", "Platform IMAP port"],
+  ["email.platform_imap_security", "Platform IMAP security"],
+];
+
+function emailList(over: Record<string, Record<string, unknown>> = {}) {
+  return EMAIL_KEYS.map(([key, label]) => cred(key, label, { sensitive: false, ...(over[key] ?? {}) }));
+}
+
+describe("AdminSettingsPage — Email servers", () => {
+  it("shows the seven server settings, with the stored values since none is secret", async () => {
+    stubFetch({
+      global: [
+        ...globalList(),
+        ...emailList({ "email.platform_smtp_host": { configured: true, value: "smtp.example.org" } }),
+      ],
+    });
+    renderApp();
+    const email = await section("Email servers");
+    for (const label of ["Mail domain", "SMTP host", "SMTP port", "SMTP security", "IMAP host", "IMAP port", "IMAP security"]) {
+      expect(await email.findByLabelText(label)).toBeInTheDocument();
+    }
+    const host = email.getByLabelText("SMTP host") as HTMLInputElement;
+    expect(host.type).toBe("text");
+    expect(host.value).toBe("smtp.example.org");
+    expect((email.getByLabelText("SMTP port") as HTMLInputElement).type).toBe("text");
+  });
+
+  it("says mailboxes are assigned one by one, and promises nothing automatic", async () => {
+    stubFetch({ global: [...globalList(), ...emailList()] });
+    renderApp();
+    const email = await section("Email servers");
+    expect(await email.findByText(/Mailboxes are assigned to clients one by one by an administrator/)).toBeInTheDocument();
+    const card = (await screen.findByRole("heading", { name: "Email servers" })).closest(".admin-settings__card") as HTMLElement;
+    expect(card.textContent).not.toMatch(/automatic|provision/i);
+  });
+
+  it("saves a setting with the version-free credential endpoint", async () => {
+    const saved = cred("email.platform_smtp_port", "Platform SMTP port", { sensitive: false, configured: true, value: "587" });
+    const fetchMock = stubFetch({
+      global: [...globalList(), ...emailList()],
+      routes: { "PUT /admin/v1/settings/integrations/email.platform_smtp_port": () => jsonResponse(200, saved) },
+    });
+    renderApp();
+    const user = userEvent.setup();
+    const email = await section("Email servers");
+    await user.type(await email.findByLabelText("SMTP port"), "587");
+    const row = (email.getByLabelText("SMTP port").closest("div.admin-settings__row") as HTMLElement) ?? undefined;
+    await user.click(within(row).getByRole("button", { name: "Save" }));
+    expect(await email.findAllByText("Configured")).not.toHaveLength(0);
+    const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+    expect(put?.[0]).toMatch(/\/settings\/integrations\/email\.platform_smtp_port$/);
+    expect(put?.[1]?.body).toBe(JSON.stringify({ value: "587" }));
+  });
+
+  it("shows a refused value with the server's rule", async () => {
+    stubFetch({
+      global: [...globalList(), ...emailList()],
+      routes: {
+        "PUT /admin/v1/settings/integrations/email.platform_smtp_port": () =>
+          jsonResponse(422, { detail: "Platform SMTP port must be 25, 465, 587 or 2525" }),
+      },
+    });
+    renderApp();
+    const user = userEvent.setup();
+    const email = await section("Email servers");
+    await user.type(await email.findByLabelText("SMTP port"), "80");
+    const row = email.getByLabelText("SMTP port").closest("div.admin-settings__row") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Save" }));
+    expect(await email.findByText(/must be 25, 465, 587 or 2525/)).toBeInTheDocument();
+  });
+
+  it("shows exactly what the check answered when the servers answer", async () => {
+    stubFetch({
+      global: [...globalList(), ...emailList()],
+      routes: {
+        "POST /admin/v1/settings/integrations/email/test": () =>
+          jsonResponse(200, {
+            ok: true,
+            message: "Email servers: both answered over an encrypted connection. No login was attempted and no message was sent.",
+            details: { smtp: "ok", imap: "ok" },
+          }),
+      },
+    });
+    renderApp();
+    const user = userEvent.setup();
+    const email = await section("Email servers");
+    await user.click(await email.findByRole("button", { name: "Test servers" }));
+    expect(await email.findByText(/Connection OK\. Email servers: both answered/)).toBeInTheDocument();
+    expect(email.getByText("smtp: ok")).toBeInTheDocument();
+    expect(email.getByText("imap: ok")).toBeInTheDocument();
+    expect(email.getByText(/does not log in and sends or reads no message/)).toBeInTheDocument();
+  });
+
+  it("reports a failed check as a failure, with the server and the kind", async () => {
+    stubFetch({
+      global: [...globalList(), ...emailList()],
+      routes: {
+        "POST /admin/v1/settings/integrations/email/test": () =>
+          jsonResponse(200, {
+            ok: false,
+            message: "Email servers: IMAP: this server cannot be used (it is not a public mail server).",
+            details: { smtp: "ok", imap: "refused" },
+          }),
+      },
+    });
+    renderApp();
+    const user = userEvent.setup();
+    const email = await section("Email servers");
+    await user.click(await email.findByRole("button", { name: "Test servers" }));
+    expect(await email.findByText(/Connection failed\. Email servers: IMAP/)).toBeInTheDocument();
+    expect(email.getByText("imap: refused")).toBeInTheDocument();
+  });
+
+  it("is read-only for a role other than owner", async () => {
+    stubFetch({ role: "editor", global: [...globalList(), ...emailList()] });
+    renderApp();
+    const email = await section("Email servers");
+    expect(await email.findByLabelText("SMTP host")).toBeDisabled();
+  });
+});

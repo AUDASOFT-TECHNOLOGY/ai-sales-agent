@@ -17,12 +17,17 @@ import { useAdminAuth } from "../AdminAuthContext";
 import {
   AdminApiError,
   adminGetClient,
+  adminGetClientPlan,
   adminGetLLMSettings,
+  adminListPlans,
+  adminSetClientPlan,
   adminUpdateClient,
   adminUpdateClientLLM,
   type ClientDetail,
   type ClientLLM,
+  type ClientPlan,
   type LLMSettings,
+  type Plan,
   type UpdateClientRequest,
 } from "../api";
 
@@ -32,6 +37,9 @@ const CAN_EDIT_LLM_ROLES = new Set(["owner"]);
 
 // Mirrors require_owner on PATCH /clients/:id: only an owner may edit a client's profile.
 const CAN_EDIT_CLIENT_ROLES = new Set(["owner"]);
+
+// Mirrors require_owner on PUT /clients/:id/plan: only an owner puts a client on a plan.
+const CAN_EDIT_PLAN_ROLES = new Set(["owner"]);
 
 const MAX_LOGO_BYTES = 256 * 1024;
 
@@ -275,6 +283,11 @@ function ClientSheet({
             onUpdated={onLLMUpdated}
           />
         </Glass>
+
+        <Glass level={1} className="admin-detail-card">
+          <h3 className="t-label c-2">Plan</h3>
+          <ClientPlanCard clientId={client.client_id} />
+        </Glass>
       </div>
     </>
   );
@@ -346,6 +359,121 @@ function modelOptions(settings: LLMSettings): ModelOption[] {
  *  explicitly enabled for a provider wired in this deployment. Nothing is hard-coded here and this
  *  form cannot add a model -- that belongs to Settings. A provider without an allow-list contributes
  *  no option. Never shows or asks for an API key. */
+/** The client's plan (GET/PUT /admin/v1/clients/:id/plan). What is shown is the assignment: the
+ *  terms as they were when the client was put on the plan, which a later edit of the plan does not
+ *  change. Only an owner assigns. */
+function ClientPlanCard({ clientId }: { clientId: string }) {
+  const { admin } = useAdminAuth();
+  const canEdit = admin !== null && CAN_EDIT_PLAN_ROLES.has(admin.role);
+  const selectId = useId();
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [plan, setPlan] = useState<ClientPlan | null>(null);
+  const [state, setState] = useState<LoadState>("loading");
+  const [selected, setSelected] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([adminGetClientPlan(clientId), adminListPlans()])
+      .then(([assignment, list]) => {
+        if (cancelled) return;
+        setPlan(assignment);
+        setPlans(list);
+        setSelected(assignment.current?.plan_id ?? "");
+        setState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  if (state === "loading") return <p className="c-2 t-body-sm">Loading…</p>;
+  if (state === "error" || !plan)
+    return <p className="admin-alert admin-alert--danger">Could not load the client&apos;s plan.</p>;
+
+  const current = plan.current;
+  const currentId = current?.plan_id ?? "";
+  // The current plan stays selectable even if it was switched off since: say so rather than hide it.
+  const options = plans.filter((p) => p.active || p.plan_id === currentId);
+  const dirty = selected !== currentId;
+
+  async function onSave() {
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      const updated = await adminSetClientPlan(clientId, selected || null);
+      setPlan(updated);
+      setSelected(updated.current?.plan_id ?? "");
+      setSaved(true);
+    } catch (err) {
+      setSaveError(err instanceof AdminApiError ? err.message : "Could not update the plan.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="admin-llm-config">
+      <p className="admin-detail-card__value">{current ? current.plan_name : NOT_AVAILABLE}</p>
+      {current ? (
+        <dl>
+          <Field label="Monthly price" value={`${current.monthly_price} ${current.currency}`} />
+          <Field label="Included credits" value={String(current.included_credits)} />
+          <Field label="Daily quota" value={String(current.daily_quota)} />
+          <Field label="Since" value={new Date(current.started_at).toLocaleDateString()} />
+        </dl>
+      ) : (
+        <p className="c-3 t-body-sm">This client is not on a plan.</p>
+      )}
+      <FieldShell id={selectId} label="Plan">
+        <select
+          id={selectId}
+          className="input well"
+          value={selected}
+          disabled={!canEdit}
+          onChange={(e) => {
+            setSelected(e.target.value);
+            setSaved(false);
+          }}
+        >
+          <option value="">Aucun plan</option>
+          {options.map((p) => (
+            <option key={p.plan_id} value={p.plan_id}>
+              {p.active ? p.name : `${p.name} (inactive)`}
+            </option>
+          ))}
+        </select>
+      </FieldShell>
+      {saveError ? (
+        <p className="admin-alert admin-alert--danger" role="alert">
+          {saveError}
+        </p>
+      ) : null}
+      {saved ? (
+        <p className="admin-alert admin-alert--success" role="status">
+          Saved.
+        </p>
+      ) : null}
+      <Button
+        variant="primary"
+        size="sm"
+        loading={saving}
+        disabled={!dirty}
+        disabledReason={!canEdit ? "Only an owner can change a client's plan." : undefined}
+        onClick={onSave}
+      >
+        Save plan
+      </Button>
+    </div>
+  );
+}
+
 function LLMModelForm({
   clientId,
   llm,

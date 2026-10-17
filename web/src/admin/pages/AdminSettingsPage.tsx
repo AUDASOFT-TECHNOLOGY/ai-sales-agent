@@ -5,6 +5,8 @@
  *  - Meta / WhatsApp Cloud API: Revansa-wide only (app secret, verify token, API version). A
  *    client's own access token and phone number id come from the WhatsApp onboarding of that client's
  *    number, not from this page; the phone number id is Meta's id, NOT the client's WhatsApp number.
+ *  - Email: the servers of the mailboxes Revansa provides. Only the servers are described here;
+ *    which mailbox a client gets is decided client by client, elsewhere.
  *  - Muse Spark: no adapter exists in the backend yet, so nothing can be configured; it says so.
  *
  *  Everything is stored by the backend's credential store. A sensitive value is write-only: it is
@@ -24,6 +26,7 @@ import {
   adminAddOpenAIModel,
   adminDeleteOpenAIModel,
   adminListOpenAIModels,
+  adminTestEmailServers,
   adminTestOpenAI,
   adminUpdateOpenAIModel,
   type ConnectionTest,
@@ -40,6 +43,16 @@ interface FieldDef {
 
 const OPENAI_FIELDS: FieldDef[] = [
   { key: "openai.api_key", label: "API Key", help: "Stored encrypted. Never shown again once saved." },
+];
+
+const EMAIL_FIELDS: FieldDef[] = [
+  { key: "email.platform_domain", label: "Mail domain", help: "The domain of the mailboxes Revansa provides.", placeholder: "mail.example.com" },
+  { key: "email.platform_smtp_host", label: "SMTP host", help: "The server messages are sent through.", placeholder: "smtp.example.com" },
+  { key: "email.platform_smtp_port", label: "SMTP port", help: "25, 465, 587 or 2525.", placeholder: "587" },
+  { key: "email.platform_smtp_security", label: "SMTP security", help: "starttls or ssl. A mailbox is never reached in the clear.", placeholder: "starttls" },
+  { key: "email.platform_imap_host", label: "IMAP host", help: "The server replies are read from.", placeholder: "imap.example.com" },
+  { key: "email.platform_imap_port", label: "IMAP port", help: "143 or 993.", placeholder: "993" },
+  { key: "email.platform_imap_security", label: "IMAP security", help: "ssl or starttls.", placeholder: "ssl" },
 ];
 
 const META_GLOBAL_FIELDS: FieldDef[] = [
@@ -61,6 +74,7 @@ export function AdminSettingsPage() {
       </Glass>
       <OpenAISection canEdit={canEdit} />
       <MetaSection canEdit={canEdit} />
+      <EmailSection canEdit={canEdit} />
       <MuseSparkSection />
     </div>
   );
@@ -305,6 +319,31 @@ function MetaSection({ canEdit }: { canEdit: boolean }) {
       <p className="c-3 t-body-sm">
         A client&apos;s own Meta credentials are not entered here: they come from the WhatsApp onboarding of that client&apos;s
         number.
+      </p>
+    </Glass>
+  );
+}
+
+// ---- Email ----------------------------------------------------------------------------------
+
+function EmailSection({ canEdit }: { canEdit: boolean }) {
+  const store = useGlobalCredentials();
+  return (
+    <Glass level={1} className="admin-settings__card" aria-labelledby="settings-email">
+      <div className="admin-settings__head">
+        <h2 className="t-h2" id="settings-email">
+          Email servers
+        </h2>
+      </div>
+      <p className="c-2 t-body-sm">
+        The servers of the mailboxes Revansa provides. Mailboxes are assigned to clients one by one by an administrator; this
+        page only describes the servers.
+      </p>
+      <CredentialGroup store={store} fields={EMAIL_FIELDS} canEdit={canEdit} />
+      <TestButton label="Test servers" run={adminTestEmailServers} />
+      <p className="c-3 t-body-sm">
+        The test opens an encrypted connection to each server and closes it. It does not log in and sends or reads no message,
+        so it does not prove that a mailbox works.
       </p>
     </Glass>
   );

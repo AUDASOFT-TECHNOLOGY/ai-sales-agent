@@ -197,6 +197,8 @@ export interface CreateClientRequest {
   llm_model: string;
   status: "active" | "inactive";
   whatsapp_number: string;
+  /** Optional: the (active) plan the client starts on. */
+  plan_id?: string | null;
 }
 
 // POST /admin/v1/clients (owner only). The WhatsApp number is profile data; it grants no Meta access.
@@ -370,6 +372,11 @@ export function adminTestOpenAI(): Promise<ConnectionTest> {
   return request<ConnectionTest>("/settings/integrations/openai/test", { method: "POST" });
 }
 
+// Reaches the platform mail servers over an encrypted connection and closes it: no login, no message.
+export function adminTestEmailServers(): Promise<ConnectionTest> {
+  return request<ConnectionTest>("/settings/integrations/email/test", { method: "POST" });
+}
+
 export function adminTestClientWhatsApp(clientId: string): Promise<ConnectionTest> {
   return request<ConnectionTest>(`/clients/${encodeURIComponent(clientId)}/integrations/whatsapp/test`, {
     method: "POST",
@@ -400,4 +407,142 @@ export async function adminUpdateOpenAIModel(currentId: string, model: OpenAIMod
 
 export async function adminDeleteOpenAIModel(id: string): Promise<OpenAIModel[]> {
   return (await request<{ models: OpenAIModel[] }>(modelPath(id), { method: "DELETE" })).models;
+}
+
+// ---- commercial plans (src/sales_app/api/admin_plans.py) ------------------------------------------
+// Amounts are decimal strings, never floats. Reading is open to every admin; creating, changing,
+// deactivating and assigning need an owner. A plan is deactivated, never deleted.
+
+export interface Plan {
+  plan_id: string;
+  name: string;
+  monthly_price: string;
+  currency: string;
+  included_credits: number;
+  daily_quota: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  updated_by: string;
+  /** Clients currently on this plan, among those the signed-in admin can reach. */
+  client_count: number;
+}
+
+export interface PlanInput {
+  name: string;
+  monthly_price: string;
+  currency: string;
+  included_credits: number;
+  daily_quota: number;
+  active: boolean;
+}
+
+/** The terms as they were when the client was put on the plan, not as the plan is today. */
+export interface PlanAssignment {
+  plan_id: string;
+  plan_name: string;
+  monthly_price: string;
+  currency: string;
+  included_credits: number;
+  daily_quota: number;
+  started_at: string;
+  ended_at: string | null;
+  assigned_by: string;
+}
+
+export interface ClientPlan {
+  client_id: string;
+  current: PlanAssignment | null;
+  history: PlanAssignment[];
+}
+
+export async function adminListPlans(): Promise<Plan[]> {
+  return (await request<{ plans: Plan[] }>("/plans")).plans;
+}
+
+export function adminCreatePlan(body: PlanInput): Promise<Plan> {
+  return request<Plan>("/plans", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function adminUpdatePlan(planId: string, body: PlanInput): Promise<Plan> {
+  return request<Plan>(`/plans/${encodeURIComponent(planId)}`, { method: "PUT", body: JSON.stringify(body) });
+}
+
+export function adminGetClientPlan(clientId: string): Promise<ClientPlan> {
+  return request<ClientPlan>(`/clients/${encodeURIComponent(clientId)}/plan`);
+}
+
+/** `planId: null` takes the client off any plan. */
+export function adminSetClientPlan(clientId: string, planId: string | null): Promise<ClientPlan> {
+  return request<ClientPlan>(`/clients/${encodeURIComponent(clientId)}/plan`, {
+    method: "PUT",
+    body: JSON.stringify({ plan_id: planId }),
+  });
+}
+
+// ---- monthly invoices (src/sales_app/api/admin_billing.py) ----------------------------------------
+// Amounts are decimal strings. An invoice carries its own copy of the plan terms it was built from,
+// so it never changes when a plan does. PAID / FOR_FREE are the Admin's declaration (once, owner
+// only): no payment is collected or checked.
+
+export type InvoiceStatus = "PENDING" | "PAID" | "FOR_FREE";
+
+export interface InvoiceLine {
+  plan_id: string;
+  plan_name: string;
+  monthly_price: string;
+  currency: string;
+  included_credits: number;
+  daily_quota: number;
+  days: number;
+  days_in_period: number;
+  amount: string;
+}
+
+export interface Invoice {
+  invoice_id: number;
+  number: string;
+  client_id: string;
+  period: string;
+  currency: string;
+  amount: string;
+  status: InvoiceStatus;
+  lines: InvoiceLine[];
+  created_at: string;
+  created_by: string;
+  status_changed_at: string | null;
+  status_changed_by: string | null;
+}
+
+export interface InvoiceFilters {
+  client_id?: string;
+  /** One month, YYYY-MM; takes the place of the range. */
+  period?: string;
+  period_from?: string;
+  period_to?: string;
+  status?: InvoiceStatus;
+}
+
+export interface GenerateInvoicesResult {
+  period: string;
+  created: Invoice[];
+  already_invoiced: number;
+  skipped: { client_id: string; reason: string }[];
+}
+
+export async function adminListInvoices(filters: InvoiceFilters = {}): Promise<Invoice[]> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) query.set(key, value);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return (await request<{ invoices: Invoice[] }>(`/billing/invoices${suffix}`)).invoices;
+}
+
+export function adminGenerateInvoices(period: string): Promise<GenerateInvoicesResult> {
+  return request<GenerateInvoicesResult>("/billing/invoices/generate", { method: "POST", body: JSON.stringify({ period }) });
+}
+
+export function adminSettleInvoice(invoiceId: number, status: "PAID" | "FOR_FREE"): Promise<Invoice> {
+  return request<Invoice>(`/billing/invoices/${invoiceId}/status`, { method: "PUT", body: JSON.stringify({ status }) });
 }

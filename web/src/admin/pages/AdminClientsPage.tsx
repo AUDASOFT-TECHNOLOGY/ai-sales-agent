@@ -16,8 +16,10 @@ import {
   adminCreateClient,
   adminGetLLMSettings,
   adminListClients,
+  adminListPlans,
   type ClientSummary,
   type LLMSettings,
+  type Plan,
 } from "../api";
 
 type LoadState = "loading" | "ready" | "error";
@@ -142,6 +144,8 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
   const [model, setModel] = useState("");
   const [status, setStatus] = useState<"active" | "inactive">("inactive");
   const [whatsappNumber, setWhatsappNumber] = useState("");
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [planId, setPlanId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -160,6 +164,19 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
       .catch(() => {
         if (!cancelled) setSettingsFailed(true);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The plan is optional: when the plans cannot be loaded the client is simply created without one.
+  useEffect(() => {
+    let cancelled = false;
+    adminListPlans()
+      .then((data) => {
+        if (!cancelled) setPlans(data.filter((p) => p.active));
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -212,6 +229,7 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
         llm_model: model.trim(),
         status,
         whatsapp_number: whatsappNumber.trim(),
+        ...(planId ? { plan_id: planId } : {}),
       });
       onCreated(created);
     } catch (err) {
@@ -316,6 +334,17 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
           autoComplete="off"
           helper="Le numéro que l'agent commercial utilisera avec les prospects."
         />
+
+        {plans.length > 0 ? (
+          <SelectField label="Plan" value={planId} onChange={setPlanId}>
+            <option value="">Aucun plan</option>
+            {plans.map((p) => (
+              <option key={p.plan_id} value={p.plan_id}>
+                {p.name} — {p.monthly_price} {p.currency}
+              </option>
+            ))}
+          </SelectField>
+        ) : null}
 
         {error ? (
           <p className="admin-alert admin-alert--danger" role="alert">
