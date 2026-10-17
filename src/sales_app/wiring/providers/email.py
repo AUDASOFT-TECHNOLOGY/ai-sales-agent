@@ -13,10 +13,12 @@ import contextlib
 import smtplib
 
 from sales_app.config import ClientConfig
-from sales_app.config.email_settings import EmailChannelSettings
-from sales_app.config.secrets import EMAIL_PASSWORD
+from sales_app.config.email_settings import EmailChannelSettings, EmailSettingsOfAnyMode
+from sales_app.config.secrets import EMAIL_PASSWORD, EMAIL_PLATFORM_MAILBOX
 from sales_app.connection_tests import MailProbeFailure
+from sales_app.mailbox_access import imap_settings, resolve_mailbox, smtp_settings
 from sales_app.secret_store import ScopeKind
+from sales_app.secret_store.catalog import MAILBOX_ADDRESS, MAILBOX_ADDRESS_RULE
 from sales_app.wiring.providers.types import (
     ChannelSupport,
     CredentialDeclaration,
@@ -26,12 +28,10 @@ from sales_app.wiring.providers.types import (
 )
 from sales_integrations.mail import (
     ImapMailbox,
-    ImapSettings,
     MailAuthError,
     MailChannel,
     MailError,
     MailHostRefusedError,
-    SmtpSettings,
     open_imap,
     open_smtp,
 )
@@ -40,45 +40,12 @@ KEY = "email"
 CHANNEL_KIND = "email"  # the Core's name for this channel
 
 
-def _settings(config: ClientConfig) -> EmailChannelSettings:
-    return EmailChannelSettings.model_validate(config.spec.channel_settings_for(KEY))
-
-
-def smtp_settings(settings: EmailChannelSettings, password: str) -> SmtpSettings:
-    return SmtpSettings(
-        host=settings.smtp_host,
-        port=settings.smtp_port,
-        security=settings.smtp_security,
-        username=settings.username,
-        password=password,
-        from_address=settings.from_address,
-        from_name=settings.from_name,
-        subject=settings.subject,
-    )
-
-
-def imap_settings(settings: EmailChannelSettings, password: str) -> ImapSettings:
-    return ImapSettings(
-        host=settings.imap_host,
-        port=settings.imap_port,
-        security=settings.imap_security,
-        username=settings.username,
-        password=password,
-        mailbox=settings.mailbox,
-        own_addresses=(settings.from_address, settings.username),
-    )
-
-
 def build_channel(config: ClientConfig, *, smtp_factory=open_smtp) -> MailChannel:
-    return MailChannel(
-        smtp_settings(_settings(config), config.secrets.get(EMAIL_PASSWORD)), factory=smtp_factory
-    )
+    return MailChannel(resolve_mailbox(config).smtp, factory=smtp_factory)
 
 
 def build_inbox(config: ClientConfig, *, imap_factory=open_imap) -> ImapMailbox:
-    return ImapMailbox(
-        imap_settings(_settings(config), config.secrets.get(EMAIL_PASSWORD)), factory=imap_factory
-    )
+    return ImapMailbox(resolve_mailbox(config).imap, factory=imap_factory)
 
 
 class MailProbe:
@@ -141,13 +108,23 @@ DESCRIPTOR = ProviderDescriptor(
     key=KEY,
     kind=ProviderKind.CHANNEL,
     label="Email",
-    settings_models={ProviderKind.CHANNEL: EmailChannelSettings},
+    settings_models={ProviderKind.CHANNEL: EmailSettingsOfAnyMode},
     credentials=(
         CredentialDeclaration(
             key=EMAIL_PASSWORD,
             label="Email password",
             scope=ScopeKind.CLIENT,
             required_when=Requirement.LIVE,
+        ),
+        CredentialDeclaration(
+            key=EMAIL_PLATFORM_MAILBOX,
+            label="Email mailbox",
+            scope=ScopeKind.CLIENT,
+            sensitive=False,
+            required_when=Requirement.OPTIONAL,  # only a client in `platform` mode needs one
+            unique=True,
+            pattern=MAILBOX_ADDRESS,
+            rule=MAILBOX_ADDRESS_RULE,
         ),
     ),
     connection_keys=(EMAIL_PASSWORD,),

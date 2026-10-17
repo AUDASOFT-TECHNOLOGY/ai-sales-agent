@@ -164,6 +164,13 @@ class TestGlobalCredentials:
             "whatsapp.verify_token",
             "whatsapp.app_secret",
             "whatsapp.api_version",
+            "email.platform_domain",
+            "email.platform_smtp_host",
+            "email.platform_smtp_port",
+            "email.platform_smtp_security",
+            "email.platform_imap_host",
+            "email.platform_imap_port",
+            "email.platform_imap_security",
         }
         assert all(c["configured"] is False and c["value"] is None for c in body)
         assert all(c["scope"] == "global" for c in body)
@@ -258,6 +265,7 @@ class TestClientCredentials:
             "whatsapp.phone_number_id",
             "hubspot.access_token",
             "email.password",
+            "email.platform_mailbox",
             "telegram.bot_token",
             "telegram.webhook_secret",
         }

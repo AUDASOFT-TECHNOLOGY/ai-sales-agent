@@ -20,12 +20,18 @@ from sales_core.approval import ApprovalMode
 from sales_core.contracts import (
     ActionStatus,
     Channel,
+    ContactInfo,
     Direction,
     InboundMessage,
     ProspectId,
     ProspectStatus,
 )
-from sales_core.engine import EngineConfig, InboundStatus
+from sales_core.engine import (
+    EngineConfig,
+    InboundPolicy,
+    InboundStatus,
+    UnknownSenderPolicy,
+)
 
 
 def handle(h, message=None, **kw):
@@ -337,3 +343,56 @@ def test_engine_config_rejects_invalid_values():
         EngineConfig(mode=ApprovalMode.APPROVAL, max_attempts=0)
     with pytest.raises(ValueError, match="daily_action_limit"):
         EngineConfig(mode=ApprovalMode.APPROVAL, daily_action_limit=-1)
+
+
+class TestKnowsInboundSender:
+    """A question a reader of someone's own mailbox asks before letting a message through."""
+
+    def email_prospect(self, pid="p1", address="Alex@Example.com"):
+        return prospect(
+            pid,
+            contact=ContactInfo(
+                phone=phone_for(pid), email=address, preferred_channel=Channel.EMAIL
+            ),
+        )
+
+    def test_a_prospect_is_known_by_the_address_it_writes_from_whatever_its_case(self):
+        h = build(prospects=[self.email_prospect()])
+        assert h.engine.knows_inbound_sender(Channel.EMAIL, "alex@example.com") is True
+        assert h.engine.knows_inbound_sender(Channel.EMAIL, " ALEX@EXAMPLE.COM ") is True
+
+    def test_a_stranger_is_not_known(self):
+        h = build(prospects=[self.email_prospect()])
+        assert h.engine.knows_inbound_sender(Channel.EMAIL, "stranger@elsewhere.example") is False
+
+    def test_an_identity_is_known_on_its_own_channel(self):
+        h = build(prospects=[self.email_prospect()])
+        assert h.engine.knows_inbound_sender(Channel.WHATSAPP, phone_for("p1")) is True
+        assert h.engine.knows_inbound_sender(Channel.WHATSAPP, "+19998887777") is False
+
+    def test_it_only_asks_it_stores_nothing_and_audits_nothing(self):
+        h = build(prospects=[self.email_prospect()])
+        h.engine.knows_inbound_sender(Channel.EMAIL, "alex@example.com")
+        h.engine.knows_inbound_sender(Channel.EMAIL, "stranger@elsewhere.example")
+        assert h.repo.messages == () and h.event_types() == []
+        assert h.repo.list_actions() == [] and h.brain.calls == []
+
+    def test_a_policy_that_would_engage_strangers_does_not_make_one_known(self):
+        policy = InboundPolicy(
+            spontaneous_conversations=True, unknown_sender=UnknownSenderPolicy.ENGAGE
+        )
+        h = build(prospects=[self.email_prospect()], inbound=policy)
+        assert h.engine.knows_inbound_sender(Channel.EMAIL, "stranger@elsewhere.example") is False
+        assert h.repo.find_prospect_by_contact(email="stranger@elsewhere.example") is None
+        assert h.event_types() == []
+
+    def test_receiving_is_unchanged(self):
+        h = build(prospects=[self.email_prospect()])
+        receipt = h.engine.receive_inbound(
+            inbound("Hi", sender="alex@example.com", channel=Channel.EMAIL, external_id="m1")
+        )
+        assert receipt.status is InboundStatus.STORED and receipt.prospect_id == "p1"
+        stranger = h.engine.receive_inbound(
+            inbound("Hi", sender="x@elsewhere.example", channel=Channel.EMAIL, external_id="m2")
+        )
+        assert stranger.status is InboundStatus.UNKNOWN_SENDER

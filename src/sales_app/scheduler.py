@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from sales_app.config import ClientConfig
 from sales_app.errors import ClientNotReadyError
-from sales_app.inbox import InboxPoller, poll_inbox
+from sales_app.inbox import InboxPoller, PositionStore, poll_inbox
 from sales_app.logs import client_logger
 from sales_app.registry import ClientRegistry
 from sales_app.wiring import ClientRuntime
@@ -70,11 +70,13 @@ class Scheduler:
         inbox: InboxSupport | None = None,
         inbox_every_minutes: int = INBOX_EVERY_MINUTES,
         sync_every_minutes: int = SYNC_EVERY_MINUTES,
+        mail_cursors: Callable[[str], PositionStore] | None = None,
     ) -> None:
         self._registry = registry
         self._clock = clock
         self._may_run = may_run  # the client's own switch; None: nothing to ask
         self._inbox = inbox
+        self._mail_cursors = mail_cursors  # one client's positions; None: no database
         self._inbox_every = inbox_every_minutes
         self._sync_every = sync_every_minutes
         self._executor = executor
@@ -290,6 +292,12 @@ class Scheduler:
         assert self._inbox is not None
         poller = self._inbox.open_inbox(runtime.config)
         try:
+            if getattr(poller, "needs_cursor", False):
+                # A deployment with no database keeps no position: the reader then refuses to read
+                # (it would lose messages or read them twice), and the job fails with that reason.
+                poller.use_cursor(  # type: ignore[attr-defined]
+                    self._mail_cursors(runtime.config.client_id) if self._mail_cursors else None
+                )
             return poll_inbox(engine, poller)
         finally:
             poller.close()

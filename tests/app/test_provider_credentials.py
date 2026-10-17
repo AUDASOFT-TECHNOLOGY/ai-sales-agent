@@ -52,6 +52,18 @@ REGISTRY = default_registry()
 CATALOG_BY_KEY = {spec.key: spec for spec in CATALOG}
 # Model lists live in the credential store but are model-catalogue data, not a provider credential.
 MODEL_LIST_KEYS = {"openai.model_sol", "openai.model_lune", "openai.models"}
+# The platform mail server profile (Admin → Settings → Email): global, non-secret settings of
+# Revansa's own mail servers. Stored like credentials, but no provider declares them: the email
+# provider's credentials are the client's own (`email.password`).
+PLATFORM_MAIL_KEYS = {
+    "email.platform_domain",
+    "email.platform_smtp_host",
+    "email.platform_smtp_port",
+    "email.platform_smtp_security",
+    "email.platform_imap_host",
+    "email.platform_imap_port",
+    "email.platform_imap_security",
+}
 # Declared by a descriptor, not yet storable through the Admin API (the catalog does not list them).
 NOT_YET_IN_CATALOG = {"meta.api_key", "meta.base_url"}
 SRC = Path(__file__).resolve().parents[2] / "src"
@@ -65,6 +77,7 @@ EXPECTED = {
     "whatsapp.access_token": ("whatsapp", ScopeKind.CLIENT, True, Requirement.LIVE, False),
     "whatsapp.phone_number_id": ("whatsapp", ScopeKind.CLIENT, False, Requirement.LIVE, True),
     "email.password": ("email", ScopeKind.CLIENT, True, Requirement.LIVE, False),
+    "email.platform_mailbox": ("email", ScopeKind.CLIENT, False, Requirement.OPTIONAL, True),
     "telegram.bot_token": ("telegram", ScopeKind.CLIENT, True, Requirement.LIVE, False),
     "telegram.webhook_secret": ("telegram", ScopeKind.CLIENT, True, Requirement.LIVE, False),
     "openai.api_key": ("openai", ScopeKind.GLOBAL, True, Requirement.ALWAYS, False),
@@ -83,6 +96,10 @@ VALUES = {
     "whatsapp.access_token": ("EAAB-token", [""]),
     "whatsapp.phone_number_id": ("123456789012345", ["abc", "1234", "12 345 678", "1" * 33]),
     "email.password": ("a-mailbox-password", [""]),
+    "email.platform_mailbox": (
+        "alpha@mail.example.org",
+        ["", "no-at-sign", "a b@example.org", "a@b", "<a@example.org>"],
+    ),
     "telegram.bot_token": (
         "123456789:AAH-secret-token-value-of-the-bot_xx",
         ["", "not-a-token", "123:short", "abc:AAH-secret-token-value-of-the-bot_xx", "1:2"],
@@ -164,11 +181,16 @@ class TestTheDeclarationsAreComplete:
             "openai.project",
             "openai.base_url",
             "meta.base_url",
+            "email.platform_mailbox",
         }
 
     def test_only_an_account_identifier_or_token_is_unique_among_stored_credentials(self):
         unique = {c.key for d in REGISTRY for c in d.credentials if c.unique}
-        assert unique == {"whatsapp.phone_number_id", "hubspot.access_token"}
+        assert unique == {
+            "whatsapp.phone_number_id",
+            "hubspot.access_token",
+            "email.platform_mailbox",
+        }
 
     def test_the_environment_only_credential_cannot_be_stored_or_unique(self):
         _, credential = declaration("sheets.credentials_file")
@@ -196,8 +218,9 @@ class TestEquivalenceWithTheCredentialCatalog:
 
     def test_the_catalog_lists_exactly_the_stored_declarations_plus_model_lists(self):
         derived = {spec.key for spec in legacy_specs(REGISTRY)}
-        assert derived - NOT_YET_IN_CATALOG == set(CATALOG_BY_KEY) - MODEL_LIST_KEYS
-        assert set(CATALOG_BY_KEY) - derived == MODEL_LIST_KEYS
+        catalog_only = MODEL_LIST_KEYS | PLATFORM_MAIL_KEYS
+        assert derived - NOT_YET_IN_CATALOG == set(CATALOG_BY_KEY) - catalog_only
+        assert set(CATALOG_BY_KEY) - derived == catalog_only
         assert derived & NOT_YET_IN_CATALOG == NOT_YET_IN_CATALOG
 
     def test_every_field_is_equal(self):

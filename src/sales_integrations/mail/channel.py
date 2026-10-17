@@ -26,6 +26,13 @@ from typing import Any, Protocol
 
 from sales_core.contracts import Channel, OutboundMessage, SendResult, SendStatus
 from sales_core.ports import Clock
+from sales_integrations.mail.auth import (
+    PASSWORD,
+    XOAUTH2,
+    SmtpXOAuth2,
+    check_credentials,
+    xoauth2_string,
+)
 from sales_integrations.mail.errors import MailHostRefusedError, MailUnavailableError
 from sales_integrations.mail.net import SMTP_PORTS, ensure_public_host
 
@@ -44,10 +51,19 @@ class SmtpSettings:
     from_name: str | None = None
     subject: str = "Following up on your enquiry"
     timeout: float = DEFAULT_TIMEOUT_SECONDS
+    auth: str = PASSWORD  # "password" (the historical way) or "xoauth2" (see `mail.auth`)
+    access_token: str = field(default="", repr=False)  # given by the layer above, for "xoauth2"
+
+    def __post_init__(self) -> None:
+        check_credentials(self.auth, self.password, self.access_token)
+        if self.auth == XOAUTH2:
+            xoauth2_string(self.username, self.access_token)  # refuse a value that cannot be sent
 
 
 class SmtpConnection(Protocol):
     def login(self, user: str, password: str) -> Any: ...
+
+    def auth(self, mechanism: str, authobject: Callable[..., str], **kwargs: Any) -> Any: ...
 
     def send_message(self, message: EmailMessage) -> Any: ...
 
@@ -106,7 +122,12 @@ class MailChannel:
         except MailUnavailableError:
             return self._failure(SendStatus.FAILED_TRANSIENT, "connect_error", "unreachable")
         try:
-            connection.login(self._settings.username, self._settings.password)
+            if self._settings.auth == XOAUTH2:
+                connection.auth(
+                    "XOAUTH2", SmtpXOAuth2(self._settings.username, self._settings.access_token)
+                )
+            else:
+                connection.login(self._settings.username, self._settings.password)
         except smtplib.SMTPAuthenticationError:
             _quietly_quit(connection)
             return self._failure(SendStatus.FAILED_TRANSIENT, "auth", "login refused")

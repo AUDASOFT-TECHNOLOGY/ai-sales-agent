@@ -112,10 +112,29 @@ class _MergedInbox:
     def __init__(self, pollers: Sequence[InboxPoller]) -> None:
         self._pollers = tuple(pollers)
 
-    def fetch(self, limit: int = 50) -> Sequence[Fetched]:
+    @property
+    def needs_cursor(self) -> bool:
+        return any(getattr(p, "needs_cursor", False) for p in self._pollers)
+
+    @property
+    def filters_by_sender(self) -> bool:
+        return any(getattr(p, "filters_by_sender", False) for p in self._pollers)
+
+    def use_cursor(self, store) -> None:
+        for poller in self._pollers:
+            if getattr(poller, "needs_cursor", False):
+                poller.use_cursor(store)  # type: ignore[attr-defined]
+
+    def fetch(self, limit: int = 50, accept=None) -> Sequence[Fetched]:
         found: list[Fetched] = []
         for index, poller in enumerate(self._pollers):
-            found.extend(_Tagged(index, item) for item in poller.fetch(limit - len(found)))
+            room = limit - len(found)
+            items = (
+                poller.fetch(room, accept=accept)  # type: ignore[call-arg]
+                if getattr(poller, "filters_by_sender", False)
+                else poller.fetch(room)
+            )
+            found.extend(_Tagged(index, item) for item in items)
             if len(found) >= limit:
                 break
         return found

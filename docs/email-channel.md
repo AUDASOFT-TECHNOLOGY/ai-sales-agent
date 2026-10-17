@@ -6,6 +6,30 @@ client's own. Which clients may use the channel at all is the Admin's decision.
 
 ## What a client has to provide
 
+> **Modes (T1).** Everything below describes the `custom` mode, the historical one: a document with
+> no `mode` is `custom` and behaves exactly as before. A second mode, `platform`, exists in
+> configuration only; no client screen or route offers it yet, so a client cannot choose or change it.
+>
+> | | `custom` | `platform` |
+> |---|---|---|
+> | Servers | the client's settings (below) | the platform's, set by the Admin in Settings → Email servers (`email.platform_*`) |
+> | Address and login | `username` / `from_address` | the mailbox assigned to the client (`email.platform_mailbox`, client scope, not secret) |
+> | Password | `email.password` | `email.password` (the client's own, written by the Admin) |
+> | Settings the document may hold | all of the table below | `mode`, `from_name`, `subject` only (anything technical is refused) |
+>
+> **One address, one client.** The assigned address is stored in lowercase and the credential store
+> refuses it for a second client, atomically (the check and the write happen under one lock, so
+> simultaneous attempts cannot both succeed). That guarantee holds **within one process**, which is
+> how the application runs (an instance lock refuses a second one); it would not cover a second
+> process writing the same secrets file. A client's `mailbox_key` is also compared at load and when
+> a runtime is refreshed. Who assigns a mailbox, and how, is not built yet: today it is written
+> with the Admin's credential routes (`/admin/v1/clients/{id}/integrations/email.platform_mailbox`
+> and `…/email.password`).
+>
+> Not tested against any real server: the platform servers are checked by Settings → Email
+> servers → "Test servers" (an encrypted connection, no login), and nothing has been sent through a
+> platform mailbox.
+
 Non-secret settings (`PUT /client/v1/channel`, body `{expected_version, channel: "email", email: {...}}`):
 
 | Setting | Meaning | Default |
@@ -39,6 +63,32 @@ taken away afterwards makes the client not ready, so it takes no new work and it
 read. WhatsApp/Meta credentials stay the Admin's; the Client API refuses any such field.
 
 ## How replies come back
+
+> **Two ways to read (T2).** What follows describes `consume`, the historical way, for a mailbox that
+> exists for Revansa alone. A second way, `observe`, is for a mailbox that belongs to a person and
+> holds their own mail (the client's own address, once that can be connected). It is built and
+> tested but **no configuration reaches it yet**: nothing sets `read_mode` to `observe`, so every
+> mailbox is still read as described below.
+>
+> In `observe` mode: the folder is opened read-only and no `STORE` is ever sent, so nothing is marked
+> read; "new" is a saved position (the UID of the first message not dealt with, and the UIDVALIDITY
+> it belongs to) kept in the database (`op_mail_cursor`, migration 0010), per client and mailbox, and
+> it only moves forward. The first read starts at the end of the mailbox: no history is touched. For
+> each new message only the headers that say who wrote it are read (`BODY.PEEK[HEADER.FIELDS (...)]`,
+> never the subject); the whole message is read only when the sender is already a prospect
+> (`Engine.knows_inbound_sender`), so the text of anyone else's mail never leaves the server, never
+> reaches the Engine and never appears in the audit trail (where the historical way records the text
+> of a stranger's message). A message the Engine failed to store holds the position back and is
+> offered again; the Engine de-duplicates by `Message-ID`. If the server renumbers the folder
+> (new UIDVALIDITY), the reader starts again from the date of the last progress, a day earlier.
+> Without a database the reader refuses to read, rather than lose a message or read it twice.
+>
+> Limits: tested against a double of the server, never a real one. A message the Engine can never
+> store holds the position back at that message (as an unread one stays unread in `consume`). Whether
+> a sender is a prospect is asked of the client's source for every new message from a stranger; a
+> network failure in that lookup is reported as a mailbox read failure (safe, nothing is lost, but
+> the sentence says "mailbox"). A server that does not announce its next UID is asked for the last
+> one instead, so a message arriving during the very first read may be taken for history.
 
 The scheduler runs an `inbox` job per client every 2 minutes (`INBOX_EVERY_MINUTES`), outside the
 outbound window, before the cycle that answers. A message is marked read **only after the Engine has

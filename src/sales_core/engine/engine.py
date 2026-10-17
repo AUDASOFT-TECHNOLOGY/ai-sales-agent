@@ -823,12 +823,24 @@ class Engine:
         prefix = _created_prefix(day)
         return sum(1 for p in self._repo.list_prospects() if p.prospect_id.startswith(prefix))
 
+    def knows_inbound_sender(self, channel: Channel, sender: str) -> bool:
+        """Whether `sender` is one of this client's prospects on `channel`.
+
+        A question, nothing more: it stores nothing and emits no event. It is for a reader that must
+        not let anyone else's message through (a person's own mailbox): the answer does not depend on
+        the policy for unknown senders, because a stranger is never to be engaged from there."""
+        with self._lock:
+            return self._find_prospect(channel, sender) is not None
+
     def _find_sender(self, inbound: InboundMessage) -> Prospect | None:
-        if inbound.channel is Channel.EMAIL:
-            return self._repo.find_prospect_by_contact(email=inbound.sender)
-        if inbound.channel is Channel.TELEGRAM:
-            return self._repo.find_prospect_by_contact(telegram_chat_id=inbound.sender)
-        return self._repo.find_prospect_by_contact(phone=inbound.sender)
+        return self._find_prospect(inbound.channel, inbound.sender)
+
+    def _find_prospect(self, channel: Channel, sender: str) -> Prospect | None:
+        if channel is Channel.EMAIL:
+            return self._repo.find_prospect_by_contact(email=sender)
+        if channel is Channel.TELEGRAM:
+            return self._repo.find_prospect_by_contact(telegram_chat_id=sender)
+        return self._repo.find_prospect_by_contact(phone=sender)
 
     def _link_sender(self, inbound: InboundMessage) -> Prospect | None:
         """Attach a sender we cannot find to the prospect they were invited as, when the adapter

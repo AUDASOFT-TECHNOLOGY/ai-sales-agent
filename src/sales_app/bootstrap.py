@@ -19,6 +19,7 @@ from sales_app.config import build_llm_registry, clamp_mode, load_client_configs
 from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
 from sales_app.config_store import ConfigStore
 from sales_app.errors import ConfigurationError
+from sales_app.inbox import PositionStore
 from sales_app.llm_pricing import LLMPricingStore
 from sales_app.llm_usage import LLMUsageStore
 from sales_app.parsers import ParserTable, build_parsers
@@ -26,6 +27,7 @@ from sales_app.persistence import AccountStores, build_account_stores
 from sales_app.persistence.invoice_rows import SqlInvoiceStore
 from sales_app.persistence.llm_pricing_rows import SqlLLMPricingStore
 from sales_app.persistence.llm_usage_rows import SqlLLMUsageStore
+from sales_app.persistence.mail_cursor_rows import SqlMailCursorStore
 from sales_app.persistence.operational_rows import SqlOperationalRows
 from sales_app.persistence.plan_rows import SqlPlanStore
 from sales_app.plans import PlanStore
@@ -329,6 +331,7 @@ def _assemble(
             executor=executor,
             may_run=lambda client_id: _may_work(agent_state, settings.clients_dir, client_id),
             inbox=builders,
+            mail_cursors=_mail_cursor_stores(account_stores),
         ),
         parsers=parsers,
         clock=clock,
@@ -371,6 +374,17 @@ def _plan_store(account_stores: AccountStores | None) -> PlanStore | None:
 def _llm_pricing_store(account_stores: AccountStores | None) -> LLMPricingStore | None:
     engine = account_stores.engine if account_stores is not None else None
     return SqlLLMPricingStore(engine) if engine is not None else None
+
+
+def _mail_cursor_stores(
+    account_stores: AccountStores | None,
+) -> Callable[[str], PositionStore] | None:
+    """One client's mailbox positions in the deployment's database; None without one (a mailbox
+    that is read without being consumed then does not read at all)."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None
+    return lambda client_id: SqlMailCursorStore(engine, client_id)
 
 
 def _llm_usage_stores(

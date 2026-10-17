@@ -9,10 +9,16 @@ from typing import Any
 
 from sales_app.bootstrap import Application
 from sales_app.config.channel_access import DEFAULT_ALLOWED
-from sales_app.config.email_settings import EmailChannelSettings
-from sales_app.config.secrets import EMAIL_PASSWORD, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
+from sales_app.config.email_settings import PlatformEmailSettings, parse_email_settings
+from sales_app.config.secrets import (
+    EMAIL_PASSWORD,
+    EMAIL_PLATFORM_MAILBOX,
+    EMAIL_PLATFORM_PROFILE_KEYS,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_WEBHOOK_SECRET,
+)
 from sales_app.config.telegram_settings import TelegramChannelSettings
-from sales_app.secret_store import SecretStoreError, client_scope
+from sales_app.secret_store import GLOBAL_SCOPE, SecretStoreError, client_scope
 
 DEFAULT_CHANNEL = "whatsapp"
 EMAIL = "email"
@@ -77,11 +83,32 @@ def channel_problem(
     if provider != EMAIL:
         return None
     try:
-        EmailChannelSettings.model_validate(channel_settings_of(document))
+        settings = parse_email_settings(channel_settings_of(document))
     except ValueError:
         return "Your email settings are incomplete. Fill them in your channel settings."
+    if isinstance(settings, PlatformEmailSettings):
+        return _platform_mailbox_problem(application, client_id)
     if not password_stored(application, client_id):
         return "Your email password is missing. Add it in your channel settings."
+    return None
+
+
+def _platform_mailbox_problem(application: Application, client_id: str) -> str | None:
+    """A mailbox Revansa provides is the administrator's to assign and to set up: whatever is
+    missing, the client has nothing to type and is told to ask."""
+    if not credential_stored(application, client_id, EMAIL_PLATFORM_MAILBOX):
+        return "No mailbox has been assigned to your account yet. Contact your administrator."
+    if not password_stored(application, client_id):
+        return "Your assigned mailbox is not ready yet. Contact your administrator."
+    try:
+        servers_set = all(
+            application.credentials.status(GLOBAL_SCOPE, key).configured
+            for key in EMAIL_PLATFORM_PROFILE_KEYS
+        )
+    except SecretStoreError:
+        servers_set = False
+    if not servers_set:
+        return "The email servers are not set up yet. Contact your administrator."
     return None
 
 

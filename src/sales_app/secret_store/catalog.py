@@ -10,6 +10,7 @@ number id, an API version): it may be shown to an admin. A sensitive value never
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -50,10 +51,34 @@ class CredentialSpec:
     unique: bool = False  # no two scopes may hold the same value
     pattern: re.Pattern[str] | None = None  # the whole (stripped) value must match
     rule: str = ""  # what `pattern` expects, in words (shown when a value is refused)
+    # The form a value is stored in, applied after the pattern is checked. Only for a value that
+    # `unique` compares: two spellings of one thing must become one value to be told apart.
+    canonical: Callable[[str], str] | None = None
 
 
 _OPENAI_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+# The platform mail server profile (Admin, global): settings of Revansa's own mail servers, not
+# secrets. The limits are the ones a client's mailbox settings have (`config.email_settings`).
+_MAIL_HOST = re.compile(r"^(?=.{3,253}$)[a-z0-9]([a-z0-9.-]*[a-z0-9])?$", re.IGNORECASE)
+_MAIL_DOMAIN = re.compile(
+    r"^(?=.{4,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", re.IGNORECASE
+)
+_SMTP_PORT = re.compile(r"^(25|465|587|2525)$")
+_IMAP_PORT = re.compile(r"^(143|993)$")
+_MAIL_SECURITY = re.compile(r"^(starttls|ssl)$")
+_HOST_RULE = "must be a host name (letters, digits, dots and hyphens)"
+_SECURITY_RULE = "must be starttls or ssl"
+# The address of a mailbox Revansa assigns to a client (`email.platform_mailbox`). The same rules as
+# the address of a client's own mailbox (`config.email_settings`), in any case: it is stored in
+# lowercase (`canonical`), so that two spellings of one address are one value, and the store can
+# refuse the second one atomically.
+MAILBOX_ADDRESS = re.compile(
+    r"^(?=.{6,254}$)[^@\s<>,;\"'()\[\]\\]+@[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$",
+    re.IGNORECASE,
+)
+MAILBOX_ADDRESS_RULE = "must be an email address such as name@example.com"
+
 _HUBSPOT_TOKEN = re.compile(
     r"^pat-[a-z]{2,4}\d{1,2}-[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$"
 )
@@ -116,6 +141,64 @@ CATALOG: tuple[CredentialSpec, ...] = (
         pattern=re.compile(r"^v\d{1,3}\.\d{1,3}$"),
         rule="must look like v21.0",
     ),
+    # The servers of the mailboxes Revansa provides (OVH today). Only the servers: which mailbox a
+    # client gets, and its password, are the client's own (`email.password`, client scope).
+    CredentialSpec(
+        "email.platform_domain",
+        ScopeKind.GLOBAL,
+        "Platform mail domain",
+        sensitive=False,
+        pattern=_MAIL_DOMAIN,
+        rule="must be a domain name such as mail.example.com",
+    ),
+    CredentialSpec(
+        "email.platform_smtp_host",
+        ScopeKind.GLOBAL,
+        "Platform SMTP host",
+        sensitive=False,
+        pattern=_MAIL_HOST,
+        rule=_HOST_RULE,
+    ),
+    CredentialSpec(
+        "email.platform_smtp_port",
+        ScopeKind.GLOBAL,
+        "Platform SMTP port",
+        sensitive=False,
+        pattern=_SMTP_PORT,
+        rule="must be 25, 465, 587 or 2525",
+    ),
+    CredentialSpec(
+        "email.platform_smtp_security",
+        ScopeKind.GLOBAL,
+        "Platform SMTP security",
+        sensitive=False,
+        pattern=_MAIL_SECURITY,
+        rule=_SECURITY_RULE,
+    ),
+    CredentialSpec(
+        "email.platform_imap_host",
+        ScopeKind.GLOBAL,
+        "Platform IMAP host",
+        sensitive=False,
+        pattern=_MAIL_HOST,
+        rule=_HOST_RULE,
+    ),
+    CredentialSpec(
+        "email.platform_imap_port",
+        ScopeKind.GLOBAL,
+        "Platform IMAP port",
+        sensitive=False,
+        pattern=_IMAP_PORT,
+        rule="must be 143 or 993",
+    ),
+    CredentialSpec(
+        "email.platform_imap_security",
+        ScopeKind.GLOBAL,
+        "Platform IMAP security",
+        sensitive=False,
+        pattern=_MAIL_SECURITY,
+        rule=_SECURITY_RULE,
+    ),
     # ---- one client ---------------------------------------------------------------------
     CredentialSpec("whatsapp.access_token", ScopeKind.CLIENT, "WhatsApp access token"),
     CredentialSpec(
@@ -128,6 +211,18 @@ CATALOG: tuple[CredentialSpec, ...] = (
         rule="must be the numeric id Meta gives the phone number (digits only)",
     ),
     CredentialSpec("email.password", ScopeKind.CLIENT, "Email password"),
+    # The mailbox Revansa assigned to this client (e-mail mode `platform`). Not a secret, and held
+    # by one client only: the store refuses the same address for a second one.
+    CredentialSpec(
+        "email.platform_mailbox",
+        ScopeKind.CLIENT,
+        "Email mailbox",
+        sensitive=False,
+        unique=True,
+        pattern=MAILBOX_ADDRESS,
+        rule=MAILBOX_ADDRESS_RULE,
+        canonical=str.lower,
+    ),
     CredentialSpec(
         "telegram.bot_token",
         ScopeKind.CLIENT,
@@ -177,4 +272,4 @@ def normalize_value(spec: CredentialSpec, value: str) -> str:
         raise InvalidCredentialError("value must not contain control characters or line breaks")
     if spec.pattern is not None and not spec.pattern.match(cleaned):
         raise InvalidCredentialError(f"{spec.label} {spec.rule}")
-    return cleaned
+    return spec.canonical(cleaned) if spec.canonical is not None else cleaned

@@ -17,7 +17,7 @@ from pydantic import (
 )
 
 from sales_app.brain_registry import BRAIN_KEY_PATTERN
-from sales_app.config.email_settings import EmailChannelSettings
+from sales_app.config.email_settings import parse_email_settings
 from sales_app.config.telegram_settings import TelegramChannelSettings
 from sales_core.approval import ApprovalMode
 from sales_core.contracts import ALL_PRODUCTS
@@ -137,7 +137,7 @@ class ChannelSection(_Section):
     @model_validator(mode="after")
     def _known_settings(self) -> "ChannelSection":
         if self.provider == "email" and self.settings:
-            EmailChannelSettings.model_validate(self.settings)  # a half-written mailbox is refused
+            parse_email_settings(self.settings)  # a half-written mailbox is refused
         if self.provider == "telegram" and self.settings:
             TelegramChannelSettings.model_validate(self.settings)
         return self

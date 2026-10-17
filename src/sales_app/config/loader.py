@@ -13,7 +13,13 @@ from pydantic import ValidationError
 from sales_app.brain_registry import BrainRegistry
 from sales_app.config.brain_settings import prepare_brain_settings
 from sales_app.config.channel_access import GOVERNED, effective_channels
-from sales_app.config.email_settings import EmailChannelSettings, mailbox_key_of
+from sales_app.config.email_settings import (
+    PLATFORM_MODE,
+    email_mode_of,
+    mailbox_key_of,
+    parse_email_settings,
+    platform_mailbox_key,
+)
 from sales_app.config.llm_registry import EMPTY_LLM_REGISTRY, LLMRegistry
 from sales_app.config.offered_models import inactive_model_reason, models_from
 from sales_app.config.resolution import (
@@ -31,6 +37,8 @@ from sales_app.config.secrets import (
     CHANNELS_ACCESS,
     CHANNELS_ALLOWED,
     EMAIL_PASSWORD,
+    EMAIL_PLATFORM_MAILBOX,
+    EMAIL_PLATFORM_PROFILE_KEYS,
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
     OPENAI_ORGANIZATION,
@@ -99,7 +107,13 @@ class ClientConfig:
         """The mailbox this client reads, when its channel is e-mail and it has one set up."""
         if "email" not in self.spec.channel_providers:
             return None
-        return mailbox_key_of(self.spec.channel_settings_for("email"))
+        settings = self.spec.channel_settings_for("email")
+        if email_mode_of(settings) == PLATFORM_MODE:
+            # The assigned address is a credential of the client's own, not a setting: nothing a
+            # client writes can name a mailbox that is not its own.
+            address = self.secrets.get_optional(EMAIL_PLATFORM_MAILBOX)
+            return platform_mailbox_key(address) if address else None
+        return mailbox_key_of(settings)
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,6 +352,16 @@ def _resolve_secrets(
     email_wanted = (
         [(EMAIL_PASSWORD, "Email password", client, None, live)] if "email" in channels else []
     )
+    # A mailbox Revansa provides: its address is the client's own, its servers are the platform's.
+    # The servers are only collected here; whether they are all set is said once, below.
+    email_platform = "email" in channels and (
+        email_mode_of(spec.channel_settings_for("email")) == PLATFORM_MODE
+    )
+    if email_platform:
+        email_wanted += [
+            (EMAIL_PLATFORM_MAILBOX, "Email mailbox", client, None, False),
+            *((key, key, GLOBAL_SCOPE, None, False) for key in EMAIL_PLATFORM_PROFILE_KEYS),
+        ]
     telegram_wanted = (
         [
             (TELEGRAM_BOT_TOKEN, "Telegram bot token", client, None, live),
@@ -383,9 +407,14 @@ def _resolve_secrets(
             missing.append(f"{label} is not configured")
     if "email" in channels and live:
         try:
-            EmailChannelSettings.model_validate(spec.channel_settings_for("email"))
+            parse_email_settings(spec.channel_settings_for("email"))
         except ValueError:
             missing.append("Email settings are incomplete")
+    if email_platform and live:
+        if EMAIL_PLATFORM_MAILBOX not in values:
+            missing.append("Email mailbox has not been assigned to this account yet")
+        if any(key not in values for key in EMAIL_PLATFORM_PROFILE_KEYS):
+            missing.append("The platform mail servers are not configured")
     if "telegram" in channels and live:
         try:
             TelegramChannelSettings.model_validate(spec.channel_settings_for("telegram"))

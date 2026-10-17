@@ -338,12 +338,21 @@ class TestCatalog:
             "openai.model_sol",
             "openai.model_lune",
             "openai.models",
+            "email.platform_domain",
+            "email.platform_smtp_host",
+            "email.platform_smtp_port",
+            "email.platform_smtp_security",
+            "email.platform_imap_host",
+            "email.platform_imap_port",
+            "email.platform_imap_security",
+            "email.platform_mailbox",
         }
 
     def test_phone_number_id_and_hubspot_token_are_unique_per_client(self):
         assert {s.key for s in CATALOG if s.unique} == {
             "whatsapp.phone_number_id",
             "hubspot.access_token",
+            "email.platform_mailbox",
         }
 
     def test_no_provider_that_does_not_exist_is_listed(self):
@@ -365,12 +374,20 @@ class TestService:
             "whatsapp.verify_token",
             "whatsapp.app_secret",
             "whatsapp.api_version",
+            "email.platform_domain",
+            "email.platform_smtp_host",
+            "email.platform_smtp_port",
+            "email.platform_smtp_security",
+            "email.platform_imap_host",
+            "email.platform_imap_port",
+            "email.platform_imap_security",
         }
         assert {s.key for s in svc.describe(client_scope("a"))} == {
             "whatsapp.access_token",
             "whatsapp.phone_number_id",
             "hubspot.access_token",
             "email.password",
+            "email.platform_mailbox",
             "telegram.bot_token",
             "telegram.webhook_secret",
         }

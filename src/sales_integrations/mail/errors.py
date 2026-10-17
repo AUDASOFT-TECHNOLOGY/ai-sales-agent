@@ -19,3 +19,8 @@ class MailAuthError(MailError):
 
 class MailHostRefusedError(MailError):
     """The host is not one Revansa may connect to (a private, loopback or reserved address)."""
+
+
+class MailCursorUnavailableError(MailUnavailableError):
+    """Where a mailbox was read up to could not be read or kept. Nothing is read without it: a
+    reader that does not know its place would lose messages or read them twice."""

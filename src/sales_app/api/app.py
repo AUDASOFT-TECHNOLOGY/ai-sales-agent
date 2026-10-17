@@ -40,6 +40,7 @@ from sales_app.api.client_source import (
 )
 from sales_app.bootstrap import Application
 from sales_app.connection_tests import HttpClientFactory, default_http_client
+from sales_app.email_platform import PlatformMailProbe, PlatformMailProbeFactory
 from sales_app.errors import ClientNotReadyError
 from sales_app.logs import client_logger
 from sales_app.wiring import ClientRuntime
@@ -60,6 +61,7 @@ def create_app(
     sheets_probe: SheetsProbeFactory = default_sheets_probe,
     mail_probe: MailProbeFactory = email_provider.MailProbe,
     bot_probe: BotProbeFactory = telegram_provider.TelegramProbe,
+    platform_mail_probe: PlatformMailProbeFactory = PlatformMailProbe,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -91,7 +93,9 @@ def create_app(
     app.include_router(create_admin_plans_router(application))
     app.include_router(create_admin_billing_router(application))
     app.include_router(create_admin_channels_router(application))
-    app.include_router(create_admin_integrations_router(application, connection_http))
+    app.include_router(
+        create_admin_integrations_router(application, connection_http, platform_mail_probe)
+    )
     app.include_router(create_client_router(application))
     app.include_router(create_client_agent_router(application))
     app.include_router(create_client_approvals_router(application))

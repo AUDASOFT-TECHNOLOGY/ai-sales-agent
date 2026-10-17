@@ -32,6 +32,11 @@ from sales_app.connection_tests import (
     check_whatsapp_client,
     default_http_client,
 )
+from sales_app.email_platform import (
+    PlatformMailProbe,
+    PlatformMailProbeFactory,
+    check_platform_servers,
+)
 from sales_app.llm_models import ModelTest, foreign_model_keys, record_test, stored_models
 from sales_app.model_usage import impact_of_credential_write
 from sales_app.secret_store import (
@@ -163,7 +168,9 @@ def _client_exists(application: Application, client_id: str) -> bool:
 
 
 def create_admin_integrations_router(
-    application: Application, http: HttpClientFactory = default_http_client
+    application: Application,
+    http: HttpClientFactory = default_http_client,
+    platform_mail_probe: PlatformMailProbeFactory = PlatformMailProbe,
 ) -> APIRouter:
     credentials = application.credentials
     get_current_admin = make_current_admin_dependency(application.admin_auth)
@@ -262,6 +269,15 @@ def create_admin_integrations_router(
                 models={m.name: m.id for m in stored_models(credentials) or [] if m.active},
                 http=http,
             )
+        )
+
+    @router.post("/settings/integrations/email/test", response_model=ConnectionTestResponse)
+    def test_email_servers(_admin: AdminUser = Depends(require_owner)) -> ConnectionTestResponse:
+        """Opens an encrypted connection to each server of the platform mail profile and closes it.
+        No login is attempted and no message is sent or read: it proves the servers can be reached
+        from here, nothing more."""
+        return _test_response(
+            check_platform_servers(lambda key: stored(GLOBAL_SCOPE, key), platform_mail_probe)
         )
 
     @router.post("/settings/openai/models/{model_id}/test", response_model=ModelTestResponse)

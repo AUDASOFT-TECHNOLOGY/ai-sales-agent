@@ -7,9 +7,19 @@ a field here (the document check refuses keys that look like one).
 The servers are typed by the client, so the ports are limited to the ones mail servers use and the
 hosts are checked again, address by address, each time a connection is made
 (`sales_integrations.mail.net`): a client cannot aim Revansa at the platform's own network.
+
+**Two modes.** `mode` says where the mailbox comes from:
+
+- absent, or `custom`: the historical mailbox, described here by its servers and login
+  (`EmailChannelSettings`). A document written before modes existed has no `mode` and means this,
+  unchanged. Only an administrator sets it up.
+- `platform`: a mailbox Revansa provides. Its servers are the platform's (Admin -> Settings) and its
+  address and password are the client's own credentials; the settings hold nothing technical, only
+  what the client may say about how it writes (`PlatformEmailSettings`).
 """
 
-from typing import Annotated, Literal
+from collections.abc import Mapping
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 
@@ -32,12 +42,35 @@ Login = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, ma
 
 DEFAULT_SUBJECT = "Following up on your enquiry"
 
+PLATFORM_MODE = "platform"
+CUSTOM_MODE = "custom"
+
+
+def _plain_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    if len(value) > 80 or any(ch in value for ch in '<>"\r\n,;\\'):
+        raise ValueError("must be a short plain name")
+    return value
+
+
+def _single_line(value: str) -> str:
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ValueError("must be a single line")
+    return value
+
 
 class EmailChannelSettings(BaseModel):
     """One client's mailbox: where Revansa sends from and reads replies."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    # Absent: the historical mailbox. Never written by the code, so a document without it is
+    # dumped exactly as before.
+    mode: Literal["custom"] | None = None
     from_address: Address
     from_name: str | None = None
     username: Login
@@ -63,21 +96,12 @@ class EmailChannelSettings(BaseModel):
     @field_validator("from_name")
     @classmethod
     def _name(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            return None
-        if len(value) > 80 or any(ch in value for ch in '<>"\r\n,;\\'):
-            raise ValueError("must be a short plain name")
-        return value
+        return _plain_name(value)
 
     @field_validator("username", "mailbox", "subject")
     @classmethod
     def _one_line(cls, value: str) -> str:
-        if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
-            raise ValueError("must be a single line")
-        return value
+        return _single_line(value)
 
     @property
     def mailbox_key(self) -> str:
@@ -91,3 +115,70 @@ def mailbox_key_of(settings: dict[str, object]) -> str | None:
         return EmailChannelSettings.model_validate(settings).mailbox_key
     except ValueError:
         return None
+
+
+class PlatformEmailSettings(BaseModel):
+    """A mailbox Revansa provides: nothing technical, because nothing here is the client's to say.
+
+    The servers are the platform's (`sales_app.email_platform`), the address is the one assigned to
+    this client and the password is its own credential: none of them is a setting. What is left is
+    how the client's messages are written. `extra="forbid"` refuses any server, port, login or
+    password, whoever sends them."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mode: Literal["platform"]
+    from_name: str | None = None
+    subject: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)
+    ] = DEFAULT_SUBJECT
+
+    @field_validator("from_name")
+    @classmethod
+    def _name(cls, value: str | None) -> str | None:
+        return _plain_name(value)
+
+    @field_validator("subject")
+    @classmethod
+    def _one_line(cls, value: str) -> str:
+        return _single_line(value)
+
+
+MailboxSettings = EmailChannelSettings | PlatformEmailSettings
+
+
+def email_mode_of(settings: Mapping[str, Any]) -> str:
+    """`platform` or `custom`. A document with no `mode` is `custom`: it is the historical one."""
+    return PLATFORM_MODE if settings.get("mode") == PLATFORM_MODE else CUSTOM_MODE
+
+
+def parse_email_settings(settings: Mapping[str, Any]) -> MailboxSettings:
+    """The settings of the mode they name, validated. Raises ValueError (a pydantic one) when they
+    are not valid for it. A mode that is not `platform` is read by the historical model, which
+    refuses any `mode` other than `custom`."""
+    if email_mode_of(settings) == PLATFORM_MODE:
+        return PlatformEmailSettings.model_validate(dict(settings))
+    return EmailChannelSettings.model_validate(dict(settings))
+
+
+class EmailSettingsOfAnyMode(BaseModel):
+    """What the e-mail provider's descriptor validates a channel's settings with: the settings of
+    whichever mode they name. It only dispatches; it has no fields of its own."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @classmethod
+    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+        return parse_email_settings(obj)
+
+
+def canonical_mailbox_address(value: str) -> str:
+    """What identifies an assigned mailbox: its address, stripped and in lowercase. It is the very
+    address the mailbox logs in and sends with, so nothing else is changed in it."""
+    return value.strip().lower()
+
+
+def platform_mailbox_key(address: str) -> str:
+    """The key under which two clients are compared. In its own namespace: it can never equal the
+    key of a historical mailbox (`host|login`)."""
+    return f"platform|{canonical_mailbox_address(address)}"

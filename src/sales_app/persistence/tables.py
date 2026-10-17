@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -376,4 +377,18 @@ invoice_lines = Table(
     Column("days_in_period", Integer, nullable=False),
     Column("amount", Numeric(18, 2), nullable=False),
     Index("ix_invoice_lines_invoice", "invoice_id"),
+)
+
+
+# Where each mailbox that is read without being consumed was read up to (`observe`): the digest of
+# the mailbox (never its address), the UID of the first message not dealt with yet, and the
+# UIDVALIDITY those UIDs belong to. Nothing of any message. It only moves forward (see the store).
+op_mail_cursor = Table(
+    "op_mail_cursor",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("mailbox_key", String(64), primary_key=True),
+    Column("uid_validity", BigInteger, nullable=False),
+    Column("next_uid", BigInteger, nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
 )
