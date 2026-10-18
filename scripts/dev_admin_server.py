@@ -30,6 +30,7 @@ The Client space is at http://localhost:5173/#/login, with two seeded dev accoun
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from datetime import UTC, datetime
@@ -49,6 +50,8 @@ from sales_app.api import create_app
 from sales_app.bootstrap import build_application
 from sales_app.client_profiles import ClientProfile, InMemoryClientProfileStore
 from sales_app.config_store import InMemoryConfigStore
+from sales_app.resources.service import ResourceService
+from sales_app.resources.store import InMemoryResourceStore
 from sales_app.secret_store import InMemorySecretAudit, InMemorySecretStore
 from sales_app.settings import Settings
 from sales_app.wiring import ChannelProvider, IntegrationBuilders
@@ -199,15 +202,20 @@ def main() -> None:
         secret_audit=InMemorySecretAudit(),
     )
 
+    # Product documents live in the database in a real deployment; here, in memory, so the Client
+    # screens for them can be tried without one (pages are fetched for real, so use public https).
+    application.product_resources = ResourceService(InMemoryResourceStore(), clock=clock.now)
+
     print("Clients copied from", REAL_CLIENTS_DIR, "->", ", ".join(client_ids))
     print(f"Admin login: username={ADMIN_USERNAME!r} password={ADMIN_PASSWORD!r}")
     for client_id, password in CLIENT_DEV_PASSWORDS.items():
         print(f"Client login: login={client_id!r} password={password!r}")
-    print("Serving on http://127.0.0.1:8000 -- run `cd web && npm run dev` in another terminal,")
+    port = int(os.environ.get("DEV_PORT", "8000"))
+    print(f"Serving on http://127.0.0.1:{port} -- run `cd web && npm run dev` in another terminal,")
     print("then open http://localhost:5173/#/admin/login")
 
     uvicorn.run(
-        create_app(application, run_scheduler=False), host="127.0.0.1", port=8000, workers=1
+        create_app(application, run_scheduler=False), host="127.0.0.1", port=port, workers=1
     )
 
 

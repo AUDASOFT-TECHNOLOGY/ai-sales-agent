@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMethodForm, blankMethod, forgetMethod, formOfMethod, methodProblems, putMethod, removeMethod } from "./paymentModel";
+import { applyMethodForm, blankMethod, disableJourney, enableJourney, forgetMethod, formOfMethod, journeyOf, methodProblems, putMethod, removeMethod } from "./paymentModel";
 import type { Doc } from "../settingsModel";
 
 const bank: Doc = {
@@ -113,5 +113,40 @@ describe("payment methods in the document", () => {
     const [p1, p2] = (next.catalog as Doc).products as Doc[];
     expect(((p1!.payment as Doc).offline as Doc).methods).toEqual(["cash"]);
     expect(p2).toEqual({ id: "p2" });
+  });
+});
+
+describe("the purchase journey", () => {
+  const base: Doc = { business: { name: "B" }, payment: { methods: [] } };
+  it("is off by default and reads what is set", () => {
+    expect(journeyOf(base)).toBe("off");
+    expect(journeyOf({ ...base, conversion: { default_workflow: "achat" } })).toBe("on");
+    expect(journeyOf({ ...base, conversion: { default_workflow: "their-process" } })).toBe("custom");
+  });
+  it("is switched on by adding its workflow and making it the default", () => {
+    const next = enableJourney(base);
+    const conversion = next.conversion as Doc;
+    expect(conversion.default_workflow).toBe("achat");
+    expect((conversion.workflows as Doc[]).map((w) => w.id)).toEqual(["achat"]);
+    expect(((conversion.workflows as Doc[])[0]!.steps as Doc[]).map((s) => s.kind)).toEqual(["recommend", "payment", "payment_confirmation"]);
+    expect(next.business).toEqual(base.business);
+  });
+  it("never replaces a sales process Revansa set", () => {
+    const theirs: Doc = { ...base, conversion: { default_workflow: "their-process", workflows: [{ id: "their-process", steps: [] }] } };
+    expect(enableJourney(theirs)).toBe(theirs);
+    expect(disableJourney(theirs)).toBe(theirs);
+  });
+  it("keeps other workflows when it is switched on and off", () => {
+    const other = { id: "other", steps: [{ id: "x", kind: "inform" }] };
+    const on = enableJourney({ ...base, conversion: { workflows: [other], appointment: { supported: false } } });
+    expect(((on.conversion as Doc).workflows as Doc[]).map((w) => w.id)).toEqual(["other", "achat"]);
+    const off = disableJourney(on);
+    expect(off.conversion).toEqual({ workflows: [other], appointment: { supported: false } });
+  });
+  it("leaves no empty conversion section behind", () => {
+    expect(disableJourney(enableJourney(base))).toEqual(base);
+  });
+  it("is idempotent", () => {
+    expect(enableJourney(enableJourney(base))).toEqual(enableJourney(base));
   });
 });

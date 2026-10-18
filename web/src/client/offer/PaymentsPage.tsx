@@ -17,8 +17,11 @@ import {
   applyMethodForm,
   blankInstruction,
   blankMethod,
+  disableJourney,
+  enableJourney,
   forgetMethod,
   formOfMethod,
+  journeyOf,
   methodProblems,
   methodsOf,
   putMethod,
@@ -29,7 +32,7 @@ import {
 } from "./paymentModel";
 import { useOffer } from "./OfferLayout";
 
-function MethodEditor({ initial, existing, onDone, onCancel }: { initial: MethodForm; existing: boolean; onDone: () => void; onCancel: () => void }) {
+function MethodEditor({ initial, existing, onDone, onCancel }: { initial: MethodForm; existing: boolean; onDone: (startedJourney: boolean) => void; onCancel: () => void }) {
   const { t } = useI18n();
   const { commercial, save } = useOffer();
   const lang = defaultLanguage(commercial);
@@ -52,10 +55,14 @@ function MethodEditor({ initial, existing, onDone, onCancel }: { initial: Method
     const method = applyMethodForm(original, { ...draft, id }, lang);
     setBusy(true);
     setFailure(null);
-    const problem = await save({ commercial: putMethod(commercial, method) });
+    // The first payment method is useless unless the agent may hand it over: the purchase journey
+    // starts with it (unless Revansa set the client's own sales process), and the screen says so.
+    const firstOne = !existing && methodsOf(commercial).length === 0 && journeyOf(commercial) === "off";
+    const base = putMethod(commercial, method);
+    const problem = await save({ commercial: firstOne ? enableJourney(base) : base });
     setBusy(false);
     if (problem) setFailure(problem);
-    else onDone();
+    else onDone(firstOne);
   }
 
   return (
@@ -152,10 +159,12 @@ export function PaymentsPage() {
   const [editing, setEditing] = useState<{ form: MethodForm; existing: boolean } | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<null | "plain" | "journey">(null);
+  const journey = journeyOf(commercial);
+  const activeMethods = methods.filter((m) => m.status !== "inactive").length;
 
   const start = (kind: MethodKind) => {
-    setSaved(false);
+    setSaved(null);
     setEditing({ form: blankMethod("", kind), existing: false });
   };
 
@@ -166,6 +175,16 @@ export function PaymentsPage() {
     const problem = await save({ commercial: next });
     setBusy(null);
     if (problem) setFailure(problem);
+  }
+
+  async function switchJourney(turnOn: boolean) {
+    setBusy("journey");
+    setFailure(null);
+    setSaved(null);
+    const problem = await save({ commercial: turnOn ? enableJourney(commercial) : disableJourney(commercial) });
+    setBusy(null);
+    if (problem) setFailure(problem);
+    else setSaved("plain");
   }
 
   async function remove(id: string) {
@@ -197,7 +216,30 @@ export function PaymentsPage() {
         {t("rv.pay.how.text")}
       </Note>
       {failure ? <FailureNote failure={failure} /> : null}
-      {saved ? <Note tone="success">{t("rv.common.saved")}</Note> : null}
+      {saved ? <Note tone="success">{t(saved === "journey" ? "rv.pay.journey.started" : "rv.common.saved")}</Note> : null}
+
+      {methods.length > 0 ? (
+        <Card aria-label={t("rv.pay.journey.title")} data-testid="journey">
+          <div className="rv-card__head">
+            <h3>{t("rv.pay.journey.title")}</h3>
+            <Chip tint={journey === "on" ? "success" : "neutral"}>{t(`rv.pay.journey.state.${journey}` as MessageKey)}</Chip>
+          </div>
+          <p className="rv-card__sub">{t(`rv.pay.journey.text.${journey}` as MessageKey)}</p>
+          {journey === "on" && activeMethods === 0 ? <Note tone="warn">{t("rv.pay.journey.needMethod")}</Note> : null}
+          {journey !== "custom" ? (
+            <div>
+              <Button
+                variant={journey === "on" ? "secondary" : "primary"}
+                loading={busy === "journey"}
+                disabledReason={journey === "off" && activeMethods === 0 ? t("rv.pay.journey.needMethod") : undefined}
+                onClick={() => void switchJourney(journey === "off")}
+              >
+                {t(journey === "on" ? "rv.pay.journey.disable" : "rv.pay.journey.enable")}
+              </Button>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
 
       {editing ? (
         <MethodEditor
@@ -205,9 +247,9 @@ export function PaymentsPage() {
           initial={editing.form}
           existing={editing.existing}
           onCancel={() => setEditing(null)}
-          onDone={() => {
+          onDone={(startedJourney) => {
             setEditing(null);
-            setSaved(true);
+            setSaved(startedJourney ? "journey" : "plain");
           }}
         />
       ) : null}
@@ -256,7 +298,7 @@ export function PaymentsPage() {
                   </div>
                   <Chip tint={active ? "success" : "neutral"}>{t(active ? "rv.pay.active" : "rv.pay.inactive")}</Chip>
                   <div className="rv-actions">
-                    <Button size="sm" onClick={() => { setSaved(false); setEditing({ form, existing: true }); }} disabled={editing !== null}>
+                    <Button size="sm" onClick={() => { setSaved(null); setEditing({ form, existing: true }); }} disabled={editing !== null}>
                       {t("rv.common.edit")}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => void toggle(id, active ? "inactive" : "active")} loading={busy === id}>

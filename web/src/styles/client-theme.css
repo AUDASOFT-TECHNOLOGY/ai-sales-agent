@@ -601,3 +601,8 @@ main { outline: none; }
 .rv-select { width: 100%; }
 .rv-select-label { display: grid; gap: 8px; }
 .rv-pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+
+/* Legacy cards (channel, reports, profile) take the same width as the new ones. */
+:root[data-app="client"] .client-card { max-width: none; padding: 24px; }
+:root[data-app="client"] .page,
+:root[data-app="client"] .page--focus { max-width: none; padding-inline: 0; }

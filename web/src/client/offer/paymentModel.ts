@@ -9,6 +9,7 @@
  *  Confirmation is always manual: a payment counts as paid only when the client has checked it. */
 
 import { localizedText, withLocalized, type Doc } from "../settingsModel";
+import journey from "./purchaseJourney.json";
 
 export type MethodKind = "online" | "offline";
 
@@ -182,4 +183,40 @@ export function forgetMethod(commercial: Doc, id: string): Doc {
     return { ...product, payment: { ...payment, online: trim(payment.online), offline: trim(payment.offline) } };
   });
   return { ...commercial, catalog: { ...catalog, products } };
+}
+
+/* ── The purchase journey ────────────────────────────────────────────────────────────────────────
+ * Payment methods only reach a buyer through a conversion workflow with a payment step. The client
+ * never sees a "workflow": the Payments screen offers one switch, "give my payment methods when a
+ * prospect is interested". This is the workflow that switch manages (the same file is read by the
+ * backend test that proves the agent really gives the exact link with it). It is only ever set as
+ * the default when the client has no sales process of its own: one set by Revansa is never replaced. */
+
+export const JOURNEY_ID = journey.id;
+
+export type JourneyState = "on" | "off" | "custom";
+
+export function journeyOf(commercial: Doc | undefined): JourneyState {
+  const chosen = obj(commercial?.conversion).default_workflow;
+  if (chosen === JOURNEY_ID) return "on";
+  return typeof chosen === "string" && chosen !== "" ? "custom" : "off";
+}
+
+export function enableJourney(commercial: Doc): Doc {
+  const conversion = obj(commercial.conversion);
+  if (typeof conversion.default_workflow === "string" && conversion.default_workflow !== JOURNEY_ID) return commercial;
+  const others = (Array.isArray(conversion.workflows) ? conversion.workflows : []).filter((w) => obj(w).id !== JOURNEY_ID);
+  return { ...commercial, conversion: { ...conversion, default_workflow: JOURNEY_ID, workflows: [...others, journey] } };
+}
+
+export function disableJourney(commercial: Doc): Doc {
+  const conversion = obj(commercial.conversion);
+  if (conversion.default_workflow !== JOURNEY_ID) return commercial;
+  const next: Doc = { ...conversion };
+  delete next.default_workflow;
+  next.workflows = (Array.isArray(conversion.workflows) ? conversion.workflows : []).filter((w) => obj(w).id !== JOURNEY_ID);
+  if ((next.workflows as unknown[]).length === 0) delete next.workflows;
+  const { conversion: _removed, ...rest } = commercial;
+  void _removed;
+  return Object.keys(next).length === 0 ? rest : { ...rest, conversion: next };
 }

@@ -1,0 +1,9 @@
+{
+  "id": "achat",
+  "label": "Achat",
+  "steps": [
+    { "id": "recommend", "kind": "recommend" },
+    { "id": "payment", "kind": "payment" },
+    { "id": "payment_confirmation", "kind": "payment_confirmation" }
+  ]
+}
