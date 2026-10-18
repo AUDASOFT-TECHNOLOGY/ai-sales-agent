@@ -18,6 +18,7 @@ from sales_app.config.runtime_config import (
 from sales_app.config.schema import BrainSection
 from sales_app.errors import ClientNotReadyError, ClientUnavailableError, RuntimeBuildError
 from sales_app.llm_usage import RecordingLLMProvider
+from sales_app.send_cap import RefusingChannel, SendCapChannel
 from sales_app.sourcing.composite import CompositeRepository
 from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
@@ -395,6 +396,19 @@ def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> Sa
     return _stage(client_id, "repository", lambda: CompositeRepository(source, store, consent))
 
 
+def _metered(provider: Any, config: ClientConfig, builders: IntegrationBuilders) -> MessagingChannel:
+    """The channel of this client as the Engine uses it. A metered channel (e-mail, whichever mode)
+    goes behind the daily send cap here, the one place a client's channel is built for the Engine:
+    prospecting, replies and follow-ups all pass through it. Without a guard (no database) it can
+    send nothing. The daily report builds its own channel and takes its place in the same counter."""
+    channel = provider.build(config)
+    if not provider.metered:
+        return channel
+    if builders.send_guards is None:
+        return RefusingChannel(provider.kind)
+    return SendCapChannel(channel, builders.send_guards(config.client_id, provider.kind.value))
+
+
 def _build_lane_parts(
     config: ClientConfig, builders: IntegrationBuilders, clock: Clock
 ) -> tuple[SalesRepository, ChannelRouter, ClientWriteback | None]:
@@ -440,7 +454,7 @@ def _build_lane_parts(
             adapters[provider.kind] = DisabledChannel(provider.kind)  # cannot send, by construction
             continue
         try:
-            adapters[provider.kind] = provider.build(config)
+            adapters[provider.kind] = _metered(provider, config, builders)
         except Exception as error:  # noqa: BLE001
             problems.append(f"channel {key!r}: {error}")
     if problems:
@@ -512,7 +526,7 @@ def build_runtime(
         if config.effective_mode is ApprovalMode.DRY_RUN:
             channel = DisabledChannel(provider.kind)  # a dry run cannot send, by construction
         else:
-            channel = _stage(client_id, "channel", lambda: provider.build(config))
+            channel = _stage(client_id, "channel", lambda: _metered(provider, config, builders))
 
     engine = _stage(
         client_id,

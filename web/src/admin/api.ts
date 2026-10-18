@@ -481,6 +481,40 @@ export function adminSetClientPlan(clientId: string, planId: string | null): Pro
   });
 }
 
+// ---- a client's daily e-mail cap (src/sales_app/api/admin_send_cap.py) --------------------------------
+// The cap is the Admin's alone (owner to set or remove); there is no default and no "unlimited".
+// The effective cap is the smaller of the cap and the daily quota of the client's current plan.
+
+export type SendCapStatus = "ok" | "not_configured" | "limit_reached";
+
+export interface SendCap {
+  client_id: string;
+  channel: string;
+  daily_cap: number | null;
+  plan_daily_quota: number | null;
+  effective_cap: number | null;
+  used_today: number | null;
+  remaining_today: number | null;
+  day_utc: string;
+  status: SendCapStatus;
+  max_cap: number;
+}
+
+export function adminGetSendCap(clientId: string): Promise<SendCap> {
+  return request<SendCap>(`/clients/${encodeURIComponent(clientId)}/send-cap`);
+}
+
+export function adminSetSendCap(clientId: string, dailyCap: number): Promise<SendCap> {
+  return request<SendCap>(`/clients/${encodeURIComponent(clientId)}/send-cap`, {
+    method: "PUT",
+    body: JSON.stringify({ daily_cap: dailyCap }),
+  });
+}
+
+export function adminRemoveSendCap(clientId: string): Promise<SendCap> {
+  return request<SendCap>(`/clients/${encodeURIComponent(clientId)}/send-cap`, { method: "DELETE" });
+}
+
 // ---- monthly invoices (src/sales_app/api/admin_billing.py) ----------------------------------------
 // Amounts are decimal strings. An invoice carries its own copy of the plan terms it was built from,
 // so it never changes when a plan does. PAID / FOR_FREE are the Admin's declaration (once, owner

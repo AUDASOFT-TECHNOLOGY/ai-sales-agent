@@ -51,6 +51,7 @@ from sales_core.contracts import (
     SendResult,
 )
 from sales_core.contracts.audit import AuditEvent
+from sales_core.contracts.messaging import DEFERRED_KEY, DEFERRED_VALUE
 from sales_core.engine import events as ev
 from sales_core.engine.applier import (
     after_send,
@@ -636,8 +637,12 @@ class Engine:
             code=result.error_code,
             error=detail,
         )
-        attempts = action.attempts + 1
-        retry = result.retryable and attempts < self._config.max_attempts
+        # A refusal that sent nothing and is not the message's fault (an allowance used up): the
+        # action stays APPROVED with the reason visible, WITHOUT using one of its attempts, and is
+        # offered again on the next dispatch (once per dispatch: no tight loop).
+        deferred = result.retryable and result.metadata.get(DEFERRED_KEY) == DEFERRED_VALUE
+        attempts = action.attempts if deferred else action.attempts + 1
+        retry = deferred or (result.retryable and attempts < self._config.max_attempts)
         status = ActionStatus.APPROVED if retry else ActionStatus.FAILED
         try:
             self._repo.save_actions(

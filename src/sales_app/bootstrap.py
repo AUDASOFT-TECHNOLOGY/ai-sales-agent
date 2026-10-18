@@ -4,7 +4,7 @@ import logging
 import os
 from collections.abc import Callable, Mapping
 from concurrent.futures import Executor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,8 @@ from sales_app.persistence.llm_usage_rows import SqlLLMUsageStore
 from sales_app.persistence.mail_cursor_rows import SqlMailCursorStore
 from sales_app.persistence.operational_rows import SqlOperationalRows
 from sales_app.persistence.plan_rows import SqlPlanStore
-from sales_app.plans import PlanStore
+from sales_app.persistence.send_cap_rows import SqlSendCapStore, SqlSendCounter
+from sales_app.plans import PlanStore, current_daily_quota
 from sales_app.registry import ClientRegistry
 from sales_app.runtime_manager import RuntimeManager
 from sales_app.scheduler import Scheduler
@@ -44,6 +45,7 @@ from sales_app.secret_store import (
     SecretStoreError,
     build_secret_store,
 )
+from sales_app.send_cap import SendCapStore, SendLimits
 from sales_app.settings import Settings
 from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
 from sales_app.sourcing.consent.files import open_file_registry
@@ -102,6 +104,11 @@ class Application:
     plans: PlanStore | None = None
     # The monthly invoices; None without a database (the Admin API says so).
     invoices: InvoiceStore | None = None
+    # The Admin's daily e-mail cap of each client and the effective limit (cap and plan) every e-mail
+    # path obeys; None without a database (e-mails are then refused; the Admin API says so). See
+    # `sales_app.send_cap`.
+    send_caps: SendCapStore | None = None
+    send_limits: SendLimits | None = None
 
     def agent_may_work(self, client_id: str) -> bool:
         """`_may_work`, failing closed: if either switch cannot be read, the answer is no."""
@@ -263,6 +270,8 @@ def _assemble(
         else FileSecretAudit(settings.secrets_dir / AUDIT_FILENAME)
     )
     credentials = CredentialService(secrets, audit, now=clock.now)
+    plans = _plan_store(account_stores)
+    send_caps, send_limits = _send_limits(account_stores, plans, clock)
     builders = builders or default_builders(
         settings,
         verify_token=lambda: secrets.get(GLOBAL_SCOPE, WHATSAPP_VERIFY_TOKEN),
@@ -272,7 +281,11 @@ def _assemble(
         ),
         writeback=_writeback_support(settings, account_stores),
         llm_usage=_llm_usage_stores(account_stores),
+        send_guards=send_limits.guard if send_limits is not None else None,
     )
+    if builders.send_guards is None and send_limits is not None:
+        # Builders given by the caller still obey the deployment's cap (their metered channels).
+        builders = replace(builders, send_guards=send_limits.guard)
 
     llm_registry = build_llm_registry(settings.allowed_llm_models)
     if settings.model_upstream_ids:
@@ -345,7 +358,9 @@ def _assemble(
         channel_policy=channel_policy,
         builders=builders,
         llm_pricing=_llm_pricing_store(account_stores),
-        plans=_plan_store(account_stores),
+        plans=plans,
+        send_caps=send_caps,
+        send_limits=send_limits,
         invoices=_invoice_store(account_stores),
     )
 
@@ -369,6 +384,18 @@ def _invoice_store(account_stores: AccountStores | None) -> InvoiceStore | None:
 def _plan_store(account_stores: AccountStores | None) -> PlanStore | None:
     engine = account_stores.engine if account_stores is not None else None
     return SqlPlanStore(engine) if engine is not None else None
+
+
+def _send_limits(
+    account_stores: AccountStores | None, plans: PlanStore | None, clock: Clock
+) -> tuple[SendCapStore | None, SendLimits | None]:
+    """The cap store and the effective limit (Admin cap and plan) of a deployment with a database."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None, None
+    caps = SqlSendCapStore(engine)
+    quota = (lambda client_id: current_daily_quota(plans, client_id)) if plans is not None else None
+    return caps, SendLimits(caps, SqlSendCounter(engine), clock, quota)
 
 
 def _llm_pricing_store(account_stores: AccountStores | None) -> LLMPricingStore | None:

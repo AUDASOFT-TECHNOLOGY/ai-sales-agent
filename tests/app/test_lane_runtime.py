@@ -38,6 +38,7 @@ from sales_app.secret_store import (
     InMemorySecretStore,
     client_scope,
 )
+from sales_app.send_cap import InMemorySendCapStore, InMemorySendCounter, SendLimits
 from sales_app.sourcing import StatusMapping
 from sales_app.wiring import build_runtime, default_builders
 from sales_core.contracts import (
@@ -229,9 +230,21 @@ class Deployment:
             source_instances={"google_sheets": build_source, "hubspot": build_source},
             operational_stores=lambda cid: self.stores[cid],
             consent=lambda cid: self.worlds[cid].registry,
+            send_guards=self.send_limits.guard,
         )
 
     # ---- the application ----------------------------------------------------------------
+
+    @property
+    def send_limits(self):
+        """The e-mail cap of the deployment: this fixture has no database, so the guard is in memory,
+        with a generous cap declared by the Admin for every client (no cap means no e-mail)."""
+        if not hasattr(self, "_send_limits"):
+            caps = InMemorySendCapStore()
+            for cid in self.clients:
+                caps.set(cid, 1000, by="admin:test", at=self.clock.now())
+            self._send_limits = SendLimits(caps, InMemorySendCounter(), self.clock)
+        return self._send_limits
 
     def start(self):
         self.application = build_application(

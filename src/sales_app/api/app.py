@@ -22,6 +22,7 @@ from sales_app.api.admin_clients import create_admin_clients_router
 from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_llm_pricing import create_admin_llm_pricing_router
 from sales_app.api.admin_plans import create_admin_plans_router
+from sales_app.api.admin_send_cap import create_admin_send_cap_router
 from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
@@ -91,6 +92,7 @@ def create_app(
     app.include_router(create_admin_settings_router(application))
     app.include_router(create_admin_llm_pricing_router(application))
     app.include_router(create_admin_plans_router(application))
+    app.include_router(create_admin_send_cap_router(application))
     app.include_router(create_admin_billing_router(application))
     app.include_router(create_admin_channels_router(application))
     app.include_router(

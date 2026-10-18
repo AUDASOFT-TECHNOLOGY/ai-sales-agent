@@ -28,7 +28,7 @@ from sales_app.bootstrap import _mail_cursor_stores
 from sales_app.inbox import poll_inbox
 from sales_app.persistence import create_database_engine, upgrade_database
 from sales_app.persistence.mail_cursor_rows import SqlMailCursorStore
-from sales_app.persistence.schema import current_revision, head_revision
+from sales_app.persistence.schema import current_revision
 from sales_app.persistence.tables import metadata
 from sales_app.scheduler import Scheduler
 from sales_app.sourcing.errors import StoreUnavailableError
@@ -86,11 +86,19 @@ class TestMigration0010:
         upgrade_database(engine, "0009")
         before = set(inspect(engine).get_table_names())
         assert "op_mail_cursor" not in before
-        upgrade_database(engine)
-        assert head_revision() == current_revision(engine) == "0010"
+        upgrade_database(engine, "0010")
+        assert current_revision(engine) == "0010"
         after = set(inspect(engine).get_table_names())
         assert after - before == {"op_mail_cursor"}
-        assert after - {"alembic_version"} == set(metadata.tables)
+        # 0011 (the send cap), 0012 (payments) and 0013 (daily reports) come after: modelled, not here yet.
+        later = {
+            "client_send_caps",
+            "op_send_counter",
+            "payment_events",
+            "daily_reports",
+            "client_report_settings",
+        }
+        assert after - {"alembic_version"} == set(metadata.tables) - later
 
     def test_the_table_holds_a_position_and_nothing_of_any_message(self, engine):
         columns = {c["name"]: c for c in inspect(engine).get_columns("op_mail_cursor")}

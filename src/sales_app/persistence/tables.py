@@ -11,7 +11,9 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -391,4 +393,29 @@ op_mail_cursor = Table(
     Column("uid_validity", BigInteger, nullable=False),
     Column("next_uid", BigInteger, nullable=False),
     Column("updated_at", UtcDateTime, nullable=False),
+)
+
+# The daily send cap the Admin set for a client: a whole number of at least 1. No row, no cap, and
+# nothing may be sent. There is no default value.
+client_send_caps = Table(
+    "client_send_caps",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("daily_cap", Integer, nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+    Column("updated_by", String(255), nullable=False),
+    CheckConstraint("daily_cap >= 1", name="ck_client_send_caps_cap"),
+)
+
+# How many messages a client sent on one channel on one UTC day. A place is reserved here, in one
+# statement, before a message is sent (see `sales_app.send_cap`). Counts only: nothing of a message.
+op_send_counter = Table(
+    "op_send_counter",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("channel", String(32), primary_key=True),
+    Column("day", Date, primary_key=True),
+    Column("used", Integer, nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+    CheckConstraint("used >= 0", name="ck_op_send_counter_used"),
 )

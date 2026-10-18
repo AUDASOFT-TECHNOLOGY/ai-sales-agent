@@ -249,3 +249,18 @@ class InMemoryPlanStore:
                 if a.started_at < end and (a.ended_at is None or a.ended_at > start)
             ]
         return sorted(found, key=lambda a: (a.client_id, a.started_at))
+
+
+def current_daily_quota(store: PlanStore, client_id: str) -> int | None:
+    """The daily quota the client's current plan allows today (the plan's present terms, not the
+    snapshot taken when the client was put on it), or None when the client is on no plan.
+
+    This is what bounds the client's e-mails (`sales_app.send_cap.SendLimits`). A plan that cannot
+    be found raises `PlanNotFoundError`: the caller refuses rather than guesses."""
+    assignment = store.current_assignment(client_id)
+    if assignment is None:
+        return None
+    plan = store.get_plan(assignment.plan_id)
+    if plan is None:
+        raise PlanNotFoundError(assignment.plan_id)
+    return plan.daily_quota

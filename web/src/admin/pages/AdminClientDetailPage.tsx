@@ -14,6 +14,7 @@ import { Chip } from "../../ui/Chip";
 import { Button } from "../../ui/Button";
 import { FieldShell, TextInput } from "../../ui/Controls";
 import { useAdminAuth } from "../AdminAuthContext";
+import { AdminClientSendCapCard } from "./AdminClientSendCapCard";
 import {
   AdminApiError,
   adminGetClient,
@@ -287,6 +288,11 @@ function ClientSheet({
         <Glass level={1} className="admin-detail-card">
           <h3 className="t-label c-2">Plan</h3>
           <ClientPlanCard clientId={client.client_id} />
+        </Glass>
+
+        <Glass level={1} className="admin-detail-card">
+          <h3 className="t-label c-2">Daily email limit</h3>
+          <AdminClientSendCapCard clientId={client.client_id} />
         </Glass>
       </div>
     </>

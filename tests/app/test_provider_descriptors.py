@@ -444,6 +444,8 @@ class TestTheBuildersTheRuntimeUsesAreUnchanged:
             "consent",
             "source_instances",  # E5: added last, with a default, so older callers are unchanged
             "writeback",  # E9: the same, and None (off) unless the deployment builds it
+            "llm_usage",  # the LLM usage register of a client, None without a database
+            "send_guards",  # the daily send cap of a client's metered channel, None without a database
         ]
 
     def test_the_channel_provider_keeps_its_fields_and_gains_the_inbox(self):
@@ -455,6 +457,7 @@ class TestTheBuildersTheRuntimeUsesAreUnchanged:
             "build_parser",
             "build_inbox",  # added with e-mail, the one channel that is polled, not pushed
             "answer_unknown",  # added with Telegram, where a stranger is asked who they are
+            "metered",  # e-mail: every message takes a place in the client's daily send cap
         ]
 
     def test_the_table_has_the_same_providers_as_before(self):

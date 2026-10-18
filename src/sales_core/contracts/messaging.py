@@ -9,6 +9,11 @@ from sales_core.contracts.conversation import MessageDraft
 from sales_core.contracts.enums import Channel, SendStatus
 from sales_core.contracts.ids import ClientId, ProspectId
 
+# A transient failure that sent nothing and says "not now" (an allowance used up): the Engine keeps
+# the action approved and does not count the try. Carried in `SendResult.metadata`.
+DEFERRED_KEY = "deferred"
+DEFERRED_VALUE = "true"
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class OutboundMessage:

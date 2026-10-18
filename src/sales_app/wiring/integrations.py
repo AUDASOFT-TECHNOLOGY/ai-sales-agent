@@ -19,6 +19,7 @@ from sales_app.config.runtime_config import channel_provider_keys
 from sales_app.config.schema import SourceInstance
 from sales_app.inbox import Fetched, InboxPoller
 from sales_app.llm_usage import LLMUsageStore
+from sales_app.send_cap import DailySendGuard
 from sales_app.settings import Settings
 from sales_app.sourcing.consent import ConsentWriter
 from sales_app.sourcing.ports import OperationalStore, ProspectSource
@@ -57,6 +58,9 @@ class ChannelProvider:
     build_inbox: Callable[[ClientConfig], InboxPoller] | None = None
     # Answers a sender no prospect matches (see `ChannelSupport.answer_unknown`); None: no answer.
     answer_unknown: Callable[[ClientConfig, InboundMessage], None] | None = None
+    # Every message through this channel takes a place in the client's daily send cap (e-mail, in
+    # both modes). The runtime wraps the channel it builds: with no guard wired, nothing is sent.
+    metered: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +85,9 @@ class IntegrationBuilders:
     # One client's LLM usage register, or None when the deployment has no database: calls are then
     # simply not recorded.
     llm_usage: Callable[[str], LLMUsageStore] | None = None
+    # One client's cap guard for a channel kind (`guard(client_id, channel)`), or None when the
+    # deployment has no database: a `metered` channel then refuses every message.
+    send_guards: Callable[[str, str], DailySendGuard] | None = None
 
     # ---- polling the channels that do not call us ------------------------------------------
 
@@ -163,6 +170,7 @@ def default_builders(
     consent: Callable[[str], ConsentWriter] | None = None,
     writeback: WritebackSupport | None = None,
     llm_usage: Callable[[str], LLMUsageStore] | None = None,
+    send_guards: Callable[[str, str], DailySendGuard] | None = None,
 ) -> IntegrationBuilders:
     """The builders of every provider the runtime can run today (those with a factory).
 
@@ -171,7 +179,8 @@ def default_builders(
     `registry` defaults to the providers Revansa knows. A provider that is declared but has no
     factory is left out, so a client naming it is refused exactly as for any unknown provider.
     `operational_stores` and `consent` open one client's store and registry (None: the deployment
-    has none, and a client whose source needs them is refused).
+    has none, and a client whose source needs them is refused). `send_guards` gives the daily send
+    cap guard of a client's channel; without it the e-mail channel (metered) sends nothing.
     """
     registry = registry if registry is not None else default_registry()
 
@@ -190,6 +199,7 @@ def default_builders(
             build_parser=parser if support.build_parser is not None else None,
             build_inbox=support.build_inbox,
             answer_unknown=support.answer_unknown,
+            metered=Channel(support.kind) is Channel.EMAIL,
         )
 
     def runnable(kind: ProviderKind):
@@ -206,4 +216,5 @@ def default_builders(
         consent=consent,
         writeback=writeback,
         llm_usage=llm_usage,
+        send_guards=send_guards,
     )
