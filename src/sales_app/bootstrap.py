@@ -21,6 +21,7 @@ from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
 from sales_app.config_store import ConfigStore
 from sales_app.daily_report import DailyReportService
 from sales_app.errors import ConfigurationError
+from sales_app.gmail_wiring import GmailMailService
 from sales_app.inbox import PositionStore
 from sales_app.llm_pricing import LLMPricingStore
 from sales_app.llm_usage import LLMUsageStore
@@ -121,6 +122,9 @@ class Application:
     # `sales_app.send_cap`.
     send_caps: SendCapStore | None = None
     send_limits: SendLimits | None = None
+    # The Gmail mailbox mode: the platform's Google application (resolved at each use), the clients'
+    # grants in the secret store and the channel/inbox of a client in Gmail mode.
+    gmail: GmailMailService | None = None
 
     def agent_may_work(self, client_id: str) -> bool:
         """`_may_work`, failing closed: if either switch cannot be read, the answer is no."""
@@ -155,6 +159,7 @@ def build_application(
     refresh_executor: Executor | None = None,
     agent_state_store: AgentStateStore | None = None,
     source_check_store: SourceCheckStore | None = None,
+    gmail_service: GmailMailService | None = None,
 ) -> Application:
     """Load, validate and wire everything, or raise a ConfigurationError listing every problem.
 
@@ -224,6 +229,7 @@ def build_application(
             defaults,
             agent_state,
             source_checks,
+            gmail_service,
         )
     except BaseException:
         if defaults is not None:
@@ -250,6 +256,7 @@ def _assemble(
     account_stores: AccountStores | None,
     agent_state: AgentStateStore,
     source_checks: SourceCheckStore,
+    gmail_service: GmailMailService | None = None,
 ) -> Application:
     client_auth = ClientAuthService(
         client_profiles,
@@ -284,6 +291,10 @@ def _assemble(
     credentials = CredentialService(secrets, audit, now=clock.now)
     plans = _plan_store(account_stores)
     send_caps, send_limits = _send_limits(account_stores, plans, clock)
+    # Resolved at each use from the Admin's credentials: no restart when they change.
+    gmail = gmail_service or GmailMailService(
+        secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
+    )
     builders = builders or default_builders(
         settings,
         verify_token=lambda: secrets.get(GLOBAL_SCOPE, WHATSAPP_VERIFY_TOKEN),
@@ -294,6 +305,7 @@ def _assemble(
         writeback=_writeback_support(settings, account_stores),
         llm_usage=_llm_usage_stores(account_stores),
         send_guards=send_limits.guard if send_limits is not None else None,
+        gmail=gmail,
     )
     if builders.send_guards is None and send_limits is not None:
         # Builders given by the caller still obey the deployment's cap (their metered channels).
@@ -384,6 +396,7 @@ def _assemble(
         plans=plans,
         send_caps=send_caps,
         send_limits=send_limits,
+        gmail=gmail,
         invoices=_invoice_store(account_stores),
         payment_provider=_payment_provider_resolver(secrets),
         daily_reports=daily_reports,

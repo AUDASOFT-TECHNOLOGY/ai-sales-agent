@@ -14,6 +14,7 @@ from sales_app.brain_registry import BrainRegistry
 from sales_app.config.brain_settings import prepare_brain_settings
 from sales_app.config.channel_access import GOVERNED, effective_channels
 from sales_app.config.email_settings import (
+    GMAIL_MODE,
     PLATFORM_MODE,
     email_mode_of,
     mailbox_key_of,
@@ -39,6 +40,12 @@ from sales_app.config.secrets import (
     EMAIL_PASSWORD,
     EMAIL_PLATFORM_MAILBOX,
     EMAIL_PLATFORM_PROFILE_KEYS,
+    GMAIL_ACCOUNT_ADDRESS,
+    GMAIL_OAUTH_CLIENT_ID,
+    GMAIL_OAUTH_CLIENT_SECRET,
+    GMAIL_OAUTH_STATE_KEY,
+    GMAIL_REAUTH_REQUIRED,
+    GMAIL_REFRESH_TOKEN,
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
     OPENAI_ORGANIZATION,
@@ -113,6 +120,11 @@ class ClientConfig:
             # client writes can name a mailbox that is not its own.
             address = self.secrets.get_optional(EMAIL_PLATFORM_MAILBOX)
             return platform_mailbox_key(address) if address else None
+        if email_mode_of(settings) == GMAIL_MODE:
+            # The connected Gmail address (not a secret, unique across clients): set by the OAuth
+            # callback, never by a setting.
+            address = self.secrets.get_optional(GMAIL_ACCOUNT_ADDRESS)
+            return f"gmail|{address.lower()}" if address else None
         return mailbox_key_of(settings)
 
 
@@ -347,6 +359,30 @@ def _is_missing_setting(problem: Mapping[str, object]) -> bool:
     return problem["type"] == "missing" and location in _SETTINGS_LOCATIONS
 
 
+def _gmail_missing(
+    secret_store: SecretStore | None, client: str, values: dict[str, str], missing: list[str]
+) -> None:
+    """A client in Gmail mode is ready to run only with the platform's Google application set and
+    its own valid grant. Tokens are NOT resolved into the client's secrets (the token source reads
+    the store when it needs one); only the connected address is, for the mailbox key."""
+    if secret_store is None:
+        missing.append("Email Gmail is not connected yet")
+        return
+    if not all(
+        secret_store.entry(GLOBAL_SCOPE, key) is not None
+        for key in (GMAIL_OAUTH_CLIENT_ID, GMAIL_OAUTH_CLIENT_SECRET, GMAIL_OAUTH_STATE_KEY)
+    ):
+        missing.append("Email Google connection is not configured by the platform yet")
+    if secret_store.entry(client, GMAIL_REFRESH_TOKEN) is None:
+        missing.append("Email Gmail is not connected yet")
+        return
+    if secret_store.get(client, GMAIL_REAUTH_REQUIRED) == "1":
+        missing.append("Email Gmail must be connected again")
+    address = secret_store.get(client, GMAIL_ACCOUNT_ADDRESS)
+    if address:
+        values[GMAIL_ACCOUNT_ADDRESS] = address
+
+
 def _resolve_secrets(
     spec: ClientFile,
     effective: ApprovalMode,
@@ -386,8 +422,14 @@ def _resolve_secrets(
         if any(c not in ("email", "telegram") for c in channels)
         else []
     )
+    email_gmail = "email" in channels and (
+        email_mode_of(spec.channel_settings_for("email")) == GMAIL_MODE
+    )
+    # A Gmail mailbox has no password at all: its grant is the client's own OAuth consent.
     email_wanted = (
-        [(EMAIL_PASSWORD, "Email password", client, None, live)] if "email" in channels else []
+        [(EMAIL_PASSWORD, "Email password", client, None, live)]
+        if "email" in channels and not email_gmail
+        else []
     )
     # A mailbox Revansa provides: its address is the client's own, its servers are the platform's.
     # The servers are only collected here; whether they are all set is said once, below.
@@ -447,6 +489,8 @@ def _resolve_secrets(
             parse_email_settings(spec.channel_settings_for("email"))
         except ValueError:
             missing.append("Email settings are incomplete")
+    if email_gmail and live:
+        _gmail_missing(secret_store, client, values, missing)
     if email_platform and live:
         if EMAIL_PLATFORM_MAILBOX not in values:
             missing.append("Email mailbox has not been assigned to this account yet")

@@ -13,6 +13,7 @@ database, no registry set up): a client that needs one then does not run, and sa
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from sales_app.config import ClientConfig
 from sales_app.config.runtime_config import channel_provider_keys
@@ -171,6 +172,7 @@ def default_builders(
     writeback: WritebackSupport | None = None,
     llm_usage: Callable[[str], LLMUsageStore] | None = None,
     send_guards: Callable[[str, str], DailySendGuard] | None = None,
+    gmail: Any = None,
 ) -> IntegrationBuilders:
     """The builders of every provider the runtime can run today (those with a factory).
 
@@ -186,6 +188,12 @@ def default_builders(
 
     def channel_provider(descriptor) -> ChannelProvider:
         support = descriptor.channel
+        build, build_inbox = descriptor.build, support.build_inbox
+        if descriptor.key == "email" and gmail is not None:
+            # The e-mail channel of a client in Gmail mode comes from the application's Gmail
+            # service; the other modes are built exactly as before.
+            build = lambda config: descriptor.build(config, gmail=gmail)
+            build_inbox = lambda config: support.build_inbox(config, gmail=gmail)
 
         def parser(secrets: Mapping[str, str]) -> WebhookParser:
             token = verify_token() if verify_token is not None else None
@@ -193,11 +201,11 @@ def default_builders(
 
         return ChannelProvider(
             kind=Channel(support.kind),
-            build=descriptor.build,
+            build=build,
             routing_key=support.routing_key,
             webhook_secret=support.webhook_secret,
             build_parser=parser if support.build_parser is not None else None,
-            build_inbox=support.build_inbox,
+            build_inbox=build_inbox,
             answer_unknown=support.answer_unknown,
             metered=Channel(support.kind) is Channel.EMAIL,
         )

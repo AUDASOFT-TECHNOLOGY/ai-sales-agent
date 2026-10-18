@@ -150,6 +150,29 @@ CATALOG: tuple[CredentialSpec, ...] = (
         pattern=re.compile(r"^[\x21-\x7e]{16,256}$"),
         rule="must be 16 to 256 printable characters without spaces",
     ),
+    # The platform's Google OAuth application, for the clients who connect their own Gmail. Setting
+    # them is what turns Gmail on; they are never returned. Stored is not verified by Google.
+    CredentialSpec(
+        "gmail.oauth_client_id",
+        ScopeKind.GLOBAL,
+        "Google OAuth client id",
+        pattern=re.compile(r"^[!-~]{10,256}$"),
+        rule="must be 10 to 256 printable characters without spaces",
+    ),
+    CredentialSpec(
+        "gmail.oauth_client_secret",
+        ScopeKind.GLOBAL,
+        "Google OAuth client secret",
+        pattern=re.compile(r"^[!-~]{8,256}$"),
+        rule="must be 8 to 256 printable characters without spaces",
+    ),
+    CredentialSpec(
+        "gmail.oauth_state_key",
+        ScopeKind.GLOBAL,
+        "Google OAuth state signing key",
+        pattern=re.compile(r"^[!-~]{16,256}$"),
+        rule="must be 16 to 256 printable characters without spaces",
+    ),
     # The servers of the mailboxes Revansa provides (OVH today). Only the servers: which mailbox a
     # client gets, and its password, are the client's own (`email.password`, client scope).
     CredentialSpec(

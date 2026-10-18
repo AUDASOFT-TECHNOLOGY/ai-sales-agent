@@ -11,12 +11,23 @@ Which clients may use the channel at all is the Admin's decision (`sales_app.con
 
 import contextlib
 import smtplib
+from typing import Any
 
 from sales_app.config import ClientConfig
-from sales_app.config.email_settings import EmailChannelSettings, EmailSettingsOfAnyMode
+from sales_app.config.email_settings import (
+    GMAIL_MODE,
+    EmailChannelSettings,
+    EmailSettingsOfAnyMode,
+    email_mode_of,
+)
 from sales_app.config.secrets import EMAIL_PASSWORD, EMAIL_PLATFORM_MAILBOX
 from sales_app.connection_tests import MailProbeFailure
-from sales_app.mailbox_access import imap_settings, resolve_mailbox, smtp_settings
+from sales_app.mailbox_access import (
+    MailboxNotReadyError,
+    imap_settings,
+    resolve_mailbox,
+    smtp_settings,
+)
 from sales_app.secret_store import ScopeKind
 from sales_app.secret_store.catalog import MAILBOX_ADDRESS, MAILBOX_ADDRESS_RULE
 from sales_app.wiring.providers.types import (
@@ -40,11 +51,25 @@ KEY = "email"
 CHANNEL_KIND = "email"  # the Core's name for this channel
 
 
-def build_channel(config: ClientConfig, *, smtp_factory=open_smtp) -> MailChannel:
+def _is_gmail(config: ClientConfig) -> bool:
+    return email_mode_of(config.spec.channel_settings_for("email")) == GMAIL_MODE
+
+
+def build_channel(config: ClientConfig, *, smtp_factory=open_smtp, gmail: Any = None) -> Any:
+    """The client's sending channel. `gmail` is the application's `GmailMailService`; a client in
+    Gmail mode without it cannot be built (fail closed). The other modes are unchanged."""
+    if _is_gmail(config):
+        if gmail is None:
+            raise MailboxNotReadyError("Gmail is not available in this deployment")
+        return gmail.channel(config)
     return MailChannel(resolve_mailbox(config).smtp, factory=smtp_factory)
 
 
-def build_inbox(config: ClientConfig, *, imap_factory=open_imap) -> ImapMailbox:
+def build_inbox(config: ClientConfig, *, imap_factory=open_imap, gmail: Any = None) -> Any:
+    if _is_gmail(config):
+        if gmail is None:
+            raise MailboxNotReadyError("Gmail is not available in this deployment")
+        return gmail.inbox(config)
     return ImapMailbox(resolve_mailbox(config).imap, factory=imap_factory)
 
 

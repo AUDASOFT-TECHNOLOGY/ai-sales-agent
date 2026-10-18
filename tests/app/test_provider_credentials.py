@@ -57,6 +57,8 @@ MODEL_LIST_KEYS = {"openai.model_sol", "openai.model_lune", "openai.models"}
 # provider's credentials are the client's own (`email.password`).
 # The payment webhook's signing secret: a platform credential no provider declares.
 PLATFORM_PAYMENT_KEYS = {"payments.webhook_secret"}
+# The platform's Google OAuth application (Gmail mailbox mode): global, Admin only, no provider declares it.
+PLATFORM_GMAIL_KEYS = {"gmail.oauth_client_id", "gmail.oauth_client_secret", "gmail.oauth_state_key"}
 PLATFORM_MAIL_KEYS = {
     "email.platform_domain",
     "email.platform_smtp_host",
@@ -220,7 +222,9 @@ class TestEquivalenceWithTheCredentialCatalog:
 
     def test_the_catalog_lists_exactly_the_stored_declarations_plus_model_lists(self):
         derived = {spec.key for spec in legacy_specs(REGISTRY)}
-        catalog_only = MODEL_LIST_KEYS | PLATFORM_MAIL_KEYS | PLATFORM_PAYMENT_KEYS
+        catalog_only = (
+            MODEL_LIST_KEYS | PLATFORM_MAIL_KEYS | PLATFORM_PAYMENT_KEYS | PLATFORM_GMAIL_KEYS
+        )
         assert derived - NOT_YET_IN_CATALOG == set(CATALOG_BY_KEY) - catalog_only
         assert set(CATALOG_BY_KEY) - derived == catalog_only
         assert derived & NOT_YET_IN_CATALOG == NOT_YET_IN_CATALOG

@@ -32,6 +32,7 @@ from sales_app.api.client_channel import (
     MailProbeFactory,
     create_client_channel_router,
 )
+from sales_app.api.client_gmail import create_application_gmail_router
 from sales_app.api.client_lanes import create_client_lanes_router
 from sales_app.api.client_prospects import create_client_prospects_router
 from sales_app.api.client_reporting import create_client_reporting_router
@@ -107,6 +108,9 @@ def create_app(
     app.include_router(create_client_prospects_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))
     app.include_router(create_client_channel_router(application, mail_probe, bot_probe))
+    gmail_router = create_application_gmail_router(application)
+    if gmail_router is not None:
+        app.include_router(gmail_router)
     app.include_router(create_client_lanes_router(application))
     app.include_router(create_client_reporting_router(application))
 

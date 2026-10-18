@@ -8,7 +8,7 @@ The servers are typed by the client, so the ports are limited to the ones mail s
 hosts are checked again, address by address, each time a connection is made
 (`sales_integrations.mail.net`): a client cannot aim Revansa at the platform's own network.
 
-**Two modes.** `mode` says where the mailbox comes from:
+**Three modes (exactly one at a time).** `mode` says where the mailbox comes from:
 
 - absent, or `custom`: the historical mailbox, described here by its servers and login
   (`EmailChannelSettings`). A document written before modes existed has no `mode` and means this,
@@ -16,6 +16,8 @@ hosts are checked again, address by address, each time a connection is made
 - `platform`: a mailbox Revansa provides. Its servers are the platform's (Admin -> Settings) and its
   address and password are the client's own credentials; the settings hold nothing technical, only
   what the client may say about how it writes (`PlatformEmailSettings`).
+- `gmail`: the client's own Gmail, connected by Google OAuth (`GmailEmailSettings`); same wording
+  fields, no technical setting and no password anywhere.
 """
 
 from collections.abc import Mapping
@@ -44,6 +46,7 @@ DEFAULT_SUBJECT = "Following up on your enquiry"
 
 PLATFORM_MODE = "platform"
 CUSTOM_MODE = "custom"
+GMAIL_MODE = "gmail"
 
 
 def _plain_name(value: str | None) -> str | None:
@@ -144,20 +147,52 @@ class PlatformEmailSettings(BaseModel):
         return _single_line(value)
 
 
-MailboxSettings = EmailChannelSettings | PlatformEmailSettings
+class GmailEmailSettings(BaseModel):
+    """The client's own Gmail, connected with Google OAuth: nothing technical here either. The
+    address and the grant are not settings (they are kept in the secret store by the OAuth callback);
+    what is left is how the client's messages are written. `extra="forbid"` refuses any server,
+    port, login or password."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mode: Literal["gmail"]
+    from_name: str | None = None
+    subject: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)
+    ] = DEFAULT_SUBJECT
+
+    @field_validator("from_name")
+    @classmethod
+    def _name(cls, value: str | None) -> str | None:
+        return _plain_name(value)
+
+    @field_validator("subject")
+    @classmethod
+    def _one_line(cls, value: str) -> str:
+        return _single_line(value)
+
+
+MailboxSettings = EmailChannelSettings | PlatformEmailSettings | GmailEmailSettings
 
 
 def email_mode_of(settings: Mapping[str, Any]) -> str:
-    """`platform` or `custom`. A document with no `mode` is `custom`: it is the historical one."""
-    return PLATFORM_MODE if settings.get("mode") == PLATFORM_MODE else CUSTOM_MODE
+    """`platform`, `gmail` or `custom`. A document with no `mode` is `custom`: it is the historical
+    one. A document has exactly one mode: there is no way to name two."""
+    mode = settings.get("mode")
+    if mode == PLATFORM_MODE:
+        return PLATFORM_MODE
+    return GMAIL_MODE if mode == GMAIL_MODE else CUSTOM_MODE
 
 
 def parse_email_settings(settings: Mapping[str, Any]) -> MailboxSettings:
     """The settings of the mode they name, validated. Raises ValueError (a pydantic one) when they
     are not valid for it. A mode that is not `platform` is read by the historical model, which
     refuses any `mode` other than `custom`."""
-    if email_mode_of(settings) == PLATFORM_MODE:
+    mode = email_mode_of(settings)
+    if mode == PLATFORM_MODE:
         return PlatformEmailSettings.model_validate(dict(settings))
+    if mode == GMAIL_MODE:
+        return GmailEmailSettings.model_validate(dict(settings))
     return EmailChannelSettings.model_validate(dict(settings))
 
 

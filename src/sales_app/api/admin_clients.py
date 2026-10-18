@@ -833,6 +833,31 @@ def read_client_settings(
     )
 
 
+def _refuse_two_mailboxes(
+    application: Application,
+    client_id: str,
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+) -> None:
+    """409 when the publication would leave a client with two e-mail mailboxes (Gmail and a
+    dedicated one): the rule lives on the server, whoever publishes (see `mailbox_exclusivity`)."""
+    from sales_app.mailbox_exclusivity import mode_conflict
+
+    def email_settings(document: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        section = document.get("channel")
+        if not isinstance(section, Mapping) or section.get("provider") != "email":
+            return None
+        settings = section.get("settings")
+        return settings if isinstance(settings, Mapping) else {}
+
+    new = email_settings(after)
+    if new is None:
+        return
+    conflict = mode_conflict(application, client_id, email_settings(before) or {}, new)
+    if conflict is not None:
+        raise HTTPException(409, conflict)
+
+
 _STAND_IN = "pending-configuration"
 # What the Admin (the model) and the client (the Sheet) have not given yet. Neither blocks the other.
 _PENDING_VALUES = (("llm", "model"), ("sheets", "spreadsheet_id"))
@@ -929,6 +954,7 @@ def publish_client_settings(
             merged = dict(document.get(section) or {})
             merged.update({k: changes[section][k] for k in keys if k in changes[section]})
             document[section] = merged
+    _refuse_two_mailboxes(application, client_id, base, document)
     check = validate_client_document(client_id, raw, document, saving=True)
     if check.errors or check.document is None:
         raise HTTPException(422, detail=list(check.errors) or ["invalid settings"])

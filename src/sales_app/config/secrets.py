@@ -61,6 +61,16 @@ TELEGRAM_WEBHOOK_SECRET = "telegram.webhook_secret"
 # stored beside the credentials but not credentials, and never resolved into a client's secrets.
 CHANNELS_ALLOWED = "channels.allowed"  # global: "whatsapp,email" or "none"
 CHANNELS_ACCESS = "channels.access"  # one client's exceptions: "+email,-whatsapp"
+# The platform's Google OAuth application (global, Admin only, write-only): the Gmail mailbox mode.
+GMAIL_OAUTH_CLIENT_ID = "gmail.oauth_client_id"
+GMAIL_OAUTH_CLIENT_SECRET = "gmail.oauth_client_secret"
+GMAIL_OAUTH_STATE_KEY = "gmail.oauth_state_key"  # signs the OAuth `state`; at least 16 characters
+# One client's Gmail grant (client scope). Written only by the OAuth callback, never through the
+# Admin credentials API (they are not in the credential catalog): the refresh token, the connected
+# address and the mark that Google needs the person to authorise again.
+GMAIL_REFRESH_TOKEN = "gmail.refresh_token"
+GMAIL_ACCOUNT_ADDRESS = "gmail.account_address"
+GMAIL_REAUTH_REQUIRED = "gmail.reauth_required"
 
 # The credential a client's own source needs, by the source's provider key: (key, label). Only a
 # client that chose that source resolves it; every other client's secrets are what they were.

@@ -23,6 +23,7 @@ from sales_app.config.email_settings import (
     CUSTOM_MODE,
     PLATFORM_MODE,
     EmailChannelSettings,
+    GmailEmailSettings,
     PlatformEmailSettings,
     parse_email_settings,
 )
@@ -70,6 +71,18 @@ def imap_settings(settings: EmailChannelSettings, password: str) -> ImapSettings
     )
 
 
+def sender_name(display_name: str | None) -> str | None:
+    """A sender name (the client's confirmed Sender Name, or its commercial name as the proposal)
+    made safe for a header. Characters a header cannot carry
+    are dropped and the length is bounded; None (the bare address) if nothing is left."""
+    if not display_name:
+        return None
+    forbidden = '<>",;\\'
+    cleaned = "".join(ch for ch in display_name if ch not in forbidden and ord(ch) >= 32)
+    cleaned = " ".join(cleaned.split())[:80].strip()
+    return cleaned or None
+
+
 def resolve_mailbox(config: ClientConfig) -> MailboxAccess:
     """The mailbox of a client whose channel is e-mail, in whichever mode its settings name.
 
@@ -77,6 +90,10 @@ def resolve_mailbox(config: ClientConfig) -> MailboxAccess:
     it first, so a client that is ready never gets here without it); a pydantic `ValueError` for
     settings that are not valid; `KeyError` for a historical mailbox with no password, as before."""
     settings = parse_email_settings(config.spec.channel_settings_for("email"))
+    if isinstance(settings, GmailEmailSettings):
+        # A Gmail mailbox logs in with an OAuth token, never a password: `gmail_wiring` builds its
+        # channel and inbox. There is no server or login to resolve here.
+        raise MailboxNotReadyError("a Gmail mailbox is not resolved from a password")
     if isinstance(settings, PlatformEmailSettings):
         return _platform(config, settings)
     password = config.secrets.get(EMAIL_PASSWORD)

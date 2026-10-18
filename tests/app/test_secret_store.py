@@ -366,6 +366,9 @@ class TestService:
         assert {s.key for s in svc.describe(GLOBAL_SCOPE)} == {
             "openai.api_key",
             "payments.webhook_secret",
+            "gmail.oauth_client_id",
+            "gmail.oauth_client_secret",
+            "gmail.oauth_state_key",
             "openai.organization",
             "openai.project",
             "openai.base_url",
