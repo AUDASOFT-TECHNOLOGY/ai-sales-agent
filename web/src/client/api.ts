@@ -243,6 +243,28 @@ export function clientGmailDisconnect(): Promise<GmailStatus> {
   return request<GmailStatus>("/channel/google/disconnect", { method: "POST" });
 }
 
+/** Google Sheets by the client's own Google authorisation (see src/sales_app/api/client_sheets_oauth.py). */
+export interface SheetsAccess {
+  state: "not_connected" | "connected" | "reauth_required" | "unavailable";
+  address: string | null;
+  /** The link of the spreadsheet is saved: the client can authorise. */
+  spreadsheet_saved: boolean;
+  message: string;
+}
+
+export function clientSheetsAccess(): Promise<SheetsAccess> {
+  return request<SheetsAccess>("/sheets-access");
+}
+
+/** The Google consent URL: the browser is sent there; the client types nothing. */
+export function clientSheetsAccessStart(): Promise<{ authorize_url: string }> {
+  return request<{ authorize_url: string }>("/sheets-access/start", { method: "POST" });
+}
+
+export function clientSheetsAccessDisconnect(): Promise<SheetsAccess> {
+  return request<SheetsAccess>("/sheets-access/disconnect", { method: "POST" });
+}
+
 export function clientTelegramInvitations(): Promise<TelegramInvitations> {
   return request<TelegramInvitations>("/channel/invitations");
 }

@@ -87,6 +87,15 @@ GMAIL_REFRESH_TOKEN = "gmail.refresh_token"
 GMAIL_ACCOUNT_ADDRESS = "gmail.account_address"
 GMAIL_REAUTH_REQUIRED = "gmail.reauth_required"
 
+# One client's Google Sheets grant (client scope): the OAuth consent that lets Revansa read and write
+# the client's own spreadsheet. Written only by the OAuth callback, never through the Admin credentials
+# API (not in the credential catalog); no file, no service account. `SHEETS_OAUTH_GRANT` is not stored:
+# it is resolved into a client's secrets ("1") when that client holds a usable grant.
+SHEETS_REFRESH_TOKEN = "sheets.refresh_token"
+SHEETS_ACCOUNT_ADDRESS = "sheets.account_address"
+SHEETS_REAUTH_REQUIRED = "sheets.reauth_required"
+SHEETS_OAUTH_GRANT = "sheets.oauth_grant"
+
 # The credential a client's own source needs, by the source's provider key: (key, label). Only a
 # client that chose that source resolves it; every other client's secrets are what they were.
 SOURCE_CREDENTIALS: dict[str, tuple[str, str]] = {

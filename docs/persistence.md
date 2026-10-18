@@ -14,11 +14,13 @@ PostgreSQL is the production target; SQLite is accepted for tests and local deve
 | Versioned client settings | database (`config_versions`, append-only) | `ConfigStore` |
 | Client identity (anchor of every foreign key) | database (`clients`) | - |
 | `enabled`, Brain/Sheets/WhatsApp wiring, schedule polling | `clients/<id>/client.yaml` | - |
-| API keys, Meta token, phone number id, app secret | encrypted `SecretStore` (files) | `SecretStore` |
+| API keys, Meta token, phone number id, app secret, each client's Telegram/e-mail/Google grants | encrypted `SecretStore`: database table `secrets` (AES-256-GCM, scope `global` or `client:<id>`) when a database is configured, else an encrypted file | `SecretStore` |
 | Prospects, actions, messages | Google Sheets | `SalesRepository` |
 | Actions, messages, audit, facts, per-prospect state, prospects created from unknown senders — of a client whose prospects live in another system | database (`op_*`, migration 0004) | `OperationalStore` |
 
-Never in the database: any credential. A test fails if a table or column names one.
+Credentials are in the database only as ciphertext, in the `secrets` table (migration 0016), opened with the
+deployment's `SALES_AGENT_SECRETS_KEY`, which is never stored there. No other table holds a credential: a test
+fails if a table or column names one.
 `enabled` stays in `client.yaml`; the `clients` table does not hold a second copy of a client's name or
 status. Agents, usage, quota, billing and revenue have no table yet: they will be modelled in the
 phases that need them.
@@ -97,7 +99,8 @@ import is verified; unset it to go back to the files.
 
 ## Back up
 
-Back up the database (`pg_dump`) **and, separately,** the secrets directory and its master key. Keep
+Back up the database (`pg_dump`) **and, separately,** the master key (and the secrets directory if a file store is
+still in use). Keep
 `SALES_AGENT_SECRETS_KEY` apart from every backup.
 
 ## Tests

@@ -194,3 +194,29 @@ when this was written; check the current Google documentation before relying on 
 - Multi-worker deployments (pending consents are per process).
 - The access log of the web server records the callback URL (`state` and the one-use `code`): both are
   single-use and the code is bound to the PKCE verifier, but do not forward those logs to third parties.
+
+## Google Sheets by the client's own authorisation
+
+The same Google application (the Admin's `gmail.oauth_*` credentials in Settings) also connects a client's
+Google Sheet, with no service account, no JSON file and no sharing address:
+
+1. the client saves the link of their spreadsheet (Connexions -> Vos prospects);
+2. they click "Autoriser Revansa" (`POST /client/v1/sheets-access/start`), agree on Google's page and come
+   back to `/client/connections/sources?google_sheets=connected|denied|scope|invalid|unavailable|error`;
+3. the refresh token is stored encrypted in the database, in that client's own scope
+   (`sheets.refresh_token`, `sheets.account_address`, `sheets.reauth_required`; not in the Admin catalog, never
+   returned by an API). A new access token is requested each time it is needed and never stored.
+
+Code: `sales_app/sheets_wiring.py`, `sales_app/api/client_sheets_oauth.py`,
+`GoogleSheetsApi.from_token_source`. A client holding a usable grant runs on it; a deployment that still sets
+`GOOGLE_APPLICATION_CREDENTIALS` keeps working for the clients that have not connected their own account.
+
+**To register at Google (external, not done by the code):** add the redirect URI
+`{SALES_AGENT_PUBLIC_BASE_URL}/client/v1/sheets-access/callback` to the OAuth client, enable the Google Sheets
+API in the Cloud project, and add the scope `https://www.googleapis.com/auth/spreadsheets` to the consent
+screen (a sensitive scope: Google reviews it before the app can serve people outside the test users).
+
+**Limits:** the `spreadsheets` scope lets Revansa technically reach any spreadsheet of the connected account;
+Revansa only ever opens the one whose link the client saved. Google's narrower `drive.file` scope would limit
+the grant to chosen files but needs Google's file picker in the page (not built). Nothing here has been
+exercised against the real Google.

@@ -412,7 +412,9 @@ class GoogleTokenSource:
         grants: GoogleGrantStore,
         clock: Clock,
         margin_seconds: int = TOKEN_MARGIN_SECONDS,
+        required_scopes: tuple[str, ...] = (MAIL_SCOPE,),
     ) -> None:
+        self._required_scopes = required_scopes
         self._client_id = client_id
         self._oauth = oauth
         self._grants = grants
@@ -445,7 +447,7 @@ class GoogleTokenSource:
                 self._forget()
                 self._grants.mark_reauth_required(self._client_id)
                 raise
-            if fresh.scope and not scopes_cover(fresh.scope, (MAIL_SCOPE,)):
+            if fresh.scope and not scopes_cover(fresh.scope, self._required_scopes):
                 # The permission was narrowed at Google's side: sending would fail; ask again.
                 self._forget()
                 self._grants.mark_reauth_required(self._client_id)

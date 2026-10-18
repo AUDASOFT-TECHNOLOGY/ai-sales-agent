@@ -97,8 +97,8 @@ class GmailPlatform:
         return "GmailPlatform()"
 
 
-def redirect_uri_for(public_base_url: str | None) -> str | None:
-    """`{public_base_url}/client/v1/channel/google/callback`, or None when the base URL is missing
+def redirect_uri_for(public_base_url: str | None, callback_path: str = CALLBACK_PATH) -> str | None:
+    """`{public_base_url}{callback_path}` (Gmail's by default), or None when the base URL is missing
     or is not https (http is accepted for localhost only)."""
     if not public_base_url:
         return None
@@ -108,7 +108,7 @@ def redirect_uri_for(public_base_url: str | None) -> str | None:
         return None
     if parts.scheme != "https" and not (parts.scheme == "http" and local):
         return None
-    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}{CALLBACK_PATH}"
+    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}{callback_path}"
 
 
 def _global(secrets: SecretStore, key: str) -> str | None:
@@ -118,7 +118,9 @@ def _global(secrets: SecretStore, key: str) -> str | None:
         return None
 
 
-def platform_missing(secrets: SecretStore, public_base_url: str | None) -> list[str]:
+def platform_missing(
+    secrets: SecretStore, public_base_url: str | None, callback_path: str = CALLBACK_PATH
+) -> list[str]:
     """What the Admin still has to set for Gmail to be offered. Names only, never a value."""
     missing = [
         label
@@ -129,16 +131,18 @@ def platform_missing(secrets: SecretStore, public_base_url: str | None) -> list[
         )
         if not _global(secrets, key)
     ]
-    if redirect_uri_for(public_base_url) is None:
+    if redirect_uri_for(public_base_url, callback_path) is None:
         missing.append("public base URL (https)")
     return missing
 
 
-def read_platform(secrets: SecretStore, public_base_url: str | None) -> GmailPlatform | None:
+def read_platform(
+    secrets: SecretStore, public_base_url: str | None, callback_path: str = CALLBACK_PATH
+) -> GmailPlatform | None:
     client_id = _global(secrets, GMAIL_OAUTH_CLIENT_ID)
     client_secret = _global(secrets, GMAIL_OAUTH_CLIENT_SECRET)
     state_key = _global(secrets, GMAIL_OAUTH_STATE_KEY)
-    redirect = redirect_uri_for(public_base_url)
+    redirect = redirect_uri_for(public_base_url, callback_path)
     if not (client_id and client_secret and state_key and redirect):
         return None
     if len(state_key.encode("utf-8")) < 16:
@@ -149,11 +153,33 @@ def read_platform(secrets: SecretStore, public_base_url: str | None) -> GmailPla
 # ---- the grant, persisted ---------------------------------------------------------------------------
 
 
-class SecretStoreGrantStore:
-    """`GoogleGrantStore` over the encrypted secret store, in the client's own scope."""
+@dataclass(frozen=True, slots=True)
+class GrantKeys:
+    """The three records of a grant, by credential key (Gmail's by default)."""
 
-    def __init__(self, secrets: SecretStore) -> None:
+    refresh_token: str = GMAIL_REFRESH_TOKEN
+    address: str = GMAIL_ACCOUNT_ADDRESS
+    reauth: str = GMAIL_REAUTH_REQUIRED
+
+
+class SecretStoreGrantStore:
+    """`GoogleGrantStore` over the encrypted secret store, in the client's own scope.
+
+    `unique_address`: no two clients may hold the same Google address (a mailbox is one client's);
+    a spreadsheet's owner may connect several of their clients."""
+
+    def __init__(
+        self,
+        secrets: SecretStore,
+        keys: GrantKeys | None = None,
+        *,
+        unique_address: bool = True,
+        actor: str = _ACTOR,
+    ) -> None:
         self._secrets = secrets
+        self._keys = keys or GrantKeys()
+        self._unique = unique_address
+        self._actor = actor
 
     def __repr__(self) -> str:
         return "SecretStoreGrantStore()"
@@ -161,9 +187,9 @@ class SecretStoreGrantStore:
     def load(self, client_id: str) -> GoogleGrant | None:
         scope = client_scope(client_id)
         try:
-            token = self._secrets.get(scope, GMAIL_REFRESH_TOKEN)
-            address = self._secrets.get(scope, GMAIL_ACCOUNT_ADDRESS)
-            reauth = self._secrets.get(scope, GMAIL_REAUTH_REQUIRED)
+            token = self._secrets.get(scope, self._keys.refresh_token)
+            address = self._secrets.get(scope, self._keys.address)
+            reauth = self._secrets.get(scope, self._keys.reauth)
         except SecretStoreError:
             raise GoogleTransientError("the stored authorisation cannot be read") from None
         if not token or not address:
@@ -172,21 +198,23 @@ class SecretStoreGrantStore:
 
     def save(self, client_id: str, refresh_token: str, address: str) -> None:
         scope = client_scope(client_id)
-        previous = self._safe_get(scope, GMAIL_ACCOUNT_ADDRESS)
+        previous = self._safe_get(scope, self._keys.address)
         try:
             # The address first, and unique: another client holding it refuses the whole save.
-            self._secrets.set(scope, GMAIL_ACCOUNT_ADDRESS, address.lower(), by=_ACTOR, unique=True)
+            self._secrets.set(
+                scope, self._keys.address, address.lower(), by=self._actor, unique=self._unique
+            )
             try:
-                self._secrets.set(scope, GMAIL_REFRESH_TOKEN, refresh_token, by=_ACTOR)
+                self._secrets.set(scope, self._keys.refresh_token, refresh_token, by=self._actor)
             except SecretStoreError:
                 if previous:
                     self._secrets.set(
-                        scope, GMAIL_ACCOUNT_ADDRESS, previous, by=_ACTOR, unique=True
+                        scope, self._keys.address, previous, by=self._actor, unique=self._unique
                     )
                 else:
-                    self._secrets.delete(scope, GMAIL_ACCOUNT_ADDRESS)
+                    self._secrets.delete(scope, self._keys.address)
                 raise
-            self._secrets.delete(scope, GMAIL_REAUTH_REQUIRED)
+            self._secrets.delete(scope, self._keys.reauth)
         except DuplicateSecretError:
             raise AddressAlreadyConnectedError from None
         except SecretStoreError:
@@ -194,13 +222,13 @@ class SecretStoreGrantStore:
 
     def mark_reauth_required(self, client_id: str) -> None:
         try:
-            self._secrets.set(client_scope(client_id), GMAIL_REAUTH_REQUIRED, "1", by=_ACTOR)
+            self._secrets.set(client_scope(client_id), self._keys.reauth, "1", by=self._actor)
         except SecretStoreError:
             log.warning("could not record that a Gmail authorisation must be renewed")
 
     def delete(self, client_id: str) -> None:
         scope = client_scope(client_id)
-        for key in (GMAIL_REFRESH_TOKEN, GMAIL_ACCOUNT_ADDRESS, GMAIL_REAUTH_REQUIRED):
+        for key in (self._keys.refresh_token, self._keys.address, self._keys.reauth):
             try:
                 self._secrets.delete(scope, key)
             except SecretStoreError:
@@ -225,16 +253,18 @@ class ResolvingOAuth:
         secrets: SecretStore,
         public_base_url: Callable[[], str | None],
         factory: OAuthFactory = GoogleOAuthClient,
+        callback_path: str = CALLBACK_PATH,
     ) -> None:
         self._secrets = secrets
         self._base = public_base_url
         self._factory = factory
+        self._callback_path = callback_path
 
     def __repr__(self) -> str:
         return "ResolvingOAuth()"
 
     def _client(self) -> GoogleOAuthPort:
-        platform = read_platform(self._secrets, self._base())
+        platform = read_platform(self._secrets, self._base(), self._callback_path)
         if platform is None:
             raise GoogleTransientError("Google is not configured")
         return self._factory(
@@ -275,6 +305,8 @@ class GoogleConnectionService:
         oauth: ResolvingOAuth,
         public_base_url: Callable[[], str | None],
         clock: Clock,
+        callback_path: str = CALLBACK_PATH,
+        required_scopes: tuple[str, ...] | None = None,
     ) -> None:
         self._secrets = secrets
         self._grants = grants
@@ -282,23 +314,27 @@ class GoogleConnectionService:
         self._oauth = oauth
         self._base = public_base_url
         self._clock = clock
+        self._callback_path = callback_path
+        self._required_scopes = required_scopes
 
     def __repr__(self) -> str:
         return "GoogleConnectionService()"
 
     def configured(self) -> bool:
-        return read_platform(self._secrets, self._base()) is not None
+        return read_platform(self._secrets, self._base(), self._callback_path) is not None
 
     def _connection(self) -> GoogleMailboxConnection:
-        platform = read_platform(self._secrets, self._base())
+        platform = read_platform(self._secrets, self._base(), self._callback_path)
         if platform is None:
             raise GoogleTransientError("Google is not configured")
+        extra = {} if self._required_scopes is None else {"required_scopes": self._required_scopes}
         return GoogleMailboxConnection(
             oauth=self._oauth,
             grants=self._grants,
             pending=self._pending,
             signing_key=platform.state_key,
             clock=self._clock,
+            **extra,
         )
 
     def start(self, client_id: str, *, login_hint: str | None = None) -> str:
@@ -427,6 +463,7 @@ __all__ = [
     "GmailMailService",
     "GmailPlatform",
     "GoogleConnectionService",
+    "GrantKeys",
     "ResolvingOAuth",
     "SecretStoreGrantStore",
     "platform_missing",

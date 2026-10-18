@@ -33,6 +33,7 @@ import {
 import { useClientAuth } from "../ClientAuthContext";
 import { Card, FailureNote, Loading, Note, failureOf, type Failure } from "../kit";
 import { slugify, uniqueSlug } from "../offer/productModel";
+import { SheetsAccessCard } from "./SheetsAccessCard";
 
 const SHEETS = "google_sheets";
 const HUBSPOT = "hubspot";
@@ -53,8 +54,11 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function SheetsHelp({ shareWith }: { shareWith: string | null }) {
+function SheetsHelp({ shareWith, linkKey }: { shareWith: string | null; linkKey: string }) {
   const { t } = useI18n();
+  // A deployment that still uses one service-account file keeps its sharing steps; every other
+  // client connects its own Google account.
+  if (!shareWith) return <SheetsAccessCard linkKey={linkKey} />;
   return (
     <ol className="stack" style={{ paddingInlineStart: 20, listStyle: "decimal" }}>
       <li>{t("rv.src.sheets.step1")}</li>
@@ -195,7 +199,7 @@ function SingleSource({ source, onChanged }: { source: SourceState; onChanged: (
 
       {sheetsChosen ? (
         <>
-          <SheetsHelp shareWith={source.google_sheets?.share_with ?? null} />
+          <SheetsHelp shareWith={source.google_sheets?.share_with ?? null} linkKey={`${source.version}:${savedSheet}`} />
           <TextInput
             label={t("rv.src.sheets.link")}
             helper={savedSheet ? t("rv.src.sheets.linkSaved") : t("rv.src.sheets.linkHelp")}
@@ -306,7 +310,7 @@ function SourceForm({ state, lane, onClose, onSaved }: { state: LanesState; lane
       ) : null}
       {sheets ? (
         <>
-          <SheetsHelp shareWith={state.share_with} />
+          <SheetsHelp shareWith={state.share_with} linkKey={String(state.version)} />
           <TextInput label={t("rv.src.sheets.link")} helper={lane ? t("rv.src.sheets.linkSaved") : t("rv.src.sheets.linkHelp")} value={sheet} onChange={(e) => setSheet(e.target.value)} error={problem === "rv.src.sheets.needLink" ? t(problem) : undefined} dir="ltr" inputMode="url" placeholder="https://docs.google.com/spreadsheets/d/…" />
           <TextInput label={t("rv.src.sheets.tab")} helper={t("rv.src.sheets.tabHelp")} value={tab} onChange={(e) => setTab(e.target.value)} maxLength={100} />
         </>

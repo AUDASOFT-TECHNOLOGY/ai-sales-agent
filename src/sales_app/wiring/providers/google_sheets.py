@@ -22,7 +22,7 @@ from pydantic import (
 
 from sales_app.config import ClientConfig
 from sales_app.config.schema import SourceInstance
-from sales_app.config.secrets import SHEETS_CREDENTIALS_FILE
+from sales_app.config.secrets import SHEETS_CREDENTIALS_FILE, SHEETS_OAUTH_GRANT
 from sales_app.sourcing import (
     ProspectChange,
     ProspectField,
@@ -227,10 +227,32 @@ def open_probe(credentials_file: str, *, timeout_seconds: float) -> GoogleSheets
     )
 
 
+def open_oauth_api(
+    source: Any, *, timeout_seconds: float | None = None, max_attempts: int = 5
+) -> GoogleSheetsApi:
+    """Sheets over a client's own Google authorisation (`source` gives fresh access tokens)."""
+    return GoogleSheetsApi.from_token_source(
+        source, timeout_seconds=timeout_seconds, max_attempts=max_attempts
+    )
+
+
+def api_for(config: ClientConfig) -> GoogleSheetsApi:
+    """The client's own Google authorisation when it holds one (the way a client connects), else the
+    deployment's service-account file (the older way, kept for deployments that still use it)."""
+    if SHEETS_OAUTH_GRANT in config.secrets:
+        from sales_app import sheets_wiring  # not at import: it needs the whole application
+
+        service = sheets_wiring.installed()
+        if service is None:
+            raise SourceAuthError("Google Sheets access is not available")
+        return service.api(config.client_id)
+    return GoogleSheetsApi.from_service_account_file(config.secrets.get(SHEETS_CREDENTIALS_FILE))
+
+
 def build_repository(config: ClientConfig) -> GoogleSheetsRepository:
     section = config.spec.sheets
     return GoogleSheetsRepository(
-        GoogleSheetsApi.from_service_account_file(config.secrets.get(SHEETS_CREDENTIALS_FILE)),
+        api_for(config),
         client_id=config.client_id,  # the Core's ClientId is a plain str at run time
         spreadsheet_id=extract_spreadsheet_id(section.spreadsheet_id),
         timezone=ZoneInfo(config.spec.timezone),
@@ -394,7 +416,7 @@ def build_source_instance(config: ClientConfig, instance: SourceInstance) -> She
     """One spreadsheet among a client's several, read-only: its prospects are `<instance id>:<id>`.
     Every instance reads under the deployment's one Google credential."""
     return build_prospect_source(
-        GoogleSheetsApi.from_service_account_file(config.secrets.get(SHEETS_CREDENTIALS_FILE)),
+        api_for(config),
         client_id=config.client_id,
         source_id=instance.id,
         settings=instance.settings,
@@ -413,8 +435,8 @@ DESCRIPTOR = ProviderDescriptor(
         ProviderKind.STORE: SheetsStoreSettings,
     },
     credentials=(
-        # The access model is going to change (OAuth per client); until then only the environment
-        # supplies it, one service-account file for the deployment.
+        # The client's own Google authorisation (OAuth, stored in its scope) is how a client
+        # connects; a deployment may still supply one service-account file from the environment.
         CredentialDeclaration(
             key=SHEETS_CREDENTIALS_FILE,
             label="Google Sheets credentials file",

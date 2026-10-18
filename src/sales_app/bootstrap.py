@@ -60,6 +60,8 @@ from sales_app.secret_store import (
 from sales_app.secret_wiring import open_secrets
 from sales_app.send_cap import SendCapStore, SendLimits
 from sales_app.settings import Settings
+from sales_app.sheets_wiring import SheetsAccessService
+from sales_app.sheets_wiring import install as install_sheets_access
 from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
 from sales_app.sourcing.ports import OperationalStore
 from sales_app.sourcing.sql_store import SqlOperationalStore
@@ -137,6 +139,9 @@ class Application:
     # The Gmail mailbox mode: the platform's Google application (resolved at each use), the clients'
     # grants in the secret store and the channel/inbox of a client in Gmail mode.
     gmail: GmailMailService | None = None
+    # Google Sheets by the client's own Google authorisation (OAuth), same platform application as
+    # Gmail, grants in the client's scope of the secret store. See `sales_app.sheets_wiring`.
+    sheets_access: SheetsAccessService | None = None
     # The documents and links clients attach to their products and the search over their text; None
     # without a database (the Client API says so). See `sales_app.resources`.
     product_resources: ResourceService | None = None
@@ -344,6 +349,10 @@ def _assemble(
     gmail = gmail_service or GmailMailService(
         secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
     )
+    sheets_access = SheetsAccessService(
+        secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
+    )
+    install_sheets_access(sheets_access)
     product_resources, knowledge = _resources(account_stores, clock)
     builders = builders or default_builders(
         settings,
@@ -459,6 +468,7 @@ def _assemble(
         send_caps=send_caps,
         send_limits=send_limits,
         gmail=gmail,
+        sheets_access=sheets_access,
         invoices=_invoice_store(account_stores),
         payment_provider=_payment_provider_resolver(secrets),
         daily_reports=daily_reports,

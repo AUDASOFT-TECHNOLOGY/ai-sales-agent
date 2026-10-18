@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -54,6 +55,9 @@ from sales_app.config.secrets import (
     OPENAI_ORGANIZATION,
     OPENAI_PROJECT,
     SHEETS_CREDENTIALS_FILE,
+    SHEETS_OAUTH_GRANT,
+    SHEETS_REAUTH_REQUIRED,
+    SHEETS_REFRESH_TOKEN,
     SOURCE_CREDENTIALS,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_WEBHOOK_SECRET,
@@ -514,7 +518,19 @@ def _resolve_secrets(
     ]
     values: dict[str, str] = {}
     missing: list[str] = []
+    # The client's own Google authorisation (OAuth) is how a client connects Sheets; the file of a
+    # service account (environment) is the older way and still works where it is set.
+    sheets_grant = _sheets_grant_state(secret_store, client) if sheets_used else None
+    if sheets_grant == "usable":
+        values[SHEETS_OAUTH_GRANT] = "1"
     for key, label, scope, variable, required in wanted:
+        if key == SHEETS_CREDENTIALS_FILE and sheets_grant is not None:
+            value = lookup(scope, key, variable)
+            if value:
+                values[key] = value
+            elif sheets_grant == "reauth":
+                missing.append("Google Sheets must be authorised again")
+            continue
         value = lookup(scope, key, variable)
         if value:
             values[key] = value
@@ -577,6 +593,15 @@ def _resolve_secrets(
         if reason is not None:
             missing.append(reason)
     return Secrets(values), missing
+
+
+def _sheets_grant_state(
+    secret_store: SecretStore | None, client: str
+) -> Literal["usable", "reauth"] | None:
+    """`None`: the client has not connected Google Sheets with its own authorisation."""
+    if secret_store is None or secret_store.entry(client, SHEETS_REFRESH_TOKEN) is None:
+        return None
+    return "reauth" if secret_store.get(client, SHEETS_REAUTH_REQUIRED) == "1" else "usable"
 
 
 def _spreadsheets(client: ClientConfig) -> list[str]:

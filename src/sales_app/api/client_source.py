@@ -268,6 +268,26 @@ def create_client_source_router(
     def platform_sheets_file(client_id: str) -> str | None:
         return sheets_credentials_file(application, client_id)
 
+    def sheets_probe_for(client_id: str) -> SheetsProbe | None:
+        """What reads the client's spreadsheet for a test: their own Google authorisation when they
+        have connected one, else the deployment's file (the older way). None: nothing to read with."""
+        access = application.sheets_access
+        if access is not None and access.connection.status(client_id).state in (
+            "connected",
+            "reauth_required",
+        ):
+            try:
+                return access.api(client_id, timeout_seconds=SHEETS_TIMEOUT_SECONDS, max_attempts=1)
+            except Exception:  # noqa: BLE001 - an unusable grant is shown as "not connected"
+                return None
+        path = platform_sheets_file(client_id)
+        if not path:
+            return None
+        try:
+            return sheets_probe(path)
+        except Exception:  # noqa: BLE001 - an unusable file is the platform's problem
+            return None
+
     def current_state(
         client_id: str,
     ) -> tuple[Any, Mapping[str, Any], Mapping[str, Any], int | None]:
@@ -453,15 +473,10 @@ def create_client_source_router(
     def run_check(client_id: str, provider: str, document: Mapping[str, Any]) -> ConnectionResult:
         if provider == SHEETS:
             spreadsheet_id, prospects_tab = sheets_of(document)
-            path = platform_sheets_file(client_id)
-            probe = None
-            if path:
-                try:
-                    probe = sheets_probe(path)
-                except Exception:  # noqa: BLE001 - an unusable file is the platform's problem
-                    probe = None
             return check_google_sheets(
-                api=probe, spreadsheet_id=spreadsheet_id, prospects_tab=prospects_tab
+                api=sheets_probe_for(client_id),
+                spreadsheet_id=spreadsheet_id,
+                prospects_tab=prospects_tab,
             )
         if provider == hubspot.KEY:
             try:
@@ -484,15 +499,8 @@ def create_client_source_router(
             settings = settings if isinstance(settings, Mapping) else {}
             nothing = ConnectionResult(False, "There is no connection check for this source yet.")
             if provider == SHEETS:
-                path = platform_sheets_file(client_id)
-                probe = None
-                if path:
-                    try:
-                        probe = sheets_probe(path)
-                    except Exception:  # noqa: BLE001 - an unusable file is the platform's problem
-                        probe = None
                 result = check_google_sheets(
-                    api=probe,
+                    api=sheets_probe_for(client_id),
                     spreadsheet_id=str(settings.get("spreadsheet_id", "")) or None,
                     prospects_tab=str(settings.get("prospects_tab", "Prospects")),
                     writeback_headers=_writeback_headers(settings),

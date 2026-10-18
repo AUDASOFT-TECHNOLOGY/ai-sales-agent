@@ -11,8 +11,11 @@ twice), so it is retried only on 429 (the request was refused, never applied).
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, runtime_checkable
 
+from google.auth.credentials import Credentials
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from httplib2 import HttpLib2Error
@@ -24,6 +27,31 @@ _TRANSIENT = frozenset({429, 500, 502, 503, 504})
 MAX_ATTEMPTS = 5
 BACKOFF_BASE_SECONDS = 1.0
 BACKOFF_MAX_SECONDS = 30.0
+
+
+class AccessTokenSource(Protocol):
+    """Fresh OAuth access tokens for one client (`GoogleTokenSource`); raises when the person's
+    authorisation is gone."""
+
+    def access_token(self) -> str: ...
+
+
+_TOKEN_LIFETIME = timedelta(minutes=5)  # how long this object trusts a token; the source caches
+
+
+class _TokenSourceCredentials(Credentials):  # type: ignore[misc]
+    """google-auth credentials that take every token from a source: nothing is stored here."""
+
+    def __init__(self, source: AccessTokenSource) -> None:
+        super().__init__()
+        self._source = source
+
+    def refresh(self, request: Any) -> None:
+        try:
+            self.token = self._source.access_token()
+        except Exception as error:  # the source's own errors never carry a token
+            raise RefreshError("the Google authorisation is not usable") from error
+        self.expiry = datetime.now(UTC).replace(tzinfo=None) + _TOKEN_LIFETIME
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +111,28 @@ class GoogleSheetsApi:
         credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
             path, scopes=list(SCOPES)
         )
+        if timeout_seconds is None:
+            service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+        else:
+            import google_auth_httplib2
+            import httplib2
+
+            http = google_auth_httplib2.AuthorizedHttp(  # type: ignore[no-untyped-call]
+                credentials, http=httplib2.Http(timeout=timeout_seconds)
+            )
+            service = build("sheets", "v4", http=http, cache_discovery=False)
+        return cls(service, max_attempts=max_attempts)
+
+    @classmethod
+    def from_token_source(
+        cls,
+        source: AccessTokenSource,
+        *,
+        timeout_seconds: float | None = None,
+        max_attempts: int = MAX_ATTEMPTS,
+    ) -> "GoogleSheetsApi":
+        """The person's own authorisation (OAuth) instead of a service-account file."""
+        credentials = _TokenSourceCredentials(source)
         if timeout_seconds is None:
             service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
         else:
@@ -183,6 +233,10 @@ class GoogleSheetsApi:
                     self._sleep(_backoff(attempt))
                     continue
                 raise SheetsApiError(_explain(status, error), status=status) from error
+            except RefreshError:
+                raise SheetsApiError(
+                    "Google Sheets access must be authorised again", status=401
+                ) from None
             except (OSError, HttpLib2Error):
                 if network and attempt < self._max_attempts:
                     self._sleep(_backoff(attempt))

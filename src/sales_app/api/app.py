@@ -35,6 +35,7 @@ from sales_app.api.client_payments import create_client_payments_router
 from sales_app.api.client_prospects import create_client_prospects_router
 from sales_app.api.client_reporting import create_client_reporting_router
 from sales_app.api.client_resources import create_client_resources_router
+from sales_app.api.client_sheets_oauth import create_client_sheets_oauth_router
 from sales_app.api.client_source import (
     SheetsProbeFactory,
     create_client_source_router,
@@ -126,6 +127,9 @@ def create_app(
     app.include_router(create_client_resources_router(application))
     app.include_router(create_client_prospects_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))
+    sheets_oauth_router = create_client_sheets_oauth_router(application)
+    if sheets_oauth_router is not None:
+        app.include_router(sheets_oauth_router)
     app.include_router(create_client_channel_router(application, bot_probe))
     gmail_router = create_application_gmail_router(application)
     if gmail_router is not None:

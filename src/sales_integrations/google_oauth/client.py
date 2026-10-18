@@ -35,6 +35,10 @@ USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 MAIL_SCOPE = "https://mail.google.com/"  # IMAP + SMTP over XOAUTH2 (a restricted scope)
 IDENTITY_SCOPES = ("openid", "email")  # only to read the address of the account
 DEFAULT_SCOPES = (MAIL_SCOPE, *IDENTITY_SCOPES)
+# Google Sheets: read and write spreadsheets. Revansa only ever touches the one spreadsheet the client
+# named; the scope is Google's narrowest that works without a file picker.
+SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
+SHEETS_SCOPES = (SHEETS_SCOPE, *IDENTITY_SCOPES)
 DEFAULT_TIMEOUT_SECONDS = 15.0
 
 
