@@ -41,7 +41,7 @@ from sales_app.sourcing.writeback import (
     WriteBackPolicyError,
     WriteBackSyncer,
 )
-from sales_app.wiring.providers import google_sheets
+from sales_app.wiring.providers import google_sheets, hubspot
 from sales_core.approval import ApprovalMode
 from sales_core.ports import Clock
 
@@ -61,8 +61,8 @@ class WritebackSupport:
 
 
 def default_policies() -> dict[str, PolicyOf]:
-    """The providers that can be written back to: Google Sheets only."""
-    return {google_sheets.KEY: google_sheets.writeback_of}
+    """The providers that can be written back to: Google Sheets and HubSpot."""
+    return {google_sheets.KEY: google_sheets.writeback_of, hubspot.KEY: hubspot.writeback_of}
 
 
 def sql_ledgers(engine: Any) -> Callable[[str], WriteBackLedger]:

@@ -27,3 +27,7 @@ class HubSpotAuthError(HubSpotError):
 
 class HubSpotDataError(HubSpotError):
     """HubSpot answered with something that is not what its API documents (fail closed)."""
+
+
+class HubSpotNotFoundError(HubSpotError):
+    """The contact asked for is not there (deleted or merged meanwhile)."""

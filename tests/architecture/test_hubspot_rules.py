@@ -1,6 +1,6 @@
 """Structural rules of the HubSpot connector, checked on its source code.
 
-The adapter only reads and holds no application code; the CRM source knows no vendor and never logs;
+The adapter reads, writes only through one bounded update, and holds no application code; the CRM source knows no vendor and never logs;
 only the provider's descriptor builds the connector; and the token is named only where it is read.
 """
 
@@ -51,10 +51,11 @@ def test_the_adapter_depends_only_on_the_standard_library_httpx_and_itself():
                 assert module.startswith("sales_integrations.hubspot"), (py.name, module)
 
 
-def test_the_adapter_has_no_way_to_write():
-    """Every request goes through one method; it is a GET, and the contact search's POST."""
-    verbs = {
-        node.args[0].value
+def test_the_adapter_has_exactly_one_way_to_write():
+    """Every request goes through one method. The verbs are GET, the contact search's POST and one
+    PATCH: the update of a contact, which only `update_contact` makes."""
+    calls = [
+        node
         for py in ADAPTER.rglob("*.py")
         for node in ast.walk(tree(py))
         if isinstance(node, ast.Call)
@@ -62,20 +63,24 @@ def test_the_adapter_has_no_way_to_write():
         and node.func.attr == "_request"
         and node.args
         and isinstance(node.args[0], ast.Constant)
-    }
-    assert verbs == {"GET", "POST"}
-    posts = [
-        node
-        for node in ast.walk(tree(ADAPTER / "client.py"))
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "_request"
-        and node.args[0].value == "POST"
     ]
+    assert {c.args[0].value for c in calls} == {"GET", "POST", "PATCH"}
+    posts = [c for c in calls if c.args[0].value == "POST"]
     assert len(posts) == 1 and any(
         isinstance(a, ast.Name) and a.id == "SEARCH_PATH" for a in posts[0].args
     )
-    assert not names(ADAPTER / "client.py") & {"put", "patch", "delete"}
+    patches = [c for c in calls if c.args[0].value == "PATCH"]
+    assert len(patches) == 1
+    # ...and that PATCH is inside `update_contact`, which refuses a property that was not declared
+    update = next(
+        node
+        for node in ast.walk(tree(ADAPTER / "client.py"))
+        if isinstance(node, ast.FunctionDef) and node.name == "update_contact"
+    )
+    assert update.lineno < patches[0].lineno <= update.end_lineno
+    assert "_writable" in names(ADAPTER / "client.py")
+    # nothing creates or deletes
+    assert not names(ADAPTER / "client.py") & {"put", "patch", "delete", "post"}
 
 
 def test_the_adapter_logs_and_prints_nothing():
@@ -107,7 +112,7 @@ def test_the_crm_source_knows_no_vendor_no_http_and_no_other_layer():
 def test_the_crm_source_never_calls_a_write_and_logs_nothing():
     used = names(CRM_SOURCE)
     assert "logging" not in imports(CRM_SOURCE) and not used & {"print", "logger"}
-    # the reader port has no write at all, so a source built on it cannot write
+    # the reader port has no write at all; the optional writer port is `write_fields` (one door)
     assert not used & {"create_records", "update_records", "save", "put", "post", "patch"}
 
 

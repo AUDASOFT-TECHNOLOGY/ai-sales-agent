@@ -126,9 +126,22 @@ class TestReading:
 
 
 class TestItOnlyReads:
-    def test_there_is_no_way_to_write(self):
+    def test_the_only_way_to_write_is_one_bounded_update(self):
         public = {n for n in dir(HubSpotClient) if not n.startswith("_")}
-        assert public == {"list_contacts", "get_contact", "find_by_email", "verify"}
+        assert public == {
+            "list_contacts",
+            "get_contact",
+            "find_by_email",
+            "verify",
+            "get_property",
+            "update_contact",
+        }
+
+    def test_a_client_built_without_writable_properties_cannot_write(self):
+        hub = Hub(reply({}))
+        with pytest.raises(ValueError):
+            hub.client().update_contact("1", {"hs_lead_status": "UNQUALIFIED"})
+        assert hub.requests == []  # refused before any request
 
     def test_every_request_is_a_get_but_the_search(self):
         listing = reply({"results": [contact("1")]})

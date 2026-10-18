@@ -195,3 +195,45 @@ def resolve_source_status(
     if do_not_contact:
         return StatusResolution(ProspectStatus.OPTED_OUT, opt_out_signal=True)
     return StatusResolution(status)
+
+
+# The statuses Revansa may pass on to a CRM (it only ever tightens a status, see
+# `writeback.planning`); an opt-out is added only if the operator asked for it to be propagated.
+_WRITTEN_STATUSES = (ProspectStatus.PAUSED, ProspectStatus.CLOSED)
+
+
+@dataclass(frozen=True, slots=True)
+class StatusWords:
+    """The CRM word to write for each status Revansa may pass on: the inverse of a status mapping."""
+
+    values: Mapping[ProspectStatus, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
+
+    @classmethod
+    def from_config(
+        cls, raw: Mapping[str, str], *, propagate_opt_out: bool = False
+    ) -> "StatusWords":
+        """Exactly one CRM value must lead to each status that is written (paused and closed, and
+        opted_out if opt-outs are propagated): none leaves Revansa without a word to write, several
+        leave it guessing. Either is refused (`StatusMappingError`) with a sentence that says
+        which status. Values that differ only by case or blanks count as several."""
+        mapping = StatusMapping.from_config(raw)  # also refuses a mapping that is not valid
+        needed = (*_WRITTEN_STATUSES, *((ProspectStatus.OPTED_OUT,) if propagate_opt_out else ()))
+        words: dict[ProspectStatus, str] = {}
+        for status in needed:
+            found = sorted({key.strip() for key in raw if mapping.lookup(key) is status})
+            if len(found) != 1:
+                raise StatusMappingError(
+                    f"status write-back needs exactly one value of status_mapping for "
+                    f"{status.value!r}, and it has {len(found)}"
+                )
+            words[status] = found[0]
+        return cls(words)
+
+    def word(self, status: object) -> str | None:
+        return self.values.get(status)  # type: ignore[arg-type]
+
+    def all_words(self) -> tuple[str, ...]:
+        return tuple(self.values.values())

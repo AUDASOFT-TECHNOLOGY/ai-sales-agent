@@ -1,8 +1,11 @@
-"""A read-only HTTP client for the contacts of one HubSpot account (a Private App token).
+"""An HTTP client for the contacts of one HubSpot account (a Private App token).
 
-It is bound to one token, so to one client's account. It **only reads**: there is no method that
-creates, changes or deletes anything, so a read-only source is read-only by construction. Its one
-`POST` is the contact search, which HubSpot makes a POST but which changes nothing.
+It is bound to one token, so to one client's account. It reads, and it has exactly one way to
+write: `update_contact`, a `PATCH` of the properties of one contact, **bounded to the property
+names given at construction** (`writable_properties`, empty by default, so a client built without
+them cannot write at all) and never to an identity property (`NEVER_WRITTEN`), whatever it is
+given. Nothing creates or deletes a contact, a property or anything else. The `POST` of the
+contact search changes nothing.
 
 It never returns a partial list: a page that fails fails the whole read. The token travels only in
 the `Authorization` header; it is not in a URL, a `repr`, an error message or a log (nothing here
@@ -19,12 +22,14 @@ import httpx
 from sales_integrations.hubspot.errors import (
     HubSpotAuthError,
     HubSpotDataError,
+    HubSpotNotFoundError,
     HubSpotRateLimitedError,
     HubSpotUnavailableError,
 )
 
 BASE_URL = "https://api.hubapi.com"
 CONTACTS_PATH = "/crm/v3/objects/contacts"
+PROPERTIES_PATH = "/crm/v3/properties/contacts"
 SEARCH_PATH = f"{CONTACTS_PATH}/search"
 DEFAULT_TIMEOUT_SECONDS = 15.0
 PAGE_SIZE = 100  # the most a listing page may hold
@@ -32,6 +37,25 @@ MAX_PAGES = 2000  # a runaway cursor is an error, not an endless read
 MAX_RETRY_AFTER_SECONDS = 3600.0
 
 _CONTACT_ID = re.compile(r"[0-9]{1,20}")
+_PROPERTY_NAME = re.compile(r"[a-z][a-z0-9_]{0,99}")
+
+# What a person is, and what says whether they may be contacted: never written, however the client
+# was built.
+NEVER_WRITTEN = frozenset(
+    {
+        "email",
+        "firstname",
+        "lastname",
+        "phone",
+        "mobilephone",
+        "hubspot_owner_id",
+        "hs_email_optout",
+        "hs_object_id",
+    }
+)
+_READ_MESSAGE = "HubSpot refused the access token, or it may not read contacts"
+_WRITE_MESSAGE = "HubSpot refused the access token, or it may not change contacts"
+_SCHEMA_MESSAGE = "HubSpot refused the access token, or it may not read the contact properties"
 
 HttpClientFactory = Callable[[], httpx.Client]
 
@@ -48,6 +72,16 @@ class HubSpotContact:
         return f"HubSpotContact(id={self.id!r})"
 
 
+@dataclass(frozen=True, slots=True)
+class HubSpotProperty:
+    """The definition of one contact property: what a write would have to respect. No value."""
+
+    name: str
+    type: str  # "string", "number", "datetime", "enumeration", "bool", "date"...
+    options: tuple[str, ...]  # the values an enumeration accepts (internal values), else empty
+    read_only: bool  # HubSpot computes it, or it cannot be set
+
+
 class HubSpotClient:
     def __init__(
         self,
@@ -58,6 +92,7 @@ class HubSpotClient:
         http: HttpClientFactory | None = None,
         page_size: int = PAGE_SIZE,
         max_pages: int = MAX_PAGES,
+        writable_properties: Sequence[str] = (),
     ) -> None:
         if not access_token or not access_token.strip():
             raise ValueError("a HubSpot access token is required")
@@ -68,6 +103,12 @@ class HubSpotClient:
         self._http = http or (lambda: httpx.Client(timeout=timeout_seconds))
         self._page_size = page_size
         self._max_pages = max_pages
+        writable = frozenset(writable_properties)
+        if any(not _PROPERTY_NAME.fullmatch(name) for name in writable):
+            raise ValueError("a writable property must be a HubSpot internal property name")
+        if writable & NEVER_WRITTEN:
+            raise ValueError("this property can never be written")
+        self._writable = writable
 
     def __repr__(self) -> str:
         return "HubSpotClient()"
@@ -126,6 +167,49 @@ class HubSpotClient:
         )
         return _contacts(body.get("results"))
 
+    def get_property(self, name: str) -> HubSpotProperty | None:
+        """The definition of a contact property, or None if there is no such property."""
+        if not _PROPERTY_NAME.fullmatch(name):
+            return None
+        body = self._request(
+            "GET", f"{PROPERTIES_PATH}/{name}", missing_ok=True, forbidden=_SCHEMA_MESSAGE
+        )
+        if body is None:
+            return None
+        kind, options = body.get("type"), body.get("options", [])
+        if not isinstance(kind, str) or not isinstance(options, list):
+            raise HubSpotDataError("HubSpot did not answer with the documented shape")
+        values = tuple(
+            o["value"]
+            for o in options
+            if isinstance(o, dict) and isinstance(o.get("value"), str) and not o.get("hidden")
+        )
+        meta = body.get("modificationMetadata")
+        read_only = bool(body.get("calculated")) or (
+            isinstance(meta, dict) and bool(meta.get("readOnlyValue"))
+        )
+        return HubSpotProperty(name, kind, values, read_only)
+
+    # ---- writing: one contact's named properties, nothing else ------------------------------
+
+    def update_contact(self, contact_id: str, values: Mapping[str, str]) -> None:
+        """Set properties of one existing contact (text; the empty text clears one). Only the
+        names given to the constructor are accepted; anything else raises `ValueError` before any
+        request. Raises `HubSpotNotFoundError` for a contact that is not there."""
+        if not _CONTACT_ID.fullmatch(contact_id):
+            raise HubSpotNotFoundError("HubSpot has no such contact")
+        if not values or not set(values) <= self._writable:
+            raise ValueError("a property that was not declared writable cannot be written")
+        if not all(isinstance(v, str) for v in values.values()):
+            raise ValueError("a property is written as text")
+        self._request(
+            "PATCH",
+            f"{CONTACTS_PATH}/{contact_id}",
+            json={"properties": dict(values)},
+            forbidden=_WRITE_MESSAGE,
+            not_found=True,
+        )
+
     def verify(self) -> None:
         """One contact id, read: succeeds only if the token is valid and may read contacts."""
         body = self._request(
@@ -144,6 +228,8 @@ class HubSpotClient:
         params: Mapping[str, Any] | None = None,
         json: Any = None,
         missing_ok: bool = False,
+        forbidden: str = _READ_MESSAGE,
+        not_found: bool = False,
     ) -> Any:
         try:
             with self._http() as client:
@@ -159,8 +245,10 @@ class HubSpotClient:
         status = response.status_code
         if status == 404 and missing_ok:
             return None
+        if status == 404 and not_found:
+            raise HubSpotNotFoundError("HubSpot has no such contact")
         if status in (401, 403):
-            raise HubSpotAuthError("HubSpot refused the access token, or it may not read contacts")
+            raise HubSpotAuthError(forbidden)
         if status == 429:
             raise HubSpotRateLimitedError(retry_after=_retry_after(response))
         if status >= 500:

@@ -17,8 +17,8 @@ from test_client_source_api import (  # noqa: F401 - fixtures
     TOKEN,
     alpha,
     choose,
+    give_token,
     history,
-    save_token,
     world,
 )
 
@@ -87,7 +87,7 @@ def test_an_unknown_client_is_a_404(world):
 
 def test_the_client_is_told_the_administrator_must_act_until_the_mapping_exists(world, alpha):
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(world)
     assert alpha.post(TEST).json()["ok"] is True
     body = alpha.get(READINESS).json()
     assert "source_connected" in check_ids(body, False)
@@ -98,7 +98,7 @@ def test_the_client_is_told_the_administrator_must_act_until_the_mapping_exists(
 
 def test_once_the_mapping_exists_the_source_check_passes_but_not_what_is_simulated(world, alpha):
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(world)
     world.admin().put(SOURCE, json=SETTINGS)
     # settings changed the document, not the connection: the client's test still counts
     assert alpha.post(TEST).json()["ok"] is True
