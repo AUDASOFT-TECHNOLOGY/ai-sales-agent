@@ -33,15 +33,16 @@ from typing import Any
 
 from sales_app.admin_auth import AdminUser, AdminUserStore
 from sales_app.config_store.models import CLIENT_ID_PATTERN
+from sales_app.consent_import import import_log as _import_log_files
+from sales_app.consent_wiring import open_consent_registry
 from sales_app.lockfile import InstanceAlreadyRunningError, InstanceLock
 from sales_app.persistence import build_account_stores
+from sales_app.persistence.factory import open_engine
 from sales_app.secret_store import (
-    AUDIT_FILENAME,
-    FileSecretAudit,
     SecretStore,
     SecretStoreError,
-    build_secret_store,
 )
+from sales_app.secret_wiring import open_secrets
 from sales_app.settings import Settings
 from sales_app.sourcing.consent import (
     CONFIRMATION_PHRASE,
@@ -80,6 +81,12 @@ def add_consent_parser(commands: "argparse._SubParsersAction[argparse.ArgumentPa
     client(actions.add_parser("status", help="health and counts of the registry"))
     client(actions.add_parser("verify-chain", help="check every event and the anchor"))
     client(actions.add_parser("check", help="is a contact blocked? (asked for, hidden)"))
+    import_log = actions.add_parser(
+        "import-log",
+        help="copy a client's consent file into the database (report first; the file is kept)",
+    )
+    client(import_log)
+    import_log.add_argument("--apply", action="store_true", help="write (without it: report only)")
 
     record = actions.add_parser("record", help="record a refusal (the contact is asked for)")
     client(record)
@@ -102,23 +109,53 @@ def run_consent(settings: Settings, args: argparse.Namespace) -> int:
     client_id = args.client
     if not CLIENT_ID_PATTERN.fullmatch(client_id):
         return _fail("invalid client id", EXIT_INVALID)
-    if not (settings.clients_dir / client_id / "client.yaml").is_file():
-        return _fail("unknown client", EXIT_INVALID)
+    engine = open_engine(settings)  # None without a database: the files remain the only truth
     try:
-        store = build_secret_store(
-            settings.secrets_dir,
-            settings.secrets_key.get_secret_value() if settings.secrets_key else None,
-        )
-    except SecretStoreError:
-        return _fail("the credential store cannot be opened (check the master key)", EXIT_PROBLEM)
+        if not _client_exists(settings, engine, client_id):
+            return _fail("unknown client", EXIT_INVALID)
+        try:
+            store, audit = open_secrets(settings, engine)
+        except SecretStoreError:
+            return _fail(
+                "the credential store cannot be opened (check the master key)", EXIT_PROBLEM
+            )
+        return _run_consent(settings, args, client_id, store, audit, engine)
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+
+def _client_exists(settings: Settings, engine: Any, client_id: str) -> bool:
+    files = settings.client_files_dir
+    if files is not None and (files / client_id / "client.yaml").is_file():
+        return True
+    if engine is None:
+        return False
+    from sales_app.persistence.client_record_rows import SqlClientRecordStore
+
+    return SqlClientRecordStore(engine).get(client_id) is not None
+
+
+def _run_consent(
+    settings: Settings,
+    args: argparse.Namespace,
+    client_id: str,
+    store: SecretStore,
+    audit: Any,
+    engine: Any,
+) -> int:
 
     command = args.consent_command
-    needs_exclusive_access = command in {"init", "record", "release"}
+    needs_exclusive_access = command in {"init", "record", "release"} or (
+        command == "import-log" and args.apply
+    )
     try:
         with _exclusive(settings) if needs_exclusive_access else _nothing():
+            if command == "import-log":
+                return _import_log(settings, engine, store, audit, client_id, args)
             if command == "release":
-                return _release(settings, store, args)
-            admin = _admin(settings, store, client_id, _NoAccounts())
+                return _release(settings, store, audit, engine, args)
+            admin = _admin(settings, store, client_id, _NoAccounts(), audit, engine)
             return _HANDLERS[command](admin, args)
     except InstanceAlreadyRunningError:
         return _fail(
@@ -184,7 +221,9 @@ def _record(admin: ConsentAdmin, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _release(settings: Settings, store: SecretStore, args: argparse.Namespace) -> int:
+def _release(
+    settings: Settings, store: SecretStore, audit: Any, engine: Any, args: argparse.Namespace
+) -> int:
     contact = _ask_contact()
     if contact is None:
         return _fail("give a phone number, an e-mail address or both", EXIT_INVALID)
@@ -196,7 +235,7 @@ def _release(settings: Settings, store: SecretStore, args: argparse.Namespace) -
     confirmation = input("> ")
     stores = build_account_stores(settings)
     try:
-        admin = _admin(settings, store, args.client, stores.admin_users)
+        admin = _admin(settings, store, args.client, stores.admin_users, audit, engine)
         result = admin.release(
             contact,
             username=args.username,
@@ -221,6 +260,29 @@ _HANDLERS: dict[str, Callable[[ConsentAdmin, argparse.Namespace], int]] = {
 }
 
 
+def _import_log(
+    settings: Settings, engine: Any, store: SecretStore, audit: Any, client_id: str, args: Any
+) -> int:
+    if engine is None:
+        return _fail("importing needs a database (SALES_AGENT_DATABASE_URL)", EXIT_INVALID)
+    from sales_app.persistence.consent_rows import SqlConsentLog
+    from sales_app.sourcing.consent.anchor import ConsentSecrets
+
+    path = settings.secrets_dir / CONSENT_DIRNAME / f"{client_id}.jsonl"
+    result = _import_log_files(
+        client_id,
+        path,
+        SqlConsentLog(engine, client_id),
+        ConsentSecrets(store, audit, client_id),
+        apply=args.apply,
+    )
+    for line in result.lines():
+        print(line)
+    if not args.apply:
+        print("report only: nothing was written")
+    return EXIT_OK if result.ok else EXIT_INTEGRITY
+
+
 # ---- helpers -----------------------------------------------------------------------------------
 
 
@@ -233,10 +295,14 @@ class _NoAccounts:
 
 
 def _admin(
-    settings: Settings, store: SecretStore, client_id: str, users: "AdminUserStore | _NoAccounts"
+    settings: Settings,
+    store: SecretStore,
+    client_id: str,
+    users: "AdminUserStore | _NoAccounts",
+    audit: Any,
+    engine: Any,
 ) -> ConsentAdmin:
-    audit = FileSecretAudit(settings.secrets_dir / AUDIT_FILENAME)
-    registry = open_file_registry(settings.secrets_dir, store, audit, client_id)
+    registry = open_consent_registry(settings, engine, store, audit, client_id)
     return ConsentAdmin(registry, users, audit)  # type: ignore[arg-type]
 
 

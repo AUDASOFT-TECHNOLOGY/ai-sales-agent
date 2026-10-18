@@ -209,7 +209,7 @@ class TestUpdateStatus:
         response = client.patch("/admin/v1/clients/naga", json={"status": "active"})
         assert response.status_code == 200
         assert response.json()["status"] == "active"
-        assert response.json()["restart_required"] is True  # no runtime until the next start
+        assert response.json()["restart_required"] is False  # put in force at once, no restart
 
 
 class TestUpdateSafety:

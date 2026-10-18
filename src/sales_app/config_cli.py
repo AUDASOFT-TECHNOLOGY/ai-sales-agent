@@ -22,13 +22,15 @@ from typing import Any
 
 from sales_app.config import (
     import_document,
-    read_wiring,
     validate_settings_document,
 )
+from sales_app.config.client_wiring import wiring_for
 from sales_app.config_store import ConfigStore, ConfigStoreError, ConfigVersion
 from sales_app.config_store.models import CLIENT_ID_PATTERN, thaw_document
 from sales_app.errors import ConfigurationError
 from sales_app.persistence import build_account_stores
+from sales_app.persistence.client_record_rows import SqlClientRecordStore
+from sales_app.persistence.factory import open_engine
 from sales_app.settings import Settings
 
 EXIT_OK, EXIT_STORE, EXIT_INVALID = 0, 1, 2
@@ -197,7 +199,14 @@ def _client(client: str) -> str:
 
 
 def _wiring(settings: Settings, client: str) -> dict[str, Any]:
-    raw, problem = read_wiring(settings.clients_dir / _client(client))
+    # The client's record in the database first (a client may have no folder), its file as the fallback.
+    engine = open_engine(settings)
+    try:
+        records = SqlClientRecordStore(engine) if engine is not None else None
+        raw, problem = wiring_for(settings.client_files_dir, _client(client), records)
+    finally:
+        if engine is not None:
+            engine.dispose()
     if raw is None:
         raise ConfigurationError([problem or f"{client}: cannot read client.yaml"])
     return raw

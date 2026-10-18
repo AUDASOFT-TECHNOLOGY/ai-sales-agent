@@ -2,14 +2,13 @@
 
 Boots the same FastAPI app the real deployment runs (`sales_app.api.create_app`), but wired to
 fake integrations (no Google Sheets, OpenAI or WhatsApp calls leave the machine) and the real
-client definitions from `clients/` (Naga, Tounesimmo -- copied, never edited), so the Admin screens
-(Dashboard, Clients, Agents, Settings, and their detail pages) can be exercised in a real browser
-without configuring any provider credentials. No invented client is added. Because the app will not
-boot without an enabled client, the temp copy of Naga alone is switched on (dry_run, stand-in Brain);
-Tounesimmo stays disabled, exactly as in `clients/`.
+client definitions generated from the platform's own skeleton (two demo clients, one active and one
+inactive), so the Admin screens (Dashboard, Clients, Agents, Settings, and their detail pages) can be
+exercised in a real browser without configuring any provider credentials. Because the app will not
+boot without an enabled client, the active demo client runs in dry_run with a stand-in Brain.
 
 This is dev tooling only: it is not imported by the application and does not ship any behaviour
-`sales_app` relies on. `clients/` is only read: the client directories are copied into a throwaway temp directory,
+`sales_app` relies on. The demo clients are written into a throwaway temp directory,
 and everything else lives in in-memory stores, so it never conflicts with a real deployment (it
 ignores SALES_AGENT_DATABASE_URL: every store is injected, so no database is opened).
 
@@ -24,14 +23,13 @@ Open http://localhost:5173/#/admin/login and sign in with:
     password: admin-dev-password
 
 The Client space is at http://localhost:5173/#/login, with two seeded dev accounts:
-    login: naga          password: naga-dev-password      (active)
-    login: tounesimmo    password: tounesimmo-dev-password (inactive: login is refused)
+    login: demo           password: demo-dev-password           (active)
+    login: demo-inactive  password: demo-inactive-dev-password  (inactive: login is refused)
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -74,15 +72,17 @@ from sales_integrations.whatsapp import WhatsAppWebhookParser
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin-dev-password"
-REAL_CLIENTS_DIR = Path(__file__).resolve().parent.parent / "clients"
 
 
-ENABLED_FOR_DEV = "naga"  # the app refuses to boot with no enabled client at all
-CLIENT_DEV_PASSWORDS = {"naga": "naga-dev-password", "tounesimmo": "tounesimmo-dev-password"}
+ENABLED_FOR_DEV = "demo"  # the app refuses to boot with no enabled client at all
+CLIENT_DEV_PASSWORDS = {
+    "demo": "demo-dev-password",
+    "demo-inactive": "demo-inactive-dev-password",
+}
 
 
 class DevBrain:
-    """Generic stand-in so a copy of Naga can run without its real, still-unwritten Brain settings."""
+    """Generic stand-in so a demo client can run without Brain settings of its own."""
 
     def __init__(self, llm: LLMProvider, settings: dict[str, Any]) -> None:
         self.llm = llm
@@ -99,32 +99,25 @@ def create_dev_brain(llm: LLMProvider, settings: dict[str, Any]) -> DevBrain:
     return DevBrain(llm, settings)
 
 
-def _enable_for_dev(client_dir: Path) -> None:
-    """Dev-only override, applied to the temp COPY only: enable the client in dry_run with the
-    stand-in Brain, keeping its real name, id and every other field."""
-    path = client_dir / "client.yaml"
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    raw.update(enabled=True, mode="dry_run")
-    raw["brain"] = {"factory": "dev_admin_server:create_dev_brain", "settings": {}}
-    raw["sheets"]["spreadsheet_id"] = "dev-sheet"
-    raw["llm"]["model"] = "gpt-4o-mini"
-    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+def _seed_dev_clients(destination: Path) -> list[str]:
+    """Write the two demo clients from the platform's skeleton. Only the active one is made able to
+    run: dry_run, the stand-in Brain, a placeholder-free Sheet and model."""
+    from sales_app.config.client_wiring import skeleton_wiring
 
-
-def _copy_real_clients(destination: Path) -> list[str]:
-    """Copy every real client definition (skipping `_template`) so the Admin shows the same
-    clients as a real deployment. Returns their ids."""
-    copied = []
-    for source in sorted(REAL_CLIENTS_DIR.iterdir()):
-        if (
-            source.is_dir()
-            and not source.name.startswith("_")
-            and (source / "client.yaml").is_file()
-        ):
-            shutil.copytree(source, destination / source.name)
-            copied.append(source.name)
-    _enable_for_dev(destination / ENABLED_FOR_DEV)
-    return copied
+    seeded = []
+    for client_id, name, enabled in (
+        ("demo", "Demo", True),
+        ("demo-inactive", "Demo Inactive", False),
+    ):
+        raw = skeleton_wiring(client_id, name, enabled=enabled, engine=None)
+        if enabled:
+            raw["brain"] = {"factory": "dev_admin_server:create_dev_brain", "settings": {}}
+            raw["sheets"]["spreadsheet_id"] = "dev-sheet"
+            raw["llm"]["model"] = "gpt-4o-mini"
+        (destination / client_id).mkdir(parents=True)
+        (destination / client_id / "client.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+        seeded.append(client_id)
+    return seeded
 
 
 def _fake_builders(clock: FakeClock) -> IntegrationBuilders:
@@ -155,7 +148,7 @@ def main() -> None:
     import uvicorn
 
     clients_dir = Path(tempfile.mkdtemp(prefix="sales-agent-admin-dev-"))
-    client_ids = _copy_real_clients(clients_dir)
+    client_ids = _seed_dev_clients(clients_dir)
 
     # False only for local http development (see Settings.admin_cookie_secure) -- exactly this
     # script's case: the browser talks to plain http://localhost, never https.
@@ -206,7 +199,7 @@ def main() -> None:
     # screens for them can be tried without one (pages are fetched for real, so use public https).
     application.product_resources = ResourceService(InMemoryResourceStore(), clock=clock.now)
 
-    print("Clients copied from", REAL_CLIENTS_DIR, "->", ", ".join(client_ids))
+    print("Demo clients:", ", ".join(client_ids))
     print(f"Admin login: username={ADMIN_USERNAME!r} password={ADMIN_PASSWORD!r}")
     for client_id, password in CLIENT_DEV_PASSWORDS.items():
         print(f"Client login: login={client_id!r} password={password!r}")

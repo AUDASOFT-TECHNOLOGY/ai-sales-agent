@@ -1,6 +1,7 @@
 """Process-level settings, read from the environment. Client settings live in clients/."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,6 +15,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SALES_AGENT_", extra="ignore")
 
     clients_dir: Path = Path("clients")
+    # Whether a client that has a `clients/<id>/client.yaml` may still be read from it. True only while
+    # a deployment still has clients that are not in the database (`sales-agent db legacy-check` says
+    # when none is left). False: no client file is ever read or written, whatever `clients_dir` holds.
+    legacy_client_files: bool = True
+    # Where the consent registry's events are kept. "file": one JSON-lines file per client under
+    # `secrets_dir` (what a deployment did until now). "sql": the database, strictly: a client whose
+    # consent files have not been imported yet is refused rather than started on an empty registry, and
+    # no consent file is ever read or written (see `sales-agent consent import-log`).
+    consent_store: Literal["file", "sql"] = "file"
     # Versioned client settings (see sales_app.config_store). Holds client business data and
     # changes at runtime, so it lives outside git and belongs in server backups.
     config_dir: Path = Path("config")
@@ -67,3 +77,8 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str | None = Field(
         default=None, validation_alias="WHATSAPP_VERIFY_TOKEN"
     )
+
+    @property
+    def client_files_dir(self) -> Path | None:
+        """Where legacy client files are read, or None when they are switched off."""
+        return self.clients_dir if self.legacy_client_files else None

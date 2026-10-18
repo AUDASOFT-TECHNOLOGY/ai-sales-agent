@@ -1,17 +1,17 @@
 {
   "schema_version": 3,
-  "client_id": "naga",
-  "display_name": "Naga",
+  "client_id": "acme",
+  "display_name": "Acme",
   "enabled": false,
   "mode": "approval",
   "timezone": "Africa/Tunis",
   "daily_action_limit": 20,
   "max_attempts": 3,
   "opt_out_keywords": ["stop"],
-  "brain": {"agent": "naga", "settings_version": 1, "settings": {}},
+  "brain": {"agent": "consultative", "settings_version": 1, "settings": {}},
   "source": {
     "provider": "google_sheets",
-    "settings": {"spreadsheet_id": "sheet-naga", "prospects_tab": "Prospects", "column_mapping": {}}
+    "settings": {"spreadsheet_id": "sheet-acme", "prospects_tab": "Prospects", "column_mapping": {}}
   },
   "store": {
     "provider": "google_sheets",

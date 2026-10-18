@@ -81,12 +81,12 @@ class TestFindingASpec:
         assert lookup.spec is None and not lookup.import_failed
         assert "does not implement BrainSettingsSpec" in lookup.error
 
-    def test_only_the_brains_that_are_built_declare_settings_rules(self):
-        # Naga's Brain is built and declares the consultative spec; Tounesimmo is still a scaffold
-        # whose settings stay opaque.
-        naga = find_settings_spec("naga_brain.brain:create_brain")
-        assert naga.error is None and naga.spec.family == "consultative_sales"
-        assert find_settings_spec("tounesimmo_brain.brain:create_brain").spec is None
+    def test_the_generic_engine_declares_the_consultative_settings_rules(self):
+        engine = find_settings_spec("sales_brain_kit.generic:BRAIN")
+        assert engine.error is None and engine.spec is None  # a descriptor is not a spec module
+        from sales_brain_kit.generic import BRAIN
+
+        assert BRAIN.settings_spec.family == "consultative_sales"
 
 
 class TestPublishingValidatesTheBrainSettings:

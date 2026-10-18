@@ -21,6 +21,8 @@ from datetime import UTC, datetime
 from sales_app.admin_auth import AdminRole, AdminStoreError, AdminUser
 from sales_app.admin_auth.passwords import hash_password
 from sales_app.persistence import build_account_stores
+from sales_app.persistence.client_record_rows import SqlClientRecordStore
+from sales_app.persistence.factory import open_engine
 from sales_app.settings import Settings
 
 EXIT_OK, EXIT_STORE, EXIT_INVALID = 0, 1, 2
@@ -175,9 +177,23 @@ def _normalize(username: str) -> str:
 
 def _checked_client_ids(settings: Settings, client_ids: list[str]) -> list[str]:
     for cid in client_ids:
-        if not (settings.clients_dir / cid / "client.yaml").exists():
-            print(f"warning: no clients/{cid}/client.yaml (scoping to it anyway)", file=sys.stderr)
+        if not _client_known(settings, cid):
+            print(f"warning: no client {cid!r} is known (scoping to it anyway)", file=sys.stderr)
     return client_ids
+
+
+def _client_known(settings: Settings, client_id: str) -> bool:
+    """A client exists as a record in the database or, for a legacy one, as a `client.yaml`."""
+    files = settings.client_files_dir
+    if files is not None and (files / client_id / "client.yaml").exists():
+        return True
+    engine = open_engine(settings)
+    if engine is None:
+        return False
+    try:
+        return SqlClientRecordStore(engine).get(client_id) is not None
+    finally:
+        engine.dispose()
 
 
 def _prompt_new_password() -> str:

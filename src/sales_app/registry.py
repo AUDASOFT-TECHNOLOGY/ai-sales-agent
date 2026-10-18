@@ -107,11 +107,13 @@ class ClientRegistry:
         with self._lock:
             self._runtimes[runtime.client_id] = runtime
             self._not_ready.pop(runtime.client_id, None)
+            self._disabled = tuple(c for c in self._disabled if c != runtime.client_id)
 
     def set_not_ready(self, config: ClientConfig) -> None:
         """A client without a runtime still lacks credentials (its config may have changed)."""
         with self._lock:
             self._not_ready[config.client_id] = config
+            self._disabled = tuple(c for c in self._disabled if c != config.client_id)
 
     # ---- lookup --------------------------------------------------------------------------
 

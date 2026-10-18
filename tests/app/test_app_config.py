@@ -361,19 +361,26 @@ class TestCrossClientIsolation:
 
 
 class TestShippedConfiguration:
-    def test_the_repository_clients_are_valid_and_disabled_until_filled_in(self):
+    def test_the_repository_clients_are_valid_and_run_nothing_until_filled_in(self):
         loaded = load_client_configs(REPO_ROOT / "clients", env={}, mode_ceiling=APPROVAL)
         assert loaded.errors == ()
         assert loaded.clients == ()
-        assert loaded.disabled == ("naga", "tounesimmo")
 
-    @pytest.mark.parametrize("client", ["naga", "tounesimmo"])
-    def test_the_shipped_files_enabled_with_placeholders_await_their_agent(self, tmp_path, client):
-        raw = (REPO_ROOT / "clients" / client / "client.yaml").read_text(encoding="utf-8")
-        write_client(tmp_path, client, raw=raw.replace("enabled: false", "enabled: true"))
-        loaded = load(tmp_path, env=env_for(client))
-        assert loaded.errors == () and loaded.clients == () and loaded.disabled == (client,)
+    def test_the_shipped_files_enabled_with_placeholders_await_their_agent(self, tmp_path):
+        shipped = sorted(
+            p.parent.name
+            for p in (REPO_ROOT / "clients").glob("*/client.yaml")
+            if not p.parent.name.startswith("_")
+        )
+        for client in shipped:
+            raw = (REPO_ROOT / "clients" / client / "client.yaml").read_text(encoding="utf-8")
+            raw = raw.replace("enabled: false", "enabled: true")
+            write_client(tmp_path, client, raw=raw)
+        loaded = load(tmp_path, env=env_for(*shipped))
+        assert loaded.errors == () and loaded.clients == ()
+        assert set(loaded.disabled) == set(shipped)
 
     def test_the_template_parses_but_is_never_loaded(self):
         template = yaml.safe_load((REPO_ROOT / "clients" / "_template" / "client.yaml").read_text())
         assert template["enabled"] is False and template["mode"] == "dry_run"
+        assert template["brain"]["agent"] == "consultative"

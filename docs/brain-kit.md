@@ -3,8 +3,8 @@
 Status: **implemented** in `src/sales_brain_kit/consultative/` (Slice 5). It is the first real Brain
 of the platform and it is client-agnostic: everything it knows comes from a client's Brain
 settings ([brain-settings.md](brain-settings.md)), the facts the Core hands it, and the
-conversation. Client Brains (`brains/*`) are thin packages that give it their settings; the first is
-Naga's ([naga-brain.md](naga-brain.md)).
+conversation. Every client runs on it as the `consultative` engine (`sales_brain_kit.generic`); a client's
+settings are its own data, stored in the database.
 
 The Brain Kit is **not a chatbot**. It is the commercial intelligence layer: it works out what is
 known, what the client sells, what the prospect probably wants, what is genuinely worth asking,

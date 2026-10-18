@@ -7,6 +7,7 @@ from sales_app.config.loader import (
     Resolution,
     clamp_mode,
     load_client_configs,
+    resolve_client,
     resolve_client_config,
 )
 from sales_app.config.resolution import (
@@ -34,6 +35,7 @@ __all__ = [
     "import_document",
     "load_client_configs",
     "read_wiring",
+    "resolve_client",
     "resolve_client_config",
     "validate_settings_document",
 ]

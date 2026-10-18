@@ -27,13 +27,13 @@ dependencies = [
 dev = [
     "pytest>=8.2",
     "ruff>=0.5",
-    # Brains are workspace members; installed here so the registry can import them.
-    "naga-brain",
-    "tounesimmo-brain",
 ]
 
 [project.scripts]
 sales-agent = "sales_app.cli:main"
+
+[project.entry-points."revansa.brains"]
+consultative = "sales_brain_kit.generic:BRAIN"
 
 [build-system]
 requires = ["hatchling"]
@@ -42,15 +42,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/sales_core", "src/sales_integrations", "src/sales_app", "src/sales_brain_kit"]
 
-[tool.uv.workspace]
-members = ["brains/*"]
-
-[tool.uv.sources]
-naga-brain = { workspace = true }
-tounesimmo-brain = { workspace = true }
-
 [tool.pytest.ini_options]
-testpaths = ["tests", "brains"]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100

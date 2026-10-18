@@ -13,7 +13,7 @@ sales_app ──► sales_core ◄── sales_integrations
   It defines contracts (data models) and ports (interfaces).
 - `sales_integrations` implements Core ports. It knows nothing about clients or brains.
 - Brains import only `sales_core` (contracts and port types), and may import `sales_brain_kit`. They contain no vendor code;
-  the Core injects the `LLMProvider`. The Naga Brain is such a package ([naga-brain.md](naga-brain.md)).
+  the Core injects the `LLMProvider`. The generic `consultative` engine (`sales_brain_kit.generic`) is such a Brain.
 - `sales_app` is the composition root, the only place where everything is wired together.
 - Brains never import each other.
 - `sales_brain_kit` is the shared, client-agnostic building block for Brains: the settings schema

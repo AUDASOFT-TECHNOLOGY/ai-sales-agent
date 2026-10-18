@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from collections.abc import Callable, Mapping
 from concurrent.futures import Executor
 from dataclasses import dataclass, field, replace
@@ -15,10 +16,13 @@ from sales_app.billing import InvoiceStore
 from sales_app.channel_policy import ChannelPolicyService
 from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore
+from sales_app.client_records import ClientRecordStore
 from sales_app.config import build_llm_registry, clamp_mode, load_client_configs
 from sales_app.config.channel_access import DEFAULT_ALLOWED
+from sales_app.config.client_wiring import wiring_for
 from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
 from sales_app.config_store import ConfigStore
+from sales_app.consent_wiring import check_consent_mode, open_consent_registry
 from sales_app.daily_report import DailyReportService
 from sales_app.email_activation import EmailActivationService
 from sales_app.email_platform import AuthLedger
@@ -47,19 +51,16 @@ from sales_app.resources.service import ResourceService
 from sales_app.runtime_manager import RuntimeManager
 from sales_app.scheduler import Scheduler
 from sales_app.secret_store import (
-    AUDIT_FILENAME,
     GLOBAL_SCOPE,
     CredentialService,
-    FileSecretAudit,
     SecretAudit,
     SecretStore,
     SecretStoreError,
-    build_secret_store,
 )
+from sales_app.secret_wiring import open_secrets
 from sales_app.send_cap import SendCapStore, SendLimits
 from sales_app.settings import Settings
 from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
-from sales_app.sourcing.consent.files import open_file_registry
 from sales_app.sourcing.ports import OperationalStore
 from sales_app.sourcing.sql_store import SqlOperationalStore
 from sales_app.wiring import IntegrationBuilders, default_builders
@@ -140,13 +141,38 @@ class Application:
     # without a database (the Client API says so). See `sales_app.resources`.
     product_resources: ResourceService | None = None
     knowledge: KnowledgeIndex | None = None
+    # Identity, status and engine of each client, in the database; None without one (the historical
+    # `client.yaml` files then decide, as before). See `sales_app.client_records`.
+    client_records: ClientRecordStore | None = None
+
+    def client_wiring(self, client_id: str) -> tuple[dict[str, Any] | None, str | None]:
+        """A client's operator wiring: its record first, its `client.yaml` as the fallback."""
+        return wiring_for(self.settings.client_files_dir, client_id, self.client_records)
+
+    def client_enabled(self, client_id: str) -> bool | None:
+        """Whether the Admin has switched the account on (None: no readable record or file)."""
+        raw, _problem = self.client_wiring(client_id)
+        return None if raw is None else raw.get("enabled", True) is not False
+
+    def set_client_enabled(self, client_id: str, enabled: bool, *, by: str) -> None:
+        """Record the Admin's decision in the database and, while a `client.yaml` still exists, in
+        the file too, so that going back to a version that reads only files changes nothing."""
+        if self.client_records is not None:
+            self.client_records.set_enabled(client_id, enabled, at=self.clock.now(), by=by)
+        files = self.settings.client_files_dir
+        path = files / client_id / "client.yaml" if files is not None else None
+        if path is not None and path.is_file():
+            write_enabled_line(path, enabled)
 
     def agent_may_work(self, client_id: str) -> bool:
         """`_may_work`, failing closed: if either switch cannot be read, the answer is no."""
         try:
-            return _may_work(self.agent_state, self.settings.clients_dir, client_id)
+            return _may_work(self.agent_state, self._is_active, client_id)
         except Exception:  # noqa: BLE001 - an unreadable switch must never mean "go"
             return False
+
+    def _is_active(self, client_id: str) -> bool:
+        return is_client_active(self.settings.client_files_dir, client_id, self.client_records)
 
     def close(self) -> None:
         self.runtime_manager.shutdown()  # first: a refresh may be waiting for a job to end
@@ -175,6 +201,7 @@ def build_application(
     agent_state_store: AgentStateStore | None = None,
     source_check_store: SourceCheckStore | None = None,
     gmail_service: GmailMailService | None = None,
+    client_record_store: ClientRecordStore | None = None,
 ) -> Application:
     """Load, validate and wire everything, or raise a ConfigurationError listing every problem.
 
@@ -225,6 +252,11 @@ def build_application(
             if source_check_store is not None
             else (defaults.source_checks if defaults is not None else InMemorySourceCheckStore())
         )
+        records = (
+            client_record_store
+            if client_record_store is not None
+            else (defaults.client_records if defaults is not None else None)
+        )
         return _assemble(
             settings,
             environment,
@@ -245,6 +277,7 @@ def build_application(
             agent_state,
             source_checks,
             gmail_service,
+            records,
         )
     except BaseException:
         if defaults is not None:
@@ -272,12 +305,15 @@ def _assemble(
     agent_state: AgentStateStore,
     source_checks: SourceCheckStore,
     gmail_service: GmailMailService | None = None,
+    client_records: ClientRecordStore | None = None,
 ) -> Application:
     client_auth = ClientAuthService(
         client_profiles,
         client_sessions,
         clock,
-        is_active=lambda client_id: is_client_active(settings.clients_dir, client_id),
+        is_active=lambda client_id: is_client_active(
+            settings.client_files_dir, client_id, client_records
+        ),
         session_ttl=timedelta(hours=settings.client_session_ttl_hours),
     )
     admin_auth = AdminAuthService(
@@ -287,22 +323,20 @@ def _assemble(
         session_ttl=timedelta(hours=settings.admin_session_ttl_hours),
     )
     try:
-        secrets = (
-            secret_store
-            if secret_store is not None
-            else build_secret_store(
-                settings.secrets_dir,
-                settings.secrets_key.get_secret_value() if settings.secrets_key else None,
+        opened = (
+            open_secrets(
+                settings,
+                account_stores.engine if account_stores is not None else None,
                 now=clock.now,
             )
+            if secret_store is None or secret_audit is None
+            else None
         )
     except SecretStoreError as error:  # a wrong or missing master key must stop startup
         raise ConfigurationError([str(error)]) from error
-    audit = (
-        secret_audit
-        if secret_audit is not None
-        else FileSecretAudit(settings.secrets_dir / AUDIT_FILENAME)
-    )
+    secrets = secret_store if secret_store is not None else opened[0]
+    audit = secret_audit if secret_audit is not None else opened[1]
+    check_consent_mode(settings, account_stores.engine if account_stores is not None else None)
     credentials = CredentialService(secrets, audit, now=clock.now)
     plans = _plan_store(account_stores)
     send_caps, send_limits = _send_limits(account_stores, plans, clock)
@@ -315,8 +349,8 @@ def _assemble(
         settings,
         verify_token=lambda: secrets.get(GLOBAL_SCOPE, WHATSAPP_VERIFY_TOKEN),
         operational_stores=_operational_stores(account_stores),
-        consent=lambda client_id: open_file_registry(
-            settings.secrets_dir, secrets, audit, client_id
+        consent=lambda client_id: open_consent_registry(
+            settings, account_stores.engine if account_stores else None, secrets, audit, client_id
         ),
         writeback=_writeback_support(settings, account_stores),
         llm_usage=_llm_usage_stores(account_stores),
@@ -337,15 +371,18 @@ def _assemble(
             "configures in Settings"
         )
     loaded = load_client_configs(
-        settings.clients_dir,
+        settings.client_files_dir,
         env=environment,
         mode_ceiling=ceiling,
         store=store,
         llm_registry=llm_registry,
         secret_store=secrets,
+        records=client_records,
     )
     errors = list(loaded.errors)
-    if require_clients and not loaded.clients and not errors:
+    # A deployment on the database may start with no client at all (the first is created from the
+    # Admin); one that only has files needs at least one.
+    if require_clients and not loaded.clients and not errors and client_records is None:
         errors.append(f"no enabled clients found in {settings.clients_dir}")
 
     registry: ClientRegistry | None = None
@@ -358,7 +395,7 @@ def _assemble(
 
     parsers = ParserTable(build_parsers(loaded.clients, builders))
     manager = RuntimeManager(
-        clients_dir=settings.clients_dir,
+        clients_dir=settings.client_files_dir,
         registry=registry,
         builders=builders,
         clock=clock,
@@ -369,6 +406,7 @@ def _assemble(
         secret_store=secrets,
         parsers=parsers,
         executor=refresh_executor,
+        client_records=client_records,
     )
     credentials.set_on_change(manager.notify_change)
     channel_policy = ChannelPolicyService(secrets, audit, now=clock.now)
@@ -395,7 +433,11 @@ def _assemble(
             registry,
             clock,
             executor=executor,
-            may_run=lambda client_id: _may_work(agent_state, settings.clients_dir, client_id),
+            may_run=lambda client_id: _may_work(
+                agent_state,
+                lambda cid: is_client_active(settings.client_files_dir, cid, client_records),
+                client_id,
+            ),
             inbox=builders,
             mail_cursors=_mail_cursor_stores(account_stores),
             reports=daily_reports,
@@ -422,6 +464,7 @@ def _assemble(
         daily_reports=daily_reports,
         product_resources=product_resources,
         knowledge=knowledge,
+        client_records=client_records,
     )
 
 
@@ -517,12 +560,26 @@ def _writeback_support(
     )
 
 
-def _may_work(store: AgentStateStore, clients_dir: Path, client_id: str) -> bool:
+_ENABLED_LINE = re.compile(r"^enabled:.*$", re.MULTILINE)
+
+
+def write_enabled_line(path: Path, enabled: bool) -> None:
+    """Flip only the `enabled` line of a `client.yaml`, so the operator's comments survive."""
+    text = path.read_text(encoding="utf-8")
+    line = f"enabled: {'true' if enabled else 'false'}"
+    if _ENABLED_LINE.search(text):
+        text = _ENABLED_LINE.sub(line, text, count=1)
+    else:
+        text = f"{line}\n{text}"
+    path.write_text(text, encoding="utf-8")
+
+
+def _may_work(store: AgentStateStore, is_active: Callable[[str], bool], client_id: str) -> bool:
     """Whether a client's agent may take work now: the Admin's `enabled` as it is stored (read each
     time, so disabling a client stops its work without a restart) **and** the client's own decision
     (started, not paused). Either alone is not enough."""
     state = store.get(client_id)
-    return state is not None and state.running and is_client_active(clients_dir, client_id)
+    return state is not None and state.running and is_active(client_id)
 
 
 def describe_modes(application: Application) -> list[dict[str, Any]]:

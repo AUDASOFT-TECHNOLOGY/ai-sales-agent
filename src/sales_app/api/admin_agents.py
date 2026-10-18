@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from sales_app.admin_auth import AdminUser
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency
 from sales_app.bootstrap import Application
-from sales_app.config import ClientConfig, read_wiring
+from sales_app.config import ClientConfig
 from sales_app.config.published import published_name
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 
@@ -191,7 +191,7 @@ def _all_summaries(application: Application) -> list[AgentSummaryResponse]:
         for config in application.registry.configs()
     ]
     for client_id in _disabled_client_ids(application):
-        raw, _problem = read_wiring(application.settings.clients_dir / client_id)
+        raw, _problem = application.client_wiring(client_id)
         summaries.append(_with_published_name(application, _summary_from_raw(client_id, raw or {})))
     return sorted(summaries, key=lambda s: s.agent_id)
 
@@ -203,10 +203,7 @@ def _find_detail(application: Application, agent_id: str) -> AgentDetailResponse
         return _with_published_name(application, _detail_from_config(config))
     if not CLIENT_ID_PATTERN.match(agent_id):
         return None
-    directory = application.settings.clients_dir / agent_id
-    if not directory.is_dir():
-        return None
-    raw, _problem = read_wiring(directory)
+    raw, _problem = application.client_wiring(agent_id)
     if raw is None or raw.get("enabled", True) is not False:
         return None  # anything that isn't an active runtime or a genuinely disabled client: 404
     return _with_published_name(application, _detail_from_raw(agent_id, raw))

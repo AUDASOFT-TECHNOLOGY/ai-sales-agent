@@ -467,27 +467,27 @@ class TestDocumentsV1AndV2ReachV3:
 
 class TestAlreadyCanonical:
     def test_a_canonical_mapping_is_accepted_as_it_is(self):
-        data = canonical_fixture("canonical_naga.json")
+        data = canonical_fixture("canonical_client.json")
         result = normalize(data)
         assert result.spec == data and result.origin == "canonical"
         assert result.env_fallbacks == {} and result.document_version is None
         ClientSpec.model_validate(result.spec)
 
     def test_it_is_idempotent(self):
-        once = normalize(canonical_fixture("canonical_naga.json"))
+        once = normalize(canonical_fixture("canonical_client.json"))
         assert normalize(once.spec).spec == once.spec
         assert normalize(normalize(once.spec).spec).spec == once.spec
 
     def test_the_result_is_a_copy(self):
-        data = canonical_fixture("canonical_naga.json")
+        data = canonical_fixture("canonical_client.json")
         result = normalize(data)
         result.spec["source"]["settings"]["spreadsheet_id"] = "changed"
-        assert data["source"]["settings"]["spreadsheet_id"] == "sheet-naga"
+        assert data["source"]["settings"]["spreadsheet_id"] == "sheet-acme"
         assert normalize(MappingProxyType(data)).spec == data
 
     def test_a_canonical_mapping_with_a_version_2_document_is_refused(self):
         problems = problems_of(
-            canonical_fixture("canonical_naga.json"), fixture_json("doc_v2.json")
+            canonical_fixture("canonical_client.json"), fixture_json("doc_v2.json")
         )
         assert "only be combined with a v3 document" in problems[0]
 
@@ -548,7 +548,7 @@ class TestDocumentsV3:
             ("polling", {"polling": {}}, "polling: is not a client setting"),
             (
                 "brain_agent",
-                {"brain": {"agent": "naga", "settings": {}}},
+                {"brain": {"agent": "consultative", "settings": {}}},
                 "brain.agent: is not a client setting",
             ),
             (
@@ -644,7 +644,7 @@ class TestIncompleteOrInvalidInput:
         assert problems_of(raw) == ("configuration must be a mapping",)
 
     def test_a_non_json_value_is_an_error_not_a_crash(self):
-        data = canonical_fixture("canonical_naga.json")
+        data = canonical_fixture("canonical_client.json")
         data["source"]["settings"]["bad"] = object()
         assert "configuration" in problems_of(data)[0]
 
@@ -664,7 +664,7 @@ class TestPurity:
             __getitem__ = get = __contains__ = keys = items = forbidden
 
         inputs = [(raw, document) for raw, document in SCENARIOS.values()]
-        canonical = canonical_fixture("canonical_naga.json")  # read before the guard
+        canonical = canonical_fixture("canonical_client.json")  # read before the guard
         # The timezone database is read when a zone is first used; the validation of a timezone
         # name is the one legitimate lookup, so the zones in use are loaded before the guard.
         zones = [ZoneInfo(name) for name in ("Africa/Tunis", "UTC")]

@@ -166,28 +166,29 @@ class TestDiscovery:
 
 
 class TestTheInstalledBrains:
-    def test_naga_is_really_discovered_through_its_entry_point(self):
+    def test_the_generic_engine_is_really_discovered_through_its_entry_point(self):
         registry = installed_brains()
-        installed = registry.get("naga")
-        assert installed.entry_point == "naga_brain.brain:BRAIN"
+        installed = registry.get("consultative")
+        assert installed.entry_point == "sales_brain_kit.generic:BRAIN"
         assert installed.settings_spec is not None
         assert installed.settings_spec.family == "consultative_sales"
         assert registry.problems() == {}
 
-    def test_tounesimmo_is_not_installed_as_a_brain_yet(self):
+    def test_no_brain_is_installed_for_a_single_client(self):
+        assert installed_brains().keys() == ("consultative",)
         with pytest.raises(BrainNotInstalledError):
-            installed_brains().get("tounesimmo")
+            installed_brains().get("some-client")
 
     def test_the_group_and_the_key_pattern_are_the_documented_ones(self):
         assert ENTRY_POINT_GROUP == "revansa.brains"
         assert BRAIN_KEY_PATTERN == r"^[a-z][a-z0-9_-]{1,63}$"
 
-    def test_the_installed_naga_builds_through_the_registry_and_validates_its_settings(self):
-        installed = installed_brains().get("naga")
+    def test_the_installed_engine_builds_through_the_registry_and_validates_its_settings(self):
+        installed = installed_brains().get("consultative")
         problems = installed.settings_spec.validate({}, 1)
-        assert problems  # Naga's settings are still empty: the spec says what is missing
+        assert problems  # empty settings: the spec says what is missing
         with pytest.raises(BrainLoadError, match="failed while building"):
-            installed_brains().create("naga", FakeLLMProvider(), {})
+            installed_brains().create("consultative", FakeLLMProvider(), {})
 
 
 def canonical(brain: dict[str, Any], **changes: Any) -> dict[str, Any]:
@@ -254,8 +255,8 @@ class TestACanonicalClientNamesItsBrainByKey:
         assert result.config is None
         assert any("brain.settings" in error for error in result.errors)
 
-    def test_naga_settings_are_validated_by_the_installed_naga_descriptor(self, tmp_path):
-        result = resolve(tmp_path, canonical({"agent": "naga", "settings": {}}), None)
+    def test_settings_are_validated_by_the_installed_engine_descriptor(self, tmp_path):
+        result = resolve(tmp_path, canonical({"agent": "consultative", "settings": {}}), None)
         assert result.config is None
         assert any("brain.settings" in error for error in result.errors)
 
@@ -278,12 +279,12 @@ class TestACanonicalClientNamesItsBrainByKey:
 
 class TestAClientCannotMakeTheRuntimeImportAnything:
     @pytest.mark.parametrize(
-        "agent", ["os.path:join", "evil.module:fn", "../x", "naga_brain.brain"]
+        "agent", ["os.path:join", "evil.module:fn", "../x", "client_brain.brain"]
     )
     def test_a_python_path_is_not_a_brain_key(self, tmp_path, import_spy, agent):
         result = resolve(tmp_path, canonical({"agent": agent, "settings": {}}), discover_brains([]))
         assert result.config is None and result.errors
-        assert not [n for n in import_spy if n.split(".")[0] in {"evil", "os", "naga_brain"}]
+        assert not [n for n in import_spy if n.split(".")[0] in {"evil", "os", "client_brain"}]
 
     def test_a_canonical_file_cannot_name_a_python_factory(self, tmp_path, import_spy):
         spec = canonical({"legacy_factory": "evil_module:build", "settings": {}})

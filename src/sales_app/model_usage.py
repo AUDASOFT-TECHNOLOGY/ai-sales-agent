@@ -13,9 +13,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from sales_app.client_records import ClientRecordStore
+from sales_app.config.client_wiring import known_client_ids, wiring_for
 from sales_app.config.offered_models import OfferedModel, models_from
 from sales_app.config.published import published_view
-from sales_app.config.resolution import read_wiring
 from sales_app.config_store import ConfigStore
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_app.secret_store import GLOBAL_SCOPE
@@ -56,10 +57,11 @@ def list_owner(providers: "ProviderRegistry", list_key: str) -> str | None:
 
 
 def models_in_use(
-    clients_dir: Path,
+    clients_dir: Path | None,
     store: ConfigStore,
     running: Iterable[Any],
     provider: str,
+    records: ClientRecordStore | None = None,
 ) -> dict[str, list[str]]:
     """Model id -> the clients (sorted) that use it, for the models of `provider`. A client whose
     settings name no provider counts for any (the model id is what matters)."""
@@ -72,16 +74,15 @@ def models_in_use(
         if isinstance(model, str) and model and (named is None or named == provider):
             used.setdefault(model, set()).add(client_id)
 
-    if clients_dir.is_dir():
-        for directory in sorted(clients_dir.iterdir()):
-            name = directory.name
-            if not directory.is_dir() or name.startswith(("_", ".")):
-                continue
-            if not CLIENT_ID_PATTERN.match(name):
-                continue
-            raw, _problem = read_wiring(directory)
-            if raw is not None:
-                note(name, published_view(store, name, raw).get("llm"))
+    names = {
+        d.name
+        for d in (clients_dir.iterdir() if clients_dir is not None and clients_dir.is_dir() else ())
+        if d.is_dir() and not d.name.startswith(("_", ".")) and CLIENT_ID_PATTERN.match(d.name)
+    } | set(known_client_ids(clients_dir, records))
+    for name in sorted(names):
+        raw, _problem = wiring_for(clients_dir, name, records)
+        if raw is not None:
+            note(name, published_view(store, name, raw).get("llm"))
     for config in running:
         note(
             config.client_id, {"provider": config.spec.llm.provider, "model": config.spec.llm.model}
@@ -91,10 +92,11 @@ def models_in_use(
 
 def clients_using_models(application: "Application", provider: str) -> dict[str, list[str]]:
     return models_in_use(
-        application.settings.clients_dir,
+        application.settings.client_files_dir,
         application.config_store,
         application.registry.configs(),
         provider,
+        application.client_records,
     )
 
 

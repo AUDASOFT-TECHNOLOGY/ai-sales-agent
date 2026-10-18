@@ -11,8 +11,10 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from sales_app.brain_registry import BrainRegistry
+from sales_app.client_records import ClientRecordStore
 from sales_app.config.brain_settings import prepare_brain_settings
 from sales_app.config.channel_access import GOVERNED, effective_channels
+from sales_app.config.client_wiring import known_client_ids, wiring_for
 from sales_app.config.email_activation import blocks_sending, parse_record
 from sales_app.config.email_settings import (
     GMAIL_MODE,
@@ -28,7 +30,6 @@ from sales_app.config.resolution import (
     CONFIG_FILENAME,
     check_document,
     merge_document,
-    read_wiring,
     strip_settings,
     upgrade_document,
     where,
@@ -151,26 +152,34 @@ class Resolution:
 
 
 def load_client_configs(
-    clients_dir: Path,
+    clients_dir: Path | None,
     *,
     env: Mapping[str, str],
     mode_ceiling: ApprovalMode,
     store: ConfigStore | None = None,
     llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
     secret_store: SecretStore | None = None,
+    records: ClientRecordStore | None = None,
 ) -> LoadedConfig:
-    if not clients_dir.is_dir():
+    from_records = records is not None and bool(known_client_ids(clients_dir, records))
+    if clients_dir is not None and not clients_dir.is_dir() and not from_records:
         return LoadedConfig((), (), (f"clients directory not found: {clients_dir}",))
 
     clients: list[ClientConfig] = []
     disabled: list[str] = []
     errors: list[str] = []
-    directories = sorted(
-        p for p in clients_dir.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))
-    )
-    for directory in directories:
-        resolution = resolve_client_config(
+    # The historical directories (as before), plus the clients that exist only as a record.
+    names = {
+        p.name
+        for p in (clients_dir.iterdir() if clients_dir is not None and clients_dir.is_dir() else ())
+        if p.is_dir() and not p.name.startswith(("_", "."))
+    } | set(known_client_ids(clients_dir, records))
+    for name in sorted(names):
+        directory = (clients_dir or Path()) / name
+        resolution = resolve_client(
             directory,
+            files=clients_dir is not None,
+            records=records,
             env=env,
             mode_ceiling=mode_ceiling,
             store=store,
@@ -179,7 +188,7 @@ def load_client_configs(
         )
         errors.extend(resolution.errors)
         if resolution.disabled:
-            disabled.append(directory.name)
+            disabled.append(name)
         elif resolution.config is not None:
             clients.append(resolution.config)
     errors.extend(_cross_client_errors(clients))
@@ -229,8 +238,33 @@ def resolve_client_config(
 
     Credentials that are not set do not make the configuration invalid: the client comes back with
     `missing_credentials` filled in (not ready). Structural problems stay errors."""
+    return resolve_client(
+        directory,
+        records=None,
+        env=env,
+        mode_ceiling=mode_ceiling,
+        store=store,
+        llm_registry=llm_registry,
+        secret_store=secret_store,
+    )
+
+
+def resolve_client(
+    directory: Path,
+    *,
+    records: ClientRecordStore | None,
+    files: bool = True,
+    env: Mapping[str, str],
+    mode_ceiling: ApprovalMode,
+    store: ConfigStore | None = None,
+    llm_registry: LLMRegistry = EMPTY_LLM_REGISTRY,
+    secret_store: SecretStore | None = None,
+) -> Resolution:
+    """`resolve_client_config` for a client whose wiring comes from its database record first and
+    its `client.yaml` as the fallback (see `sales_app.config.client_wiring`). With no record, it is
+    exactly `resolve_client_config`. `directory` need not exist when the client has a record."""
     name = directory.name
-    raw, problem = read_wiring(directory)
+    raw, problem = wiring_for(directory.parent if files else None, name, records)
     if problem is not None or raw is None:
         return Resolution(errors=(problem or f"{name}: cannot read {CONFIG_FILENAME}",))
 

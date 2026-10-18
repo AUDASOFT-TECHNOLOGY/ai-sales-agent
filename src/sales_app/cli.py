@@ -47,7 +47,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "db":
             return run_db(settings, args)
         if args.command == "secrets":
-            return run_secrets(args)
+            return run_secrets(args, settings)
         if args.command == "consent":
             return run_consent(settings, args)
         return _run(settings, args)

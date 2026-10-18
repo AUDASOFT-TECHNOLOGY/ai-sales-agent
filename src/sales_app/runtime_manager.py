@@ -27,7 +27,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from time import monotonic
 
-from sales_app.config import ClientConfig, LLMRegistry, resolve_client_config
+from sales_app.client_records import ClientRecordStore
+from sales_app.config import ClientConfig, LLMRegistry, resolve_client
+from sales_app.config.client_wiring import known_client_ids
 from sales_app.config.secrets import WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN
 from sales_app.config_store import ConfigStore
 from sales_app.config_store.models import CLIENT_ID_PATTERN
@@ -75,7 +77,7 @@ class RuntimeManager:
     def __init__(
         self,
         *,
-        clients_dir: Path,
+        clients_dir: Path | None,
         registry: ClientRegistry,
         builders: IntegrationBuilders,
         clock: Clock,
@@ -87,8 +89,10 @@ class RuntimeManager:
         parsers: ParserTable,
         executor: Executor | None = None,
         apply_wait_seconds: float = APPLY_WAIT_SECONDS,
+        client_records: ClientRecordStore | None = None,
     ) -> None:
         self._clients_dir = clients_dir
+        self._records = client_records
         self._registry = registry
         self._builders = builders
         self._clock = clock
@@ -174,8 +178,10 @@ class RuntimeManager:
         if not CLIENT_ID_PATTERN.match(client_id):
             return None
         self._set(client_id, APPLYING)
-        resolution = resolve_client_config(
-            self._clients_dir / client_id,
+        resolution = resolve_client(
+            (self._clients_dir or Path()) / client_id,
+            files=self._clients_dir is not None,
+            records=self._records,
             env=self._env,
             mode_ceiling=self._ceiling,
             store=self._config_store,
@@ -264,8 +270,10 @@ class RuntimeManager:
     def _resolve_all(self) -> list[ClientConfig]:
         configs: list[ClientConfig] = []
         for client_id in self._known_client_ids():
-            resolution = resolve_client_config(
-                self._clients_dir / client_id,
+            resolution = resolve_client(
+                (self._clients_dir or Path()) / client_id,
+                files=self._clients_dir is not None,
+                records=self._records,
                 env=self._env,
                 mode_ceiling=self._ceiling,
                 store=self._config_store,
@@ -278,7 +286,8 @@ class RuntimeManager:
 
     def _known_client_ids(self) -> list[str]:
         ids = {c.client_id for c in self._registry.configs()}
-        if self._clients_dir.is_dir():
+        ids |= set(known_client_ids(self._clients_dir, self._records))
+        if self._clients_dir is not None and self._clients_dir.is_dir():
             ids |= {
                 p.name
                 for p in self._clients_dir.iterdir()

@@ -1,4 +1,5 @@
-# Naga. Disabled until the placeholders below are replaced (see clients/_template/client.yaml).
+# Legacy file of a client that predates the database. Its identity, status and engine now belong in
+# the database (`sales-agent db clients`); this file is only the fallback until that is applied.
 client_id: naga
 display_name: Naga
 enabled: false
@@ -9,14 +10,11 @@ max_attempts: 3
 opt_out_keywords: ["stop"]
 
 brain:
-  factory: naga_brain.brain:create_brain
+  agent: consultative
   settings_version: 1
-  # Naga's Brain settings are Naga's own data: catalog, languages, markets, payment, workflow,
-  # cadence, tone. None of it is known yet, so none is written here. They are entered through the
-  # client-facing configuration interface (later) or published with
-  # `sales-agent config publish naga FILE`, and are validated against the consultative schema
-  # (`sales_brain_kit.ConsultativeSalesSpec`; see docs/brain-settings.md, docs/brain-commerce.md and
-  # the templates in docs/templates/). Naga cannot be enabled until they are valid.
+  # The client's commercial settings (catalog, languages, payment, workflow, tone) are its own
+  # data, stored as published settings versions and validated against the consultative schema
+  # (`sales_brain_kit.ConsultativeSalesSpec`; see docs/brain-settings.md). None is written here.
   settings: {}
 
 sheets:

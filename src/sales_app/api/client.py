@@ -86,7 +86,7 @@ def create_client_router(application: Application) -> APIRouter:
     auth = application.client_auth
     get_current_client = make_current_client_dependency(auth)
     router = APIRouter(prefix="/client/v1", tags=["client"])
-    clients_dir = application.settings.clients_dir
+    clients_dir = application.settings.client_files_dir
 
     def current_name(client_id: str) -> str | None:
         """The newest name wins: a published settings version is read before the running config,
@@ -97,7 +97,7 @@ def create_client_router(application: Application) -> APIRouter:
         config = application.registry.get_config(client_id)
         if config is not None:
             return config.spec.display_name
-        return stored_display_name(clients_dir, client_id)
+        return stored_display_name(clients_dir, client_id, application.client_records)
 
     def profile_response(profile: ClientProfile) -> ClientProfileResponse:
         name = current_name(profile.client_id)
@@ -105,7 +105,9 @@ def create_client_router(application: Application) -> APIRouter:
             name=name or profile.client_id,
             login=profile.login,
             whatsapp_number=profile.whatsapp_number,
-            status="active" if is_client_active(clients_dir, profile.client_id) else "inactive",
+            status="active"
+            if is_client_active(clients_dir, profile.client_id, application.client_records)
+            else "inactive",
             must_change_password=profile.must_change_password,
             whatsapp_reconnect_required=profile.whatsapp_reconnect_required,
         )

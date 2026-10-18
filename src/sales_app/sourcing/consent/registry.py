@@ -30,6 +30,7 @@ from typing import Protocol, runtime_checkable
 
 from sales_app.sourcing.consent.anchor import Anchor, ConsentAnchorFormatError, ConsentSecrets
 from sales_app.sourcing.consent.errors import (
+    ConsentConflictError,
     ConsentFormatError,
     ConsentKeyError,
     ConsentLockTimeoutError,
@@ -138,6 +139,9 @@ def _unavailable(reason: str) -> _Loaded:
     return _Loaded(Health.UNAVAILABLE, reason)
 
 
+MAX_WRITE_ATTEMPTS = 8  # a write that keeps losing its position this many times is reported
+
+
 class ConsentRegistry:
     def __init__(
         self,
@@ -240,12 +244,14 @@ class ConsentRegistry:
         """Block this contact. Idempotent: an identity already blocked adds nothing. Returns how
         many identities were newly blocked. Raises `ConsentUnavailableError` if the registry is not
         healthy (everything is blocked anyway)."""
-        with self._exclusive():
-            loaded = self._require_ok(self._load())
+
+        def write(loaded: _Loaded) -> int:
             fresh = [d for d in loaded.keys.digests(contact) if d not in loaded.blocked]  # type: ignore[union-attr]
             return self._append(
                 loaded, fresh, EventType.OPT_OUT, origin, reason, actor, evidence_ref
             )
+
+        return self._write_retrying(write)
 
     def append_release(
         self,
@@ -257,14 +263,35 @@ class ConsentRegistry:
     ) -> int:
         """End the block on this contact's identities that are blocked. **Operator service only.**
         Returns how many were released. Changes nothing else: no prospect, no status."""
-        with self._exclusive():
-            loaded = self._require_ok(self._load())
+
+        def write(loaded: _Loaded) -> int:
             held = [d for d in loaded.keys.digests(contact) if d in loaded.blocked]  # type: ignore[union-attr]
             return self._append(
                 loaded, held, EventType.RELEASE, Origin.OPERATOR, reason, actor, evidence_ref
             )
 
+        return self._write_retrying(write)
+
     # ---- internals -----------------------------------------------------------------------
+
+    def _write_retrying(self, write: Callable[["_Loaded"], int]) -> int:
+        """Run a read-verify-append, again from a fresh read when another writer took the position.
+
+        A log kept where several processes write (the database) can move on between the read and
+        the append; the append then refuses and writes nothing. Retrying starts over from what the
+        log holds now, so nothing is lost, nothing is written twice (an identity another writer has
+        already blocked is no longer "fresh") and events keep the order they were accepted in. The
+        number of attempts is bounded: past it the conflict is reported, never swallowed."""
+        written = 0
+        for attempt in range(1, MAX_WRITE_ATTEMPTS + 1):
+            try:
+                with self._exclusive():
+                    return written + write(self._require_ok(self._load()))
+            except ConsentConflictError as conflict:
+                written += getattr(conflict, "written", 0)  # events this attempt did append
+                if attempt == MAX_WRITE_ATTEMPTS:
+                    raise
+        raise AssertionError("unreachable")  # pragma: no cover
 
     @contextmanager
     def _exclusive(self) -> Iterator[None]:
@@ -314,7 +341,11 @@ class ConsentRegistry:
                 prev_mac=previous,
                 event_id=self._new_id(),
             )
-            self._log.append(event, expected_last_seq=last_seq)  # the event first...
+            try:
+                self._log.append(event, expected_last_seq=last_seq)  # the event first...
+            except ConsentConflictError as conflict:
+                conflict.written = written  # type: ignore[attr-defined]
+                raise
             self._secrets.set_anchor(
                 Anchor(event.seq, event.mac), actor=actor
             )  # ...then the anchor

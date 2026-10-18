@@ -154,8 +154,13 @@ def test_sql_is_confined_to_the_persistence_package():
     }
 
 
-def test_no_credential_is_stored_in_the_database_schema():
-    """Credentials stay in the SecretStore: no table or column of the schema may hold one."""
+# The one place credentials may live in the database: encrypted before they reach it, with the
+# master key kept outside (`sales_app.persistence.secret_rows`), and the audit of who changed them.
+CREDENTIAL_TABLES = {"secrets", "secret_audit"}
+
+
+def test_no_credential_is_stored_in_the_database_schema_outside_the_encrypted_store():
+    """Only the encrypted credential store may hold a credential: no other table or column may."""
     from sales_app.persistence.tables import metadata
 
     forbidden = (
@@ -166,9 +171,19 @@ def test_no_credential_is_stored_in_the_database_schema():
         "phone_number_id",
         "app_secret",
     )
-    columns = {f"{t.name}.{c.name}" for t in metadata.tables.values() for c in t.columns}
+    others = [t for t in metadata.tables.values() if t.name not in CREDENTIAL_TABLES]
+    columns = {f"{t.name}.{c.name}" for t in others for c in t.columns}
     assert not {c for c in columns if any(word in c for word in forbidden)}
-    assert not {t for t in metadata.tables if "secret" in t}
+    assert not {t.name for t in others if "secret" in t.name}
+    # What the store keeps is ciphertext and the facts about it, never a plaintext column.
+    assert {c.name for c in metadata.tables["secrets"].columns} == {
+        "scope",
+        "key",
+        "value",
+        "updated_at",
+        "updated_by",
+    }
+    assert {t.name for t in metadata.tables.values() if "secret" in t.name} == CREDENTIAL_TABLES
 
 
 def test_the_app_uses_no_commercial_vocabulary():
@@ -550,30 +565,7 @@ def test_the_brain_runtime_has_one_way_dependencies():
         assert not imported & later, f"{name} imports a module above it: {sorted(imported & later)}"
 
 
-# ---- the Naga Brain is a thin package over the kit ---------------------------------------------------
-
-NAGA = BRAINS / "naga" / "naga_brain"
-
-
-def test_the_naga_brain_depends_only_on_the_core_and_the_kit():
-    allowed = set(sys.stdlib_module_names) | {"naga_brain", "sales_core", "sales_brain_kit"}
-    assert _imported_top_levels(NAGA) <= allowed
-
-
-def test_the_naga_brain_reaches_the_core_only_through_contracts_and_ports():
-    for module in _imported_modules(NAGA):
-        if module.startswith("sales_core"):
-            assert module in {"sales_core.contracts", "sales_core.ports"}, module
-
-
-def test_the_naga_brain_adds_no_second_brain_interface_and_no_effects():
-    names = _defined_and_used_names(NAGA)
-    for forbidden in ("MessagingChannel", "SalesRepository", "FactsWriter", "send", "Engine"):
-        assert forbidden not in names, forbidden
-    assert not _imported_top_levels(NAGA) & {"threading", "asyncio", "sqlite3", "socket", "os"}
-
-
-def test_the_kit_never_depends_on_the_naga_brain_or_any_other_client_brain():
+def test_the_kit_never_depends_on_any_client_brain():
     assert not _imported_top_levels(KIT) & set(_brain_packages())
 
 

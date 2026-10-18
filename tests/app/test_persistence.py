@@ -574,11 +574,11 @@ class TestApplicationOnTheDatabase:
             )
             same_number = http.post("/admin/v1/clients", json=body | {"login": "other.login"})
             assert (same_login.status_code, same_number.status_code) == (409, 409)
-            # The refused attempts left neither a row nor a directory behind.
+            # The refused attempts left no row behind.
             assert rows(application.account_stores.engine, "client_profiles") == 1
+            # A new client lives in the database alone: no folder, no `client.yaml`.
             assert sorted(p.name for p in tmp_path.iterdir() if (p / "client.yaml").exists()) == [
-                "acme-corp",
-                "alpha",
+                "alpha"
             ]
 
             # The new client signs in on its own, separate session space.

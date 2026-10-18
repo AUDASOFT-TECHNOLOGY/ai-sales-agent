@@ -40,14 +40,15 @@ from sales_app.admin_auth.passwords import hash_password
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency, require_role
 from sales_app.bootstrap import Application
 from sales_app.client_profiles import LOGIN_PATTERN, ClientProfile, normalize_login
+from sales_app.client_records import DEFAULT_ENGINE, ClientRecord
 from sales_app.config import (
     ClientConfig,
     build_llm_registry,
     extract_document,
     import_document,
-    read_wiring,
     validate_settings_document,
 )
+from sales_app.config.client_wiring import skeleton_wiring
 from sales_app.config.loader import awaiting_configuration, brain_unassigned
 from sales_app.config.published import published_document, published_name, published_view
 from sales_app.config.resolution import (
@@ -281,8 +282,13 @@ def _slug(display_name: str) -> str:
 
 def _free_client_id(application: Application, base: str) -> str:
     taken = {p.client_id for p in application.client_profiles.list()}
+    taken |= {
+        r.client_id
+        for r in (application.client_records.list() if application.client_records else ())
+    }
     candidate, n = base, 2
-    while candidate in taken or (application.settings.clients_dir / candidate).exists():
+    files = application.settings.client_files_dir
+    while candidate in taken or (files is not None and (files / candidate).exists()):
         candidate, n = f"{base}-{n}", n + 1
     return candidate
 
@@ -292,44 +298,11 @@ def _new_client_yaml(
 ) -> dict:
     """A new client has no Brain, Sheet, model or WhatsApp wiring yet: placeholders stand in for
     them. The account may still be enabled -- the loader leaves such a client without an agent
-    (`awaiting_configuration`) until the Brain, the Sheet and the model are really there."""
-    return {
-        "client_id": client_id,
-        "display_name": display_name,
-        "enabled": enabled,
-        "mode": "dry_run",
-        "timezone": "UTC",
-        "daily_action_limit": 20,
-        "max_attempts": 3,
-        "opt_out_keywords": ["stop"],
-        "brain": {"factory": "TODO", "settings": {}},
-        "sheets": {
-            "provider": "google_sheets",
-            "spreadsheet_id": "TODO",
-            "prospects_tab": "Prospects",
-            "actions_tab": "Actions",
-            "messages_tab": "Messages",
-            "log_tab": "Log",
-            "column_mapping": {},
-            "credentials_env": "GOOGLE_APPLICATION_CREDENTIALS",
-        },
-        "llm": {
-            "provider": provider or "openai",
-            "api_key_env": "OPENAI_API_KEY",
-            "model": model or "TODO",
-        },
-        # No credential names, and not the client's WhatsApp number (that is profile data): Meta's
-        # access token and phone number id come from the WhatsApp onboarding and live in the
-        # credential store (see sales_app.secret_store).
-        "whatsapp": {"provider": "whatsapp"},
-        "schedule": {
-            "daily_at": "09:00",
-            "days": ["mon", "tue", "wed", "thu", "fri", "sat"],
-            "prepare_every_minutes": 60,
-            "dispatch_every_minutes": 5,
-            "recover_every_minutes": 15,
-        },
-    }
+    (`awaiting_configuration`) until the Brain, the Sheet and the model are really there. The
+    engine is not named here: it is the client's database record that carries it."""
+    return skeleton_wiring(
+        client_id, display_name, enabled=enabled, engine=None, provider=provider, model=model
+    )
 
 
 def _prospects_contacted(runtime: ClientRuntime) -> int | None:
@@ -531,7 +504,7 @@ def _all_summaries(application: Application) -> list[ClientSummaryResponse]:
         for config in application.registry.configs()
     ]
     for client_id in _disabled_client_ids(application):
-        raw, _problem = read_wiring(application.settings.clients_dir / client_id)
+        raw, _problem = application.client_wiring(client_id)
         summaries.append(_summary_from_raw(client_id, _published_view(application, client_id, raw)))
     return sorted(summaries, key=lambda s: s.client_id)
 
@@ -543,10 +516,7 @@ def _find_detail(application: Application, client_id: str) -> ClientDetailRespon
         return _with_published_name(application, detail)
     if not CLIENT_ID_PATTERN.match(client_id):
         return None
-    directory = application.settings.clients_dir / client_id
-    if not directory.is_dir():
-        return None
-    raw, _problem = read_wiring(directory)
+    raw, _problem = application.client_wiring(client_id)
     if raw is None:
         return None  # not a client directory: 404
     # Disabled, or activated and awaiting a restart: what it will run on is its published settings.
@@ -592,17 +562,14 @@ def _wiring_and_base_document(application: Application, client_id: str) -> tuple
     itself)."""
     config = application.registry.get_config(client_id)
     if config is not None:
-        raw, _problem = read_wiring(config.directory)
+        raw, _problem = application.client_wiring(config.client_id)
         if raw is None:
             return None
         published = published_document(application.config_store, client_id)
         return raw, published if published is not None else extract_document(config.spec)
     if not CLIENT_ID_PATTERN.match(client_id):
         return None
-    directory = application.settings.clients_dir / client_id
-    if not directory.is_dir():
-        return None
-    raw, _problem = read_wiring(directory)
+    raw, _problem = application.client_wiring(client_id)
     if raw is None:
         return None
     published = published_document(application.config_store, client_id)
@@ -667,15 +634,12 @@ def _apply_now(application: Application, client_id: str) -> None:
         future.result(timeout=REFRESH_WAIT_SECONDS)
 
 
-_ENABLED_LINE = re.compile(r"^enabled:.*$", re.MULTILINE)
-
-
 def _stored_enabled(application: Application, client_id: str) -> bool | None:
-    """`enabled` as written in the client's `client.yaml` (None: no readable client.yaml)."""
+    """`enabled` as the client's record says, else as written in its `client.yaml` (None: neither
+    is readable)."""
     if not CLIENT_ID_PATTERN.match(client_id):
         return None
-    raw, _problem = read_wiring(application.settings.clients_dir / client_id)
-    return None if raw is None else raw.get("enabled", True) is not False
+    return application.client_enabled(client_id)
 
 
 def _pause_client_switch(application: Application, client_id: str, by: str) -> None:
@@ -687,38 +651,81 @@ def _pause_client_switch(application: Application, client_id: str, by: str) -> N
         application.agent_state.set(client_id, running=False, by=by, at=application.clock.now())
 
 
-def _write_enabled(application: Application, client_id: str, enabled: bool) -> None:
-    """Flip only the `enabled` line, so the operator's comments and layout in client.yaml survive."""
-    path = application.settings.clients_dir / client_id / "client.yaml"
-    text = path.read_text(encoding="utf-8")
-    line = f"enabled: {'true' if enabled else 'false'}"
-    if _ENABLED_LINE.search(text):
-        text = _ENABLED_LINE.sub(line, text, count=1)
-    else:
-        text = f"{line}\n{text}"
-    path.write_text(text, encoding="utf-8")
+def _write_enabled(application: Application, client_id: str, enabled: bool, by: str) -> None:
+    """Record the Admin's decision (database first, the file kept in step while it exists)."""
+    application.set_client_enabled(client_id, enabled, by=by)
+
+
+def _activate_now(application: Application, client_id: str) -> None:
+    """Put the account's new status in force without a restart: the runtime manager resolves the
+    client again and, if it is enabled, ready and complete, builds and installs its runtime. Like
+    `_apply_now`, it never fails the request (the status was recorded; `runtime-status` says how
+    the refresh ended), and an account still awaiting its Sheet or model simply has nothing to
+    build yet."""
+    future = application.runtime_manager.refresh_client(client_id)
+    with contextlib.suppress(Exception):
+        future.result(timeout=REFRESH_WAIT_SECONDS)
 
 
 def _unvalidated_wiring(application: Application, client_id: str) -> dict | None:
     if not CLIENT_ID_PATTERN.match(client_id):
         return None
-    directory = application.settings.clients_dir / client_id
-    if not directory.is_dir():
-        return None
-    return read_wiring(directory)[0]
+    return application.client_wiring(client_id)[0]
+
+
+def _client_file(application: Application, client_id: str):
+    """The client's legacy `client.yaml` if files are enabled and it exists, else None."""
+    files = application.settings.client_files_dir
+    path = files / client_id / "client.yaml" if files is not None else None
+    return path if path is not None and path.is_file() else None
+
+
+def _awaiting_brain_settings(
+    application: Application, client_id: str, document: Mapping[str, Any] | None
+) -> bool:
+    """A client with no `client.yaml` whose Brain settings are not written yet: its name, quota and
+    model are still those of its skeleton, not of a complete document (which the Brain's rules would
+    refuse). A client that still has its file keeps the historical behaviour."""
+    if _client_file(application, client_id) is not None:
+        return False
+    brain = document.get("brain") if document is not None else None
+    return not (isinstance(brain, Mapping) and brain.get("settings"))
 
 
 def _write_skeleton_settings(
-    application: Application, client_id: str, raw: dict, changes: dict
+    application: Application, client_id: str, raw: dict, changes: dict, author: str
 ) -> None:
-    updated = {**raw}
+    """Name, quota and model of a client that has no valid settings document yet (no Brain settings
+    written). A client without a `client.yaml` (every new one) gets them as a published settings
+    version, like every other setting; only a historical client that still has its file is written
+    to the file, as before."""
+    path = _client_file(application, client_id)
+    if path is not None:
+        updated = {**raw}
+        for key in ("display_name", "daily_action_limit"):
+            if key in changes:
+                updated[key] = changes[key]
+        if "llm" in changes:
+            updated["llm"] = {**_section(raw, "llm"), **changes["llm"]}
+        path.write_text(yaml.safe_dump(updated, sort_keys=False), encoding="utf-8")
+        return
+    current = application.config_store.current(client_id)
+    document = thaw_document(current.document) if current is not None else _skeleton_document(raw)
     for key in ("display_name", "daily_action_limit"):
         if key in changes:
-            updated[key] = changes[key]
+            document[key] = changes[key]
     if "llm" in changes:
-        updated["llm"] = {**_section(raw, "llm"), **changes["llm"]}
-    path = application.settings.clients_dir / client_id / "client.yaml"
-    path.write_text(yaml.safe_dump(updated, sort_keys=False), encoding="utf-8")
+        document["llm"] = {**(document.get("llm") or {}), **changes["llm"]}
+    try:
+        application.config_store.publish(
+            client_id,
+            document,
+            author=author,
+            note="client settings",
+            expected_parent=current.version if current is not None else None,
+        )
+    except ConfigConflictError as error:
+        raise HTTPException(409, str(error)) from error
 
 
 def _with_stored_status(
@@ -742,11 +749,13 @@ def rename_client(application: Application, client_id: str, name: str, *, author
     running agent takes the new name at the next refresh of that client (any change the Admin
     publishes or a credential change) or at the next start."""
     found = _wiring_and_base_document(application, client_id)
+    if found is not None and _awaiting_brain_settings(application, client_id, found[1]):
+        found = None
     raw = found[0] if found is not None else _unvalidated_wiring(application, client_id)
     if raw is None:
         raise HTTPException(404, "no such client")
     if found is None:
-        _write_skeleton_settings(application, client_id, raw, {"display_name": name})
+        _write_skeleton_settings(application, client_id, raw, {"display_name": name}, author)
         return
     check = validate_client_document(client_id, raw, {**found[1], "display_name": name})
     if check.errors or check.document is None:
@@ -1072,6 +1081,8 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         if raw is None:
             raise HTTPException(404, "no such client")
         base_document = found[1] if found is not None else None
+        if _awaiting_brain_settings(application, client_id, base_document):
+            base_document = None  # the skeleton path: see `_awaiting_brain_settings`
         sent = body.model_fields_set
         others = [p for p in application.client_profiles.list() if p.client_id != client_id]
 
@@ -1147,7 +1158,9 @@ def create_admin_clients_router(application: Application) -> APIRouter:
                 "whatsapp_number together to create it",
             )
         if document_changes and base_document is None:
-            _write_skeleton_settings(application, client_id, raw, document_changes)
+            _write_skeleton_settings(
+                application, client_id, raw, document_changes, f"admin:{admin.username}"
+            )
         elif document_changes and base_document is not None:
             check = validate_client_document(
                 client_id,
@@ -1196,11 +1209,12 @@ def create_admin_clients_router(application: Application) -> APIRouter:
                         _pause_client_switch(application, client_id, by)
                     except Exception:  # noqa: BLE001 - any store failure means the same
                         raise HTTPException(503, "the agent switch is unavailable") from None
-                    _write_enabled(application, client_id, enabled)
+                    _write_enabled(application, client_id, enabled, by)
+                    _activate_now(application, client_id)
                 else:
                     # Disabling never depends on the client's switch: `enabled` alone stops the
                     # work, so it is written first and a store failure cannot get in the way.
-                    _write_enabled(application, client_id, enabled)
+                    _write_enabled(application, client_id, enabled, by)
                     try:
                         _pause_client_switch(application, client_id, by)
                     except Exception:  # noqa: BLE001 - the client is disabled whatever happens here
@@ -1208,7 +1222,7 @@ def create_admin_clients_router(application: Application) -> APIRouter:
                             "the agent switch could not be paused; the client is disabled anyway"
                         )
             else:
-                _write_enabled(application, client_id, enabled)
+                _write_enabled(application, client_id, enabled, f"admin:{admin.username}")
 
         return detail_response(client_id)
 
@@ -1249,32 +1263,53 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             raise HTTPException(409, "this login is already used")
 
         client_id = _free_client_id(application, base)
-        directory = application.settings.clients_dir / client_id
-        directory.mkdir(parents=True)
-        try:
-            raw = _new_client_yaml(
-                client_id, display_name, provider, model, enabled=body.status == "active"
+        by = f"admin:{admin.username}"
+        profile = ClientProfile(
+            client_id=client_id,
+            login=login,
+            password_hash=hash_password(body.temporary_password),
+            logo=body.logo,
+            whatsapp_number=whatsapp_number,
+            created_at=application.clock.now(),
+            created_by=by,
+        )
+        enabled = body.status == "active"
+        if application.client_records is not None:
+            # The client exists in the database alone: no folder, no `client.yaml`. Its wiring is
+            # the platform's skeleton (`client_wiring.skeleton_wiring`), its engine the generic one.
+            raw = skeleton_wiring(client_id, display_name, enabled=enabled, engine=DEFAULT_ENGINE)
+            try:
+                application.client_profiles.create(profile)
+            except ValueError as error:  # e.g. a concurrent request took the same login
+                raise HTTPException(409, str(error)) from error
+            application.client_records.save(
+                ClientRecord(client_id, display_name, enabled, DEFAULT_ENGINE),
+                at=application.clock.now(),
+                by=by,
             )
-            (directory / "client.yaml").write_text(
-                yaml.safe_dump(raw, sort_keys=False), encoding="utf-8"
-            )
-            application.client_profiles.create(
-                ClientProfile(
-                    client_id=client_id,
-                    login=login,
-                    password_hash=hash_password(body.temporary_password),
-                    logo=body.logo,
-                    whatsapp_number=whatsapp_number,
-                    created_at=application.clock.now(),
-                    created_by=f"admin:{admin.username}",
+            if provider is not None and model is not None:
+                _write_skeleton_settings(
+                    application, client_id, raw, {"llm": {"provider": provider, "model": model}}, by
                 )
-            )
-        except ValueError as error:  # e.g. a concurrent request took the same login
-            shutil.rmtree(directory, ignore_errors=True)
-            raise HTTPException(409, str(error)) from error
-        except Exception:
-            shutil.rmtree(directory, ignore_errors=True)
-            raise
+        else:
+            # A deployment without a database keeps the files as the only truth, unless they are off.
+            files = application.settings.client_files_dir
+            if files is None:
+                raise HTTPException(503, "clients need the database (set SALES_AGENT_DATABASE_URL)")
+            directory = files / client_id
+            directory.mkdir(parents=True)
+            try:
+                raw = _new_client_yaml(client_id, display_name, provider, model, enabled=enabled)
+                (directory / "client.yaml").write_text(
+                    yaml.safe_dump(raw, sort_keys=False), encoding="utf-8"
+                )
+                application.client_profiles.create(profile)
+            except ValueError as error:
+                shutil.rmtree(directory, ignore_errors=True)
+                raise HTTPException(409, str(error)) from error
+            except Exception:
+                shutil.rmtree(directory, ignore_errors=True)
+                raise
         application.registry.add_disabled(client_id)
         if body.plan_id is not None:
             _assign_new_client(application, client_id, body.plan_id, admin.username)

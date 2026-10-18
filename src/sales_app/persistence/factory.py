@@ -16,10 +16,12 @@ from sales_app.admin_auth import (
 )
 from sales_app.agent_state import AgentStateStore, FileAgentStateStore
 from sales_app.client_profiles import ClientProfileStore, FileClientProfileStore
+from sales_app.client_records import ClientRecordStore
 from sales_app.config_store import ConfigStore, FileConfigStore
 from sales_app.errors import ConfigurationError
 from sales_app.persistence.admin_stores import SqlAdminSessionStore, SqlAdminUserStore
 from sales_app.persistence.agent_state_store import SqlAgentStateStore
+from sales_app.persistence.client_record_rows import SqlClientRecordStore
 from sales_app.persistence.client_stores import SqlClientProfileStore, SqlClientSessionStore
 from sales_app.persistence.clients import seed_clients
 from sales_app.persistence.database import create_database_engine
@@ -40,6 +42,8 @@ class AccountStores:
     agent_state: AgentStateStore
     source_checks: SourceCheckStore
     engine: Engine | None = None  # None: the file fallback
+    # Identity, status and engine of each client; None without a database (the files decide).
+    client_records: ClientRecordStore | None = None
 
     def close(self) -> None:
         if self.engine is not None:
@@ -67,7 +71,8 @@ def build_account_stores(settings: Settings) -> AccountStores:
     try:
         ensure_schema_current(engine)
         # Every client directory is a client: this is what lets an Admin be scoped to it.
-        seed_clients(engine, settings.clients_dir, now=datetime.now(UTC))
+        if settings.client_files_dir is not None:
+            seed_clients(engine, settings.client_files_dir, now=datetime.now(UTC))
     except SchemaNotReadyError as error:
         engine.dispose()
         raise ConfigurationError([str(error)]) from error
@@ -85,4 +90,5 @@ def build_account_stores(settings: Settings) -> AccountStores:
         agent_state=SqlAgentStateStore(engine),
         source_checks=SqlSourceCheckStore(engine),
         engine=engine,
+        client_records=SqlClientRecordStore(engine),
     )

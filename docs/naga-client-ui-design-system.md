@@ -33,7 +33,7 @@ Inspected: the whole tree, `pyproject.toml`, `src/sales_app/api/app.py`, `client
 the design documents ([web-admin-product-design.md](web-admin-product-design.md),
 [client-configuration-design.md](client-configuration-design.md), [brain-settings.md](brain-settings.md),
 [brain-commerce.md](brain-commerce.md), [core-facts-and-payments.md](core-facts-and-payments.md),
-[naga-brain.md](naga-brain.md), [sheet-schema.md](sheet-schema.md)).
+[sheet-schema.md](sheet-schema.md)).
 
 | Finding | Consequence for the UI |
 |---|---|

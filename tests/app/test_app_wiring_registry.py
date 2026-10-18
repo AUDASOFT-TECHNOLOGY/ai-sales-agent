@@ -343,6 +343,6 @@ class TestBootstrap:
         assert isinstance(application.scheduler._executor, InlineExecutor)
 
     def test_brain_packages_are_not_imported_unless_configured(self, tmp_path):
-        before = {"naga_brain", "tounesimmo_brain"} & set(sys.modules)
+        before = {"client_brain"} & set(sys.modules)
         build_test_application(tmp_path, "alpha")
-        assert {"naga_brain", "tounesimmo_brain"} & set(sys.modules) == before
+        assert {"client_brain"} & set(sys.modules) == before

@@ -2,7 +2,8 @@
 a deployed database looks like; these definitions are what the stores query with.
 
 Account and configuration data, and (the `op_*` tables) a client's operational data when its
-prospects live in another system. No credential of any kind (see `sales_app.secret_store`).
+prospects live in another system. Credentials are kept only as ciphertext (`secrets`, see
+`sales_app.secret_store`): the key that opens them is never in the database.
 """
 
 from datetime import UTC, datetime
@@ -58,6 +59,12 @@ clients = Table(
     Column("client_id", String(64), primary_key=True),
     Column("created_at", UtcDateTime, nullable=False),
     Column("created_by", String(255)),
+    # Identity, status and engine (migration 0015). NULL: not migrated, `client.yaml` decides.
+    Column("display_name", String(80)),
+    Column("enabled", Boolean),
+    Column("engine", String(64)),
+    Column("updated_at", UtcDateTime),
+    Column("updated_by", String(255)),
 )
 
 client_profiles = Table(
@@ -542,4 +549,60 @@ product_resource_chunks = Table(
     Column("product_id", String(64), nullable=False),
     Column("body", Text, nullable=False),
     Index("ix_product_resource_chunks_product", "client_id", "product_id"),
+)
+
+# Credentials, encrypted with AES-256-GCM before they reach the database (`sales_app.secret_store`).
+# `scope` is "global" (Revansa's) or "client:<id>" (one client's own): the scope and the key are bound
+# into the ciphertext, so a row copied to another scope or key cannot be opened. The master key that
+# opens them is never stored here. No foreign key on purpose: a scope also names the platform.
+secrets = Table(
+    "secrets",
+    metadata,
+    Column("scope", String(128), primary_key=True),
+    Column("key", String(128), primary_key=True),
+    Column("value", Text, nullable=False),  # ciphertext only
+    Column("updated_at", UtcDateTime, nullable=False),
+    Column("updated_by", String(255), nullable=False),
+    Index("ix_secrets_key", "key"),
+)
+
+# Who changed which credential, and when. Never a value, never anything derived from one.
+secret_audit = Table(
+    "secret_audit",
+    metadata,
+    Column(
+        "id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    ),
+    Column("at", UtcDateTime, nullable=False),
+    Column("actor", String(255), nullable=False),
+    Column("action", String(16), nullable=False),
+    Column("scope", String(128), nullable=False),
+    Column("key", String(128), nullable=False),
+    Column("outcome", String(16), nullable=False),
+    Column("reason", String(32)),
+)
+
+# The consent registry's events (`sales_app.sourcing.consent`): an append-only, hash-chained log per
+# client. `(client_id, seq)` is the key, so two writers can never pick the same sequence number and
+# one client's events can never be read as another's. `at` is the exact signed timestamp text, so a
+# signature is always re-computed over the very characters it was made over. A contact is only ever
+# a keyed digest (`key`). Rows are never updated or deleted (triggers, see migration 0017).
+consent_events = Table(
+    "consent_events",
+    metadata,
+    Column("client_id", String(64), primary_key=True),
+    Column("seq", Integer, primary_key=True),
+    Column("event_id", String(32), nullable=False),
+    Column("key", String(64), nullable=False),
+    Column("type", String(16), nullable=False),
+    Column("origin", String(24), nullable=False),
+    Column("at", String(40), nullable=False),
+    Column("actor", String(64), nullable=False),
+    Column("reason", String(32), nullable=False),
+    Column("evidence_ref", String(80), nullable=False),
+    Column("prev_mac", String(64), nullable=False),
+    Column("mac", String(64), nullable=False),
+    UniqueConstraint("client_id", "event_id", name="uq_consent_events_event"),
+    CheckConstraint("seq >= 1", name="ck_consent_events_seq"),
+    Index("ix_consent_events_key", "client_id", "key"),
 )

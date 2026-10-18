@@ -55,6 +55,11 @@ class UpdateClientChannelsRequest(BaseModel):
     removed: list[str] = []
 
 
+def _has_folder(application, client_id: str) -> bool:
+    files = application.settings.client_files_dir
+    return files is not None and (files / client_id).is_dir()
+
+
 def create_admin_channels_router(application: Application) -> APIRouter:
     get_current_admin = make_current_admin_dependency(application.admin_auth)
     require_owner = require_role(get_current_admin, AdminRole.OWNER)
@@ -147,7 +152,11 @@ def create_admin_channels_router(application: Application) -> APIRouter:
         ensure_client_access(admin, client_id)
         if (
             client_id not in {c.client_id for c in application.registry.configs()}
-            and not (application.settings.clients_dir / client_id).is_dir()
+            and not _has_folder(application, client_id)
+            and not (
+                application.client_records is not None
+                and application.client_records.get(client_id) is not None
+            )
         ):
             raise HTTPException(404, "no such client")
 

@@ -24,21 +24,21 @@ from sales_app.config.canonical import (
 )
 from sales_core.approval import ApprovalMode
 
-NAGA: dict[str, Any] = {
+EXAMPLE: dict[str, Any] = {
     "schema_version": 3,
-    "client_id": "naga",
-    "display_name": "Naga",
+    "client_id": "acme",
+    "display_name": "Acme",
     "enabled": False,
     "mode": "approval",
     "timezone": "Africa/Tunis",
     "daily_action_limit": 20,
     "max_attempts": 3,
     "opt_out_keywords": ["stop"],
-    "brain": {"agent": "naga", "settings_version": 1, "settings": {}},
+    "brain": {"agent": "consultative", "settings_version": 1, "settings": {}},
     "source": {
         "provider": "google_sheets",
         "settings": {
-            "spreadsheet_id": "sheet-naga",
+            "spreadsheet_id": "sheet-acme",
             "prospects_tab": "Prospects",
             "column_mapping": {},
         },
@@ -106,7 +106,7 @@ CONCEPTUAL: dict[str, Any] = {
 
 
 def spec(**overrides: Any) -> ClientSpec:
-    data = deepcopy(NAGA)
+    data = deepcopy(EXAMPLE)
     for key, value in overrides.items():
         data[key] = value
     return ClientSpec.model_validate(data)
@@ -118,17 +118,19 @@ def refused(message: str, **overrides: Any) -> None:
 
 
 class TestValidConfigurations:
-    def test_the_naga_example(self):
-        naga = spec()
-        assert naga.client_id == "naga" and naga.mode is ApprovalMode.APPROVAL
-        assert naga.enabled is False and naga.brain.agent == "naga"
-        assert naga.source.provider == "google_sheets"
-        assert naga.source.settings["spreadsheet_id"] == "sheet-naga"
-        assert isinstance(naga.store, StoreBinding) and naga.store.connection == "same_as_source"
-        assert [(c.id, c.provider, c.priority) for c in naga.channels] == [
+    def test_the_example(self):
+        example = spec()
+        assert example.client_id == "acme" and example.mode is ApprovalMode.APPROVAL
+        assert example.enabled is False and example.brain.agent == "consultative"
+        assert example.source.provider == "google_sheets"
+        assert example.source.settings["spreadsheet_id"] == "sheet-acme"
+        assert (
+            isinstance(example.store, StoreBinding) and example.store.connection == "same_as_source"
+        )
+        assert [(c.id, c.provider, c.priority) for c in example.channels] == [
             ("whatsapp", "whatsapp", 1)
         ]
-        assert naga.llm.model == "gpt-lune" and naga.llm.legacy is None
+        assert example.llm.model == "gpt-lune" and example.llm.legacy is None
 
     def test_the_conceptual_example(self):
         acme = ClientSpec.model_validate(CONCEPTUAL)
@@ -151,7 +153,7 @@ class TestValidConfigurations:
             "client_id": "min",
             "display_name": "Min",
             "timezone": "UTC",
-            "brain": {"agent": "naga"},
+            "brain": {"agent": "consultative"},
             "source": {"provider": "some_source"},
             "llm": {"model": "some-model"},
         }
@@ -183,8 +185,8 @@ class TestValidConfigurations:
         assert both.model == "some-key" and both.legacy.model_id == "upstream-id-1"
 
     def test_the_older_brain_factory_form_is_accepted_alone(self):
-        brain = {"legacy_factory": "naga_brain.brain:create_brain", "settings": {}}
-        assert spec(brain=brain).brain.legacy_factory == "naga_brain.brain:create_brain"
+        brain = {"legacy_factory": "client_brain.brain:create_brain", "settings": {}}
+        assert spec(brain=brain).brain.legacy_factory == "client_brain.brain:create_brain"
 
     def test_provider_settings_are_free_json(self):
         free = {"anything": [1, 2.5, None, True, {"nested": ["x"]}], "other": "y"}
@@ -194,7 +196,7 @@ class TestValidConfigurations:
         )
 
     def test_validating_what_a_spec_dumps_gives_the_same_spec(self):
-        for data in (NAGA, CONCEPTUAL):
+        for data in (EXAMPLE, CONCEPTUAL):
             original = ClientSpec.model_validate(data)
             dumped = original.model_dump(mode="json")
             assert ClientSpec.model_validate(dumped) == original
@@ -214,7 +216,7 @@ class TestRefusals:
         ["brain", "source", "llm", "schedule", "polling"],
     )
     def test_an_unknown_key_in_any_section(self, section):
-        data = deepcopy(NAGA)
+        data = deepcopy(EXAMPLE)
         data[section]["surprise"] = 1
         with pytest.raises(ValidationError, match="surprise"):
             ClientSpec.model_validate(data)
@@ -225,7 +227,7 @@ class TestRefusals:
             lambda d: d["channels"][0].update(surprise=1),
             lambda d: d["store"].update(connection={"settings": {"k": "v"}, "surprise": 1}),
         ):
-            data = deepcopy(NAGA)
+            data = deepcopy(EXAMPLE)
             mutate(data)
             with pytest.raises(ValidationError, match="surprise"):
                 ClientSpec.model_validate(data)
@@ -233,7 +235,7 @@ class TestRefusals:
     def test_the_schema_version_must_be_three(self):
         for version in (1, 2, 4, "3"):
             refused("schema_version", schema_version=version)
-        data = deepcopy(NAGA)
+        data = deepcopy(EXAMPLE)
         del data["schema_version"]
         with pytest.raises(ValidationError, match="schema_version"):
             ClientSpec.model_validate(data)
@@ -293,13 +295,13 @@ class TestRefusals:
     @pytest.mark.parametrize(
         "agent",
         [
-            "naga_brain.brain:create_brain",
-            "naga_brain.brain",
+            "client_brain.brain:create_brain",
+            "client_brain.brain",
             "pkg:fn",
             "a.b",
             "../x",
             "x/y",
-            "Naga",
+            "Acme",
             "a",
             "",
             "x" * 65,
@@ -312,7 +314,7 @@ class TestRefusals:
         refused("exactly one of", brain={"settings": {}})
         refused(
             "exactly one of",
-            brain={"agent": "naga", "legacy_factory": "naga_brain.brain:create_brain"},
+            brain={"agent": "consultative", "legacy_factory": "client_brain.brain:create_brain"},
         )
 
     @pytest.mark.parametrize("factory", ["not-a-path", "pkg.mod", "pkg:", ":fn", "pkg:a:b", ""])
@@ -364,7 +366,7 @@ class TestRefusals:
         ],
     )
     def test_an_invalid_connection(self, connection):
-        store = {**NAGA["store"], "connection": connection}
+        store = {**EXAMPLE["store"], "connection": connection}
         with pytest.raises(ValidationError, match="connection"):
             spec(store=store)
 
@@ -409,31 +411,31 @@ class TestRefusals:
 
 class TestImmutability:
     def test_models_cannot_be_assigned_to(self):
-        naga = spec()
+        example = spec()
         for target, attribute, value in (
-            (naga, "display_name", "Other"),
-            (naga.brain, "agent", "other"),
-            (naga.source, "provider", "other_source"),
-            (naga.store, "connection", "same_as_source"),
-            (naga.channels[0], "priority", 9),
-            (naga.llm, "model", "other-model"),
-            (naga.schedule, "daily_at", "10:00"),
-            (naga.polling, "dispatch_every_minutes", 9),
-            (naga.inbound, "unknown_contacts", None),
+            (example, "display_name", "Other"),
+            (example.brain, "agent", "other"),
+            (example.source, "provider", "other_source"),
+            (example.store, "connection", "same_as_source"),
+            (example.channels[0], "priority", 9),
+            (example.llm, "model", "other-model"),
+            (example.schedule, "daily_at", "10:00"),
+            (example.polling, "dispatch_every_minutes", 9),
+            (example.inbound, "unknown_contacts", None),
         ):
             with pytest.raises(ValidationError, match="frozen"):
                 setattr(target, attribute, value)
 
     def test_collections_are_tuples(self):
-        naga = spec()
-        assert isinstance(naga.channels, tuple) and isinstance(naga.opt_out_keywords, tuple)
-        assert isinstance(naga.schedule.days, tuple)
+        example = spec()
+        assert isinstance(example.channels, tuple) and isinstance(example.opt_out_keywords, tuple)
+        assert isinstance(example.schedule.days, tuple)
 
     def test_settings_are_read_only_all_the_way_down(self):
-        naga = spec(
+        example = spec(
             source={"provider": "some_source", "settings": {"outer": {"inner": [1, 2]}, "top": 1}}
         )
-        settings = naga.source.settings
+        settings = example.source.settings
         assert isinstance(settings, MappingProxyType)
         for mutate in (
             lambda: settings.__setitem__("top", 2),
@@ -445,19 +447,19 @@ class TestImmutability:
         assert settings["outer"]["inner"] == (1, 2)
 
     def test_the_input_is_copied_not_shared(self):
-        data = deepcopy(NAGA)
+        data = deepcopy(EXAMPLE)
         result = ClientSpec.model_validate(data)
         data["source"]["settings"]["spreadsheet_id"] = "changed"
         data["channels"].append({"provider": "late_channel"})
-        assert result.source.settings["spreadsheet_id"] == "sheet-naga"
+        assert result.source.settings["spreadsheet_id"] == "sheet-acme"
         assert len(result.channels) == 1
 
     def test_equal_specs_are_equal_and_hashable_parts_are_stable(self):
         assert spec() == spec()
         assert spec() != spec(display_name="Other")
-        assert spec().channels[0] == ChannelBinding.model_validate(NAGA["channels"][0])
+        assert spec().channels[0] == ChannelBinding.model_validate(EXAMPLE["channels"][0])
         assert spec().llm == LLMBinding(model="gpt-lune")
-        assert spec().source == ProviderBinding.model_validate(NAGA["source"])
+        assert spec().source == ProviderBinding.model_validate(EXAMPLE["source"])
 
 
 class TestTheModuleIsProviderNeutralAndInert:

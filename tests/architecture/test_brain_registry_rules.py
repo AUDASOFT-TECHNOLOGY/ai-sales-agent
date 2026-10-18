@@ -56,6 +56,10 @@ def test_the_runtime_resolves_an_agent_only_through_the_registry():
 
 def test_every_brain_entry_point_targets_its_own_package_and_a_valid_key():
     declared = {}
+    root = tomllib.loads((BRAINS.parent / "pyproject.toml").read_text(encoding="utf-8"))
+    for key, target in root["project"]["entry-points"][GROUP].items():
+        assert target.split(":")[0].split(".")[0] == "sales_brain_kit", (key, target)
+        declared[key] = target
     for pyproject in BRAINS.glob("*/pyproject.toml"):
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
         points = data.get("project", {}).get("entry-points", {}).get(GROUP, {})
@@ -63,7 +67,8 @@ def test_every_brain_entry_point_targets_its_own_package_and_a_valid_key():
         for key, target in points.items():
             assert target.split(":")[0].split(".")[0] == package, (key, target)
             declared[key] = target
-    assert declared == {"naga": "naga_brain.brain:BRAIN"}  # Tounesimmo is still a placeholder
+    # The platform ships one generic engine; no Brain package exists for any single client.
+    assert declared == {"consultative": "sales_brain_kit.generic:BRAIN"}
 
 
 def test_brain_packages_never_import_the_application():

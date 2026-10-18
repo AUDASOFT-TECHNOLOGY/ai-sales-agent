@@ -83,14 +83,22 @@ class TestCipher:
         AesGcmCipher.from_text(a)
 
 
-# ---- both stores behave the same ---------------------------------------------------------------
+# ---- every store behaves the same ---------------------------------------------------------------
 
 
-@pytest.fixture(params=["file", "memory"])
+@pytest.fixture(params=["file", "memory", "sql"])
 def store(request, tmp_path):
     clock = lambda: NOW
     if request.param == "file":
         return FileSecretStore(tmp_path / "secrets.json", cipher(), now=clock)
+    if request.param == "sql":
+        from sales_app.persistence import create_database_engine, upgrade_database
+        from sales_app.persistence.secret_rows import SqlSecretStore
+
+        engine = create_database_engine(f"sqlite:///{(tmp_path / 'secrets.db').as_posix()}")
+        upgrade_database(engine)
+        request.addfinalizer(engine.dispose)
+        return SqlSecretStore(engine, cipher(), now=clock)
     return InMemorySecretStore(now=clock)
 
 

@@ -20,7 +20,6 @@ from pydantic import BaseModel, ConfigDict
 from sales_app.admin_auth import AdminRole, AdminUser
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency, require_role
 from sales_app.bootstrap import Application
-from sales_app.config.resolution import CONFIG_FILENAME
 from sales_app.config.secrets import EMAIL_PASSWORD, EMAIL_PLATFORM_MAILBOX, OPENAI_MODELS
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_app.connection_tests import (
@@ -251,8 +250,7 @@ def _http_error(error: Exception) -> HTTPException:
 
 def _client_exists(application: Application, client_id: str) -> bool:
     return bool(
-        CLIENT_ID_PATTERN.match(client_id)
-        and (application.settings.clients_dir / client_id / CONFIG_FILENAME).is_file()
+        CLIENT_ID_PATTERN.match(client_id) and application.client_wiring(client_id)[0] is not None
     )
 
 

@@ -130,7 +130,9 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
     """Everything the agent needs before it may start, as fixed sentences a client can act on."""
     client_id = profile.client_id
     registry = application.registry
-    enabled = is_client_active(application.settings.clients_dir, client_id)
+    enabled = is_client_active(
+        application.settings.client_files_dir, client_id, application.client_records
+    )
     config = registry.get_config(client_id)
 
     found = client_wiring_and_document(application, client_id)

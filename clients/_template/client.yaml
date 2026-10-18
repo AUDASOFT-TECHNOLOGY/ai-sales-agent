@@ -13,8 +13,8 @@ max_attempts: 3
 opt_out_keywords: ["stop"]        # add this client's own words
 
 brain:
-  factory: CHANGE_ME_brain.brain:create_brain   # module:callable, called as (llm, settings)
-  settings: {}                                  # opaque, passed to the Brain
+  agent: consultative   # the generic sales engine; a client's own data is its settings
+  settings: {}          # validated by the engine's schema
 
 sheets:
   provider: google_sheets

@@ -18,8 +18,7 @@ consultative sales Brain, is implemented too: see [brain-kit.md](brain-kit.md). 
 
 `sales_core` never imports the kit and knows no product, discovery or follow-up vocabulary (an
 architecture test enforces it). A Brain without a `SETTINGS_SPEC` keeps opaque settings exactly as
-before. The Naga Brain declares the consultative spec unchanged (it adds no rules; see
-[naga-brain.md](naga-brain.md)); the Tounesimmo Brain is still a scaffold and declares none. The generic
+before. The generic `consultative` engine declares the consultative spec unchanged (it adds no rules). The generic
 Brain is built from any valid settings with `sales_brain_kit.create_brain`.
 
 Another Brain family can bring its own schema through the same hook; a future Web Admin only calls

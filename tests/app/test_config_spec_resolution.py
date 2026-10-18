@@ -300,8 +300,8 @@ class TestDisabledIsDecidedFirst:
         assert CountingStore.calls == 1
 
     def test_a_disabled_canonical_client_is_excluded_too(self, tmp_path):
-        data = {**canonical_fixture("canonical_naga.json"), "enabled": False}
-        directory = put(tmp_path, data, "naga")
+        data = {**canonical_fixture("canonical_client.json"), "enabled": False}
+        directory = put(tmp_path, data, "acme")
         assert resolve_client_spec(directory).disabled
 
     def test_enabled_is_read_with_the_legacy_default(self, tmp_path):
@@ -319,32 +319,32 @@ class TestDisabledIsDecidedFirst:
 
 class TestCanonicalInputs:
     def canonical_yaml(self, **changes) -> dict[str, Any]:
-        return {**canonical_fixture("canonical_naga.json"), "enabled": True, **changes}
+        return {**canonical_fixture("canonical_client.json"), "enabled": True, **changes}
 
     def test_a_canonical_client_yaml(self, tmp_path):
-        directory = put(tmp_path, self.canonical_yaml(), "naga")
+        directory = put(tmp_path, self.canonical_yaml(), "acme")
         result = resolve_client_spec(directory)
         assert result.errors == () and result.origin == "canonical"
-        assert result.spec.client_id == "naga" and result.spec.llm.model == "gpt-lune"
+        assert result.spec.client_id == "acme" and result.spec.llm.model == "gpt-lune"
         assert result.env_fallbacks == {} and result.config_source == "file"
 
     def test_it_preserves_client_id_and_enabled(self, tmp_path):
-        result = resolve_client_spec(put(tmp_path, self.canonical_yaml(), "naga"))
-        assert (result.spec.client_id, result.spec.enabled) == ("naga", True)
+        result = resolve_client_spec(put(tmp_path, self.canonical_yaml(), "acme"))
+        assert (result.spec.client_id, result.spec.enabled) == ("acme", True)
 
     def test_a_canonical_client_yaml_with_a_problem(self, tmp_path):
         data = self.canonical_yaml(channels=[{"provider": "a_channel"}, {"provider": "a_channel"}])
-        result = resolve_client_spec(put(tmp_path, data, "naga"))
+        result = resolve_client_spec(put(tmp_path, data, "acme"))
         assert result.spec is None
-        assert any("naga: file: Value error, more than one channel" in e for e in result.errors)
+        assert any("acme: file: Value error, more than one channel" in e for e in result.errors)
 
     def test_a_canonical_client_yaml_with_an_unknown_key(self, tmp_path):
-        result = resolve_client_spec(put(tmp_path, self.canonical_yaml(surprise=1), "naga"))
-        assert any("surprise" in e and e.startswith("naga: ") for e in result.errors)
+        result = resolve_client_spec(put(tmp_path, self.canonical_yaml(surprise=1), "acme"))
+        assert any("surprise" in e and e.startswith("acme: ") for e in result.errors)
 
     def test_the_client_id_must_equal_the_directory_name(self, tmp_path):
         result = resolve_client_spec(put(tmp_path, self.canonical_yaml(), "other"))
-        assert result.errors == ("other: client_id 'naga' must equal the directory name",)
+        assert result.errors == ("other: client_id 'acme' must equal the directory name",)
 
     def test_a_v3_document_over_legacy_wiring(self, tmp_path):
         result = new_pipeline(
@@ -425,8 +425,8 @@ class TestEnvironmentReferences:
         assert "SECRET-VALUE" not in everything
 
     def test_a_canonical_client_has_no_environment_references(self, tmp_path):
-        data = {**canonical_fixture("canonical_naga.json"), "enabled": True}
-        assert resolve_client_spec(put(tmp_path, data, "naga")).env_fallbacks == {}
+        data = {**canonical_fixture("canonical_client.json"), "enabled": True}
+        assert resolve_client_spec(put(tmp_path, data, "acme")).env_fallbacks == {}
 
 
 class TestProviders:
