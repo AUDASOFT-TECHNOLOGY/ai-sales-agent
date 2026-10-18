@@ -66,8 +66,10 @@ from sales_core.engine.models import (
     InboundReceipt,
     InboundStatus,
     PendingProposal,
+    ProspectSummary,
     RunCollector,
     RunReport,
+    UpcomingActions,
 )
 from sales_core.engine.routing import ChannelRouter
 from sales_core.facts import ProposalRejection, review_proposals
@@ -176,6 +178,36 @@ class Engine:
         with self._lock:
             own = (p for p in self._repo.list_prospects() if p.client_id == self._client.client_id)
             return tuple(sorted(own, key=lambda p: (p.display_name.casefold(), p.prospect_id)))
+
+    def summarize_prospects(self) -> ProspectSummary:
+        """Counts over the client's prospects, from one read of `list_prospects` (read-only).
+
+        `by_status` holds every status (0 only when there really is none). The upcoming actions are
+        those of prospects the Engine may still contact (new or active) with a next action and a
+        due date recorded: a paused, opted-out or closed prospect is never contacted, so its
+        recorded next action is not an upcoming one."""
+        with self._lock:
+            found = self.list_prospects()
+        by_status = {status.value: 0 for status in ProspectStatus}
+        by_type: dict[str, int] = {}
+        due: list[datetime] = []
+        for p in found:
+            by_status[p.status.value] += 1
+            if (
+                p.status in _ACTIVE_STATUSES
+                and p.schedule.next_action_type is not None
+                and p.schedule.next_action_due_at is not None
+            ):
+                kind = p.schedule.next_action_type.value
+                by_type[kind] = by_type.get(kind, 0) + 1
+                due.append(p.schedule.next_action_due_at)
+        return ProspectSummary(
+            total=len(found),
+            by_status=by_status,
+            upcoming=UpcomingActions(
+                scheduled=len(due), by_type=by_type, next_due_at=min(due, default=None)
+            ),
+        )
 
     def conversation_of(self, prospect_id: ProspectId) -> Conversation | None:
         """The history of one of the client's prospects, oldest message first; None if the client

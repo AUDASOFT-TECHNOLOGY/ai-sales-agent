@@ -72,6 +72,24 @@ class EngineConfig:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class UpcomingActions:
+    """Prospects the Engine may still contact that have a next action recorded."""
+
+    scheduled: int
+    by_type: dict[str, int]  # only the types present, never a zero invented for an absent one
+    next_due_at: datetime | None  # the earliest of them, None when nothing is scheduled
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ProspectSummary:
+    """Counts over one client's prospects, read in one pass (nothing is estimated)."""
+
+    total: int
+    by_status: dict[str, int]  # every status, 0 only when the client really has none
+    upcoming: UpcomingActions
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ActionOutcome:
     action_id: ActionId
     status: ActionStatus | None  # None when nothing was persisted (dry run)

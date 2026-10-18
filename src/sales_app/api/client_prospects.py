@@ -31,10 +31,9 @@ from sales_app.api.client import make_current_client_dependency
 from sales_app.bootstrap import Application
 from sales_app.client_profiles import ClientProfile
 from sales_app.errors import ClientNotReadyError
-from sales_core.contracts import ProspectId, ProspectStatus
+from sales_core.contracts import ProspectId
 from sales_core.engine import Engine
 
-CONTACTABLE = frozenset({ProspectStatus.NEW, ProspectStatus.ACTIVE})
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 100
 NOT_FOUND = "no such prospect"
@@ -150,27 +149,14 @@ def create_client_prospects_router(application: Application) -> APIRouter:
     def get_summary(
         response: Response, client: ClientProfile = Depends(get_current_client)
     ) -> SummaryResponse:
-        found = run(client, response, Engine.list_prospects)
-        by_status = {status.value: 0 for status in ProspectStatus}
-        by_type: dict[str, int] = {}
-        due: list[datetime] = []
-        for p in found:
-            by_status[p.status.value] += 1
-            # Paused, opted-out and closed prospects are never contacted: their recorded next
-            # action is not an upcoming one.
-            if (
-                p.status in CONTACTABLE
-                and p.schedule.next_action_type is not None
-                and p.schedule.next_action_due_at is not None
-            ):
-                kind = p.schedule.next_action_type.value
-                by_type[kind] = by_type.get(kind, 0) + 1
-                due.append(p.schedule.next_action_due_at)
+        summary = run(client, response, Engine.summarize_prospects)
         return SummaryResponse(
-            total_prospects=len(found),
-            by_status=by_status,
+            total_prospects=summary.total,
+            by_status=summary.by_status,
             upcoming_actions=UpcomingActionsResponse(
-                scheduled=len(due), by_type=by_type, next_due_at=min(due, default=None)
+                scheduled=summary.upcoming.scheduled,
+                by_type=summary.upcoming.by_type,
+                next_due_at=summary.upcoming.next_due_at,
             ),
         )
 

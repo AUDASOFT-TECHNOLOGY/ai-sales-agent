@@ -13,8 +13,10 @@ from sales_core.engine.models import (
     InboundReceipt,
     InboundStatus,
     PendingProposal,
+    ProspectSummary,
     RunReport,
     UnknownSenderPolicy,
+    UpcomingActions,
 )
 from sales_core.engine.routing import ChannelRouter
 
@@ -30,6 +32,8 @@ __all__ = [
     "PendingProposal",
     "ProposalNotApprovableError",
     "ProposalNotFoundError",
+    "ProspectSummary",
     "RunReport",
     "UnknownSenderPolicy",
+    "UpcomingActions",
 ]
