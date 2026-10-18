@@ -1,9 +1,10 @@
-"""`/client/v1/source`: where a client's prospects come from, its token, and a real connection check.
+"""`/client/v1/source`: where a client's prospects come from, and a real connection check.
 
 Covers: authentication and isolation between clients; what is read; what a client may change (the
 source, its spreadsheet and tab) and what it may not (the model, the mode, the store, anything of
-WhatsApp or Meta); version conflicts and validation, with nothing written on a refusal; the token's
-whole life (stored write-only, never in any response, error or log); the real connection checks
+WhatsApp or Meta); version conflicts and validation, with nothing written on a refusal; that no route
+lets a client give a credential (the platform stores the CRM token, the client only learns whether it
+is in place, and no response, error or log carries it); the real connection checks
 through doubles of the two services; HubSpot being configurable and testable but never runnable;
 and the readiness check that keeps an agent from starting on it.
 """
@@ -106,8 +107,12 @@ def choose(client, provider, expected=None, **extra):
     return client.put(SOURCE, json={"expected_version": expected, "source": provider, **extra})
 
 
-def save_token(client, token=TOKEN):
-    return client.put(CREDENTIALS, json={"access_token": token})
+def give_token(world, token=TOKEN, cid="alpha"):
+    """What the platform does: the CRM account's token is a credential of the client's scope that only
+    the Admin writes. The client has no route for it."""
+    return world.application.credentials.save(
+        client_scope(cid), TOKEN_KEY, token, actor="root", apply=True
+    )
 
 
 def history(world, cid="alpha"):
@@ -130,8 +135,6 @@ def written_document(world, cid="alpha"):
     [
         ("get", SOURCE),
         ("put", SOURCE),
-        ("put", CREDENTIALS),
-        ("delete", CREDENTIALS),
         ("post", TEST),
     ],
 )
@@ -145,13 +148,12 @@ def test_an_admin_session_does_not_open_the_client_routes(world):
     assert browser.post("/admin/v1/auth/login", json={"username": "root", "password": PASSWORD})
     assert browser.get(SOURCE).status_code == 401
     assert browser.post(TEST).status_code == 401
-    assert browser.delete(CREDENTIALS).status_code == 401
 
 
 def test_no_route_takes_a_client_id(world, alpha):
     paths = alpha.get("/openapi.json").json()["paths"]
     source_paths = [p for p in paths if p.startswith(SOURCE)]
-    assert set(source_paths) == {SOURCE, CREDENTIALS, TEST}
+    assert set(source_paths) == {SOURCE, TEST}  # no route for a credential
     assert not any("{" in p for p in source_paths)
     for path in source_paths:
         for operation in paths[path].values():
@@ -160,9 +162,9 @@ def test_no_route_takes_a_client_id(world, alpha):
 
 def test_one_client_never_sees_or_changes_another(world, alpha, beta):
     assert choose(alpha, "hubspot").status_code == 200
-    assert save_token(alpha).status_code == 200
+    assert give_token(world).configured is True
     seen = beta.get(SOURCE).json()
-    assert seen["source"] == "google_sheets" and seen["credential"] is None
+    assert seen["source"] == "google_sheets" and seen["access"] is None
     assert TOKEN not in beta.get(SOURCE).text
     assert stored_token(world, "beta") is None
     assert [v.version for v in history(world, "beta")] == []
@@ -178,7 +180,7 @@ def test_one_client_never_sees_or_changes_another(world, alpha, beta):
 def test_a_client_that_never_chose_uses_the_store_provider_google_sheets(world, alpha):
     body = alpha.get(SOURCE).json()
     assert body["version"] is None and body["source"] == "google_sheets"
-    assert body["runnable"] is True and body["credential"] is None
+    assert body["runnable"] is True and body["access"] is None
     assert body["google_sheets"] == {
         "spreadsheet_id": "sheet-alpha",
         "prospects_tab": "Prospects",
@@ -203,13 +205,8 @@ def test_the_client_is_told_which_address_to_share_its_spreadsheet_with(
 
 
 def test_responses_are_never_cached(world, alpha):
-    for response in (alpha.get(SOURCE), alpha.post(TEST), save_token_when_hubspot(alpha)):
+    for response in (alpha.get(SOURCE), alpha.post(TEST), choose(alpha, "hubspot")):
         assert response.headers["cache-control"] == "no-store"
-
-
-def save_token_when_hubspot(client):
-    choose(client, "hubspot")
-    return save_token(client)
 
 
 # ---- choosing the source ----------------------------------------------------------------------
@@ -222,11 +219,7 @@ def test_choosing_hubspot_publishes_a_new_version_and_keeps_everything_else(worl
     body = response.json()
     assert (body["version"], body["source"], body["runnable"]) == (1, "hubspot", True)
     assert body["google_sheets"] is None and body["updated_by"] == "client"
-    assert body["credential"] == {
-        "label": "HubSpot access token",
-        "configured": False,
-        "updated_at": None,
-    }
+    assert body["access"] == "waiting_platform" and "credential" not in body
     (version,) = history(world)
     assert version.author == "client:alpha" and version.note == "client source"
     document = dict(version.document)
@@ -437,7 +430,7 @@ def test_a_running_client_that_chose_hubspot_stops_and_is_never_run_on_sheets(wo
     assert config.spec.source_apart_from_store is True  # the new choice is in force...
     assert config.missing_credentials  # ...and without its token the client takes no work
     assert world.application.registry.get("alpha").suspended
-    save_token(alpha)  # this deployment's test builders cannot build a HubSpot source
+    give_token(world)  # this deployment's test builders cannot build a HubSpot source
     status = world.application.runtime_manager.status("alpha")
     assert any("cannot be run yet" in e for e in status.errors)
     assert world.application.registry.get("alpha").suspended
@@ -446,31 +439,23 @@ def test_a_running_client_that_chose_hubspot_stops_and_is_never_run_on_sheets(wo
 # ---- the token ----------------------------------------------------------------------------------
 
 
-def test_a_token_needs_hubspot_to_be_the_chosen_source(world, alpha):
-    response = save_token(alpha)
-    assert response.status_code == 409 and stored_token(world) is None
-    assert alpha.delete(CREDENTIALS).status_code == 409
-
-
-def test_a_token_is_stored_in_the_clients_own_scope_and_never_returned(world, alpha):
+def test_the_client_only_learns_whether_the_platform_connected_its_crm(world, alpha):
     choose(alpha, "hubspot")
-    response = save_token(alpha)
-    assert response.status_code == 200
-    body = response.json()
-    assert body["configured"] is True and body["label"] == "HubSpot access token"
-    assert set(body) == {"label", "configured", "updated_at"}
-    assert TOKEN not in response.text
+    assert alpha.get(SOURCE).json()["access"] == "waiting_platform"
+    give_token(world)
     assert stored_token(world) == TOKEN
     entries = world.application.credentials.describe(client_scope("alpha"))
     assert {e.key for e in entries if e.configured} == {TOKEN_KEY}  # nothing else was written
     for view in (alpha.get(SOURCE), alpha.get(READINESS), alpha.get(AGENT)):
         assert TOKEN not in view.text
-    assert alpha.get(SOURCE).json()["credential"]["configured"] is True
+    body = alpha.get(SOURCE).json()
+    assert body["access"] == "ready"
+    assert "credential" not in body and "token" not in json.dumps(body).lower()
 
 
 def test_the_admin_sees_that_a_token_is_set_and_never_its_value(world, alpha):
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(world)
     admin = world.admin()
     entries = admin.get("/admin/v1/clients/alpha/integrations").json()
     (entry,) = [e for e in entries if e["key"] == TOKEN_KEY]
@@ -478,81 +463,20 @@ def test_the_admin_sees_that_a_token_is_set_and_never_its_value(world, alpha):
     assert TOKEN not in json.dumps(entries)
 
 
-@pytest.mark.parametrize(
-    "bad",
-    [
-        "",
-        "   ",
-        "pat-eu1-short",
-        "EAAB-a-whatsapp-looking-token",
-        "pat-EU1-12345678-1234-1234-1234-123456789abc",
-        "pat-eu1-12345678-1234-1234-1234-123456789abc\nextra",
-        "x" * 5000,
-    ],
-)
-def test_a_value_that_is_not_a_hubspot_token_is_refused_with_the_rule_not_the_value(
-    world, alpha, bad
-):
-    choose(alpha, "hubspot")
-    response = save_token(alpha, bad)
-    assert response.status_code == 422 and stored_token(world) is None
-    if bad.strip():
-        assert bad not in response.text
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"token": TOKEN},
-        {"value": TOKEN},
-        {"access_token": TOKEN, "extra": 1},
-        {"access_token": 12345},
-        {"access_token": None},
-        {"access_token": {"nested": TOKEN}},
-        [TOKEN],
-        TOKEN,
-        {},
-    ],
-)
-def test_a_body_that_is_not_exactly_the_expected_one_is_refused_without_echo(world, alpha, body):
-    choose(alpha, "hubspot")
-    response = alpha.put(CREDENTIALS, json=body)
-    assert response.status_code == 422 and stored_token(world) is None
-    assert TOKEN not in response.text and "12345" not in response.text
-
-
-def test_a_body_that_is_not_json_is_refused(world, alpha):
-    choose(alpha, "hubspot")
-    response = alpha.put(CREDENTIALS, content=f"access_token={TOKEN}")
-    assert response.status_code == 400 and TOKEN not in response.text
-
-
 def test_the_same_token_cannot_serve_two_clients_and_nobody_is_named(world, alpha, beta):
-    choose(alpha, "hubspot")
-    choose(beta, "hubspot")
-    assert save_token(alpha).status_code == 200
-    response = save_token(beta)
+    admin = world.admin()
+    path = "/admin/v1/clients/{}/integrations/" + TOKEN_KEY
+    assert admin.put(path.format("alpha"), json={"value": TOKEN}).status_code == 200
+    response = admin.put(path.format("beta"), json={"value": TOKEN})
     assert response.status_code == 409 and stored_token(world, "beta") is None
-    text = response.text.lower()
-    assert "alpha" not in text and TOKEN not in response.text
-    assert save_token(beta, OTHER_TOKEN).status_code == 200
+    assert TOKEN not in response.text
+    assert admin.put(path.format("beta"), json={"value": OTHER_TOKEN}).status_code == 200
 
 
-def test_a_token_can_be_replaced_and_removed(world, alpha):
-    choose(alpha, "hubspot")
-    save_token(alpha)
-    save_token(alpha, OTHER_TOKEN)
-    assert stored_token(world) == OTHER_TOKEN
-    removed = alpha.delete(CREDENTIALS)
-    assert removed.status_code == 200 and removed.json()["configured"] is False
-    assert stored_token(world) is None
-    assert alpha.delete(CREDENTIALS).json()["configured"] is False  # removing again is harmless
-    assert alpha.get(SOURCE).json()["credential"]["configured"] is False
-
-
-def test_a_client_cannot_store_anything_but_its_source_token(world, alpha):
+def test_a_client_cannot_store_any_credential(world, alpha):
     choose(alpha, "hubspot")
     for url in (
+        CREDENTIALS,
         f"{CREDENTIALS}/whatsapp.access_token",
         f"{CREDENTIALS}/{TOKEN_KEY}",
         "/client/v1/integrations/whatsapp.access_token",
@@ -561,29 +485,15 @@ def test_a_client_cannot_store_anything_but_its_source_token(world, alpha):
         for method in ("put", "post", "delete"):
             response = alpha.request(method.upper(), url, json={"access_token": "EAAB-x"})
             assert response.status_code in (404, 405)
+            assert "EAAB-x" not in response.text
     assert world.application.credentials.describe(client_scope("alpha"))
     assert {
         e.key for e in world.application.credentials.describe(client_scope("alpha")) if e.configured
     } == set()
 
 
-def test_the_credential_of_google_sheets_is_the_platforms_so_a_client_gives_none(world, alpha):
-    assert alpha.get(SOURCE).json()["credential"] is None
-    assert save_token(alpha).status_code == 409
-
-
-def test_unavailable_credential_storage_is_a_fixed_503(tmp_path, monkeypatch):
-    monkeypatch.setattr(client_source, "TEST_MIN_INTERVAL_SECONDS", 0.0)
-    # no master key: reads find nothing, writes are refused (and the audit stays in memory)
-    plain = World(tmp_path, secret_audit=InMemorySecretAudit())
-    try:
-        client = plain.browser("alpha")
-        choose(client, "hubspot")
-        response = save_token(client)
-        assert response.status_code == 503 and TOKEN not in response.text
-        assert "SALES_AGENT_SECRETS_KEY" not in response.text  # nothing of the deployment
-    finally:
-        plain.application.close()
+def test_google_sheets_needs_no_connection_from_the_platform_for_the_client(world, alpha):
+    assert alpha.get(SOURCE).json()["access"] is None
 
 
 # ---- the connection test -----------------------------------------------------------------------
@@ -635,7 +545,7 @@ def test_a_missing_prospects_tab_is_a_failure(world, alpha):
 
 def test_hubspot_is_tested_with_the_clients_own_token(world, alpha):
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(world)
     response = alpha.post(TEST)
     body = response.json()
     assert body["ok"] is True and body["source"] == "hubspot"
@@ -663,7 +573,7 @@ def test_hubspot_without_a_token_sends_nothing(world, alpha):
 )
 def test_a_refusal_by_hubspot_is_a_failure_in_a_fixed_sentence(world, alpha, status, words):
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(world)
     world.net.hubspot = lambda request: httpx.Response(
         status, json={"message": f"token {TOKEN} is wrong", "category": "INVALID_AUTHENTICATION"}
     )
@@ -675,7 +585,7 @@ def test_a_refusal_by_hubspot_is_a_failure_in_a_fixed_sentence(world, alpha, sta
 
 def test_hubspot_timeouts_and_unexpected_answers_are_failures(world, alpha):
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(world)
 
     def slow(request):
         raise httpx.ReadTimeout(f"timeout {TOKEN}")
@@ -691,7 +601,7 @@ def test_hubspot_timeouts_and_unexpected_answers_are_failures(world, alpha):
 
 def test_a_success_proves_the_access_and_changes_nothing_else(world, alpha):
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(world)
     versions = len(history(world))
     assert alpha.post(TEST).json()["ok"] is True
     assert len(history(world)) == versions and world.agent_state.get("alpha") is None
@@ -707,11 +617,10 @@ def test_tests_are_spaced_so_a_client_cannot_hammer_an_outside_service(world, al
 def test_the_token_never_reaches_the_logs(world, alpha, caplog):
     caplog.set_level(logging.DEBUG)
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(world)
     world.net.hubspot = lambda request: httpx.Response(401, json={"message": TOKEN})
     alpha.post(TEST)
-    save_token(alpha, "pat-bad")
-    alpha.delete(CREDENTIALS)
+    world.application.credentials.remove(client_scope("alpha"), TOKEN_KEY, actor="root")
     assert TOKEN not in caplog.text
     assert world.audit.recent()  # the saves and the removal are recorded...
     assert TOKEN not in json.dumps([asdict(e) for e in world.audit.recent()], default=str)
@@ -736,7 +645,7 @@ def settle_hubspot_mapping(world):
 def test_hubspot_does_not_start_while_the_runtime_could_not_build_it(world, alpha):
     choose(alpha, "hubspot")
     settle_hubspot_mapping(world)
-    save_token(alpha)
+    give_token(world)
     assert alpha.post(TEST).json()["ok"] is True
     body = alpha.get(READINESS).json()
     assert body["ready"] is False and check_ids(body, False) == {"platform_connections"}
@@ -888,7 +797,7 @@ def test_one_clients_test_never_counts_for_another(fresh):
 def test_the_fingerprint_says_nothing_of_the_spreadsheet_or_the_token(fresh):
     alpha = fresh.browser("alpha")
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(fresh)
     alpha.post(TEST)
     kept = fresh.application.source_checks.get("alpha")
     assert len(kept.fingerprint) == 64 and set(kept.fingerprint) <= set("0123456789abcdef")
@@ -898,12 +807,12 @@ def test_the_fingerprint_says_nothing_of_the_spreadsheet_or_the_token(fresh):
 def test_replacing_the_token_cancels_the_test_made_with_the_old_one(fresh):
     alpha = fresh.browser("alpha")
     choose(alpha, "hubspot")
-    save_token(alpha)
+    give_token(fresh)
     assert alpha.post(TEST).json()["ok"] is True
     assert alpha.get(SOURCE).json()["last_test"]["current"] is True
-    save_token(alpha, OTHER_TOKEN)
+    give_token(fresh, OTHER_TOKEN)
     assert alpha.get(SOURCE).json()["last_test"]["current"] is False
-    alpha.delete(CREDENTIALS)
+    fresh.application.credentials.remove(client_scope("alpha"), TOKEN_KEY, actor="root")
     assert alpha.get(SOURCE).json()["last_test"]["current"] is False
 
 
@@ -911,7 +820,7 @@ def test_hubspot_with_a_current_successful_test_still_needs_a_runtime_that_built
     alpha = fresh.browser("alpha")
     choose(alpha, "hubspot")
     settle_hubspot_mapping(fresh)
-    save_token(alpha)
+    give_token(fresh)
     assert alpha.post(TEST).json()["ok"] is True
     assert alpha.get(SOURCE).json()["last_test"] == {
         "ok": True,

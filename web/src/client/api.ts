@@ -343,7 +343,8 @@ export interface SourceTest {
 
 export interface SourceState {
   version: number | null;
-  credential: CredentialStatus | null;
+  /** Null: nothing to connect. Otherwise whether the platform has connected the CRM account. */
+  access: "ready" | "waiting_platform" | null;
   last_test: { ok: boolean; checked_at: string; current: boolean } | null;
 }
 
@@ -357,15 +358,6 @@ export function clientTestSources(): Promise<SourceTest> {
 
 export function clientSourceState(): Promise<SourceState> {
   return request<SourceState>("/source");
-}
-
-/** Write-only, like the channel's secrets: the answer says whether one is stored, never what it is. */
-export function clientSaveSourceToken(value: string): Promise<CredentialStatus> {
-  return request<CredentialStatus>("/source/credentials", { method: "PUT", body: JSON.stringify({ access_token: value }) });
-}
-
-export function clientRemoveSourceToken(): Promise<CredentialStatus> {
-  return request<CredentialStatus>("/source/credentials", { method: "DELETE" });
 }
 
 /* ── Business settings and the agent's switch (client_agent.py) ──

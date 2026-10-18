@@ -57,7 +57,7 @@ const NOT_READY = {
     { id: "channel_ready", ok: true, message: null },
   ],
 };
-const SOURCE = { version: 3, credential: null, last_test: null };
+const SOURCE = { version: 3, access: null, last_test: null };
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -431,34 +431,32 @@ describe("ClientLanesPage: connections", () => {
   });
 
   it("marks an old stored test as outdated instead of relying on it", async () => {
-    stub(reads(lanesState(), NOT_READY, { version: 3, credential: null, last_test: { ok: true, checked_at: "2026-10-14T10:00:00Z", current: false } }));
+    stub(reads(lanesState(), NOT_READY, { version: 3, access: null, last_test: { ok: true, checked_at: "2026-10-14T10:00:00Z", current: false } }));
     renderPage();
     expect(await screen.findByText(/This test is outdated/)).toBeInTheDocument();
     expect(within(screen.getByTestId("lane-alpha")).getByText("Connection not tested")).toBeInTheDocument();
   });
 
-  it("takes a HubSpot token write-only: the field is emptied and the token is never shown", async () => {
-    let stored = false;
-    let sent: Json | null = null;
-    stub({
+  it("tells a HubSpot lane that the platform is connecting it and asks for no token", async () => {
+    const calls = stub({
       ...reads(lanesState({ lanes: [lane("crm", { source: { id: "crm", source: "hubspot", label: "HubSpot", google_sheets: null } })] })),
-      [SOURCE_ROUTE]: () => json(200, { version: 3, credential: { label: "HubSpot access token", configured: stored, updated_at: null }, last_test: null }),
-      "PUT /client/v1/source/credentials": (init) => {
-        sent = bodyOf(init);
-        stored = true;
-        return json(200, { label: "HubSpot access token", configured: true, updated_at: null });
-      },
+      [SOURCE_ROUTE]: () => json(200, { version: 3, access: "waiting_platform", last_test: null }),
     });
     renderPage();
-    const user = userEvent.setup();
-    expect(await screen.findByTestId("token-status")).toHaveTextContent("No token is stored yet.");
-    const field = screen.getByLabelText("Access token");
-    await user.type(field, "pat-secret-value");
-    await user.click(screen.getByRole("button", { name: "Save the token" }));
-    await waitFor(() => expect(screen.getByTestId("token-status")).toHaveTextContent("A token is stored."));
-    expect(sent).toEqual({ access_token: "pat-secret-value" });
-    expect(field).toHaveValue("");
-    expect(document.body.textContent).not.toContain("pat-secret-value");
+    expect(await screen.findByTestId("access-status")).toHaveTextContent("being connected by Revansa");
+    expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
+    expect(document.querySelectorAll('input[type="password"]')).toHaveLength(0);
+    expect(calls.some((key) => key.includes("credentials"))).toBe(false);
+  });
+
+  it("says nothing about a connection once the platform has made it", async () => {
+    stub({
+      ...reads(lanesState({ lanes: [lane("crm", { source: { id: "crm", source: "hubspot", label: "HubSpot", google_sheets: null } })] })),
+      [SOURCE_ROUTE]: () => json(200, { version: 3, access: "ready", last_test: null }),
+    });
+    renderPage();
+    await screen.findByTestId("lane-crm");
+    expect(screen.queryByTestId("access-status")).not.toBeInTheDocument();
   });
 
   it("offers no token field when no lane uses HubSpot", async () => {
@@ -466,6 +464,7 @@ describe("ClientLanesPage: connections", () => {
     renderPage();
     await screen.findByTestId("lane-alpha");
     expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("access-status")).not.toBeInTheDocument();
   });
 });
 

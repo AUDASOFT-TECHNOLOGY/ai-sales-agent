@@ -54,8 +54,6 @@ CLIENT_ROUTES = {
     # Lot B: the prospect source (a CRM or a spreadsheet, never a model; the API field is `source`).
     ("GET", "/client/v1/source"),
     ("PUT", "/client/v1/source"),
-    ("PUT", "/client/v1/source/credentials"),
-    ("DELETE", "/client/v1/source/credentials"),
     ("POST", "/client/v1/source/test"),
     # Lot E: the channel (e-mail or WhatsApp) and the mailbox password; the API field is `channel`.
     ("GET", "/client/v1/channel"),

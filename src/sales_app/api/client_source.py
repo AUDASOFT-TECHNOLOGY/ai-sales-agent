@@ -10,14 +10,13 @@ session cookie, so no id supplied by the browser can reach another client's sour
   the settings moved; it is validated by the same rules as every publication (422) and **nothing is
   written** if it is not valid. A client changes only the source and its spreadsheet and tab: never
   the model, the mode, the quota, the store's tabs or anything of WhatsApp/Meta.
-- **The credential** (`PUT/DELETE /client/v1/source/credentials`) is the secret the chosen source
-  needs from the client (today the HubSpot Private App token). It is written, never read: no response
-  and no message carries it, whatever happens, and a body that is not exactly what is expected is
-  refused without being echoed.
+- **No credential is the client's to give.** The access a CRM source needs (today the HubSpot Private
+  App token) is connected by the platform; the client is only told whether it is in place
+  (`access`: `ready` or `waiting_platform`). There is no route here to write or remove it.
 - **The test** (`POST /client/v1/source/test`) makes one real, read-only call to the chosen source.
   A success proves the access works at that moment and nothing more; a failure is a fixed sentence.
 
-HubSpot can be chosen, given its token and tested, but the agent cannot start on it until the Admin
+HubSpot can be chosen and tested once the platform has connected it, but the agent cannot start on it until the Admin
 has settled what its statuses mean (`readiness`), and switching the source pauses an agent that
 was running: the client starts it again deliberately.
 """
@@ -60,14 +59,7 @@ from sales_app.connection_tests import (
     check_hubspot,
     default_http_client,
 )
-from sales_app.secret_store import (
-    DuplicateSecretError,
-    InvalidCredentialError,
-    ScopeKind,
-    SecretStoreError,
-    UnknownCredentialError,
-    client_scope,
-)
+from sales_app.secret_store import ScopeKind, SecretStoreError, client_scope
 from sales_app.source_checks import SourceCheckStoreCorruptError, SourceCheckStoreUnavailableError
 from sales_app.wiring.providers import ProviderDescriptor, ProviderKind, google_sheets, hubspot
 from sales_app.wiring.providers.types import CredentialDeclaration, Requirement
@@ -127,14 +119,6 @@ class SheetsSourceResponse(BaseModel):
     share_with: str | None = None  # the platform's address the spreadsheet must be shared with
 
 
-class CredentialStatusResponse(BaseModel):
-    """Whether the source's secret is stored. Never its value, never part of it."""
-
-    label: str
-    configured: bool
-    updated_at: datetime | None = None
-
-
 class LastTestResponse(BaseModel):
     """The client's last real test. It counts for the start of the agent only while `current`: once
     the source, the spreadsheet, the tab or the token has changed, it is history."""
@@ -150,7 +134,9 @@ class SourceResponse(BaseModel):
     runnable: bool
     options: list[SourceOption]
     google_sheets: SheetsSourceResponse | None = None  # when the source is Google Sheets
-    credential: CredentialStatusResponse | None = None  # when the source needs one from the client
+    # None: the source needs nothing connected by the platform. Otherwise whether the platform has
+    # connected the CRM account it needs (never a token, never part of one).
+    access: Literal["ready", "waiting_platform"] | None = None
     last_test: LastTestResponse | None = None  # None: never tested
     updated_at: datetime | None = None
     updated_by: Literal["client", "administrator"] | None = None
@@ -216,22 +202,6 @@ def default_sheets_probe(credentials_file: str) -> SheetsProbe:
     return google_sheets.open_probe(credentials_file, timeout_seconds=SHEETS_TIMEOUT_SECONDS)
 
 
-async def _read_secret(request: Request) -> str:
-    """The body must be exactly `{"access_token": "<text>"}`. Anything else is refused with a fixed
-    sentence that repeats nothing of it (it may be a token under the wrong name)."""
-    try:
-        body = await request.json()
-    except Exception:  # noqa: BLE001 - any unreadable body is simply a bad request
-        raise HTTPException(400, "body must be JSON") from None
-    if (
-        not isinstance(body, dict)
-        or set(body) != {"access_token"}
-        or not isinstance(body["access_token"], str)
-    ):
-        raise HTTPException(422, 'body must be {"access_token": "<text>"}')
-    return body["access_token"]
-
-
 async def _read_update(request: Request) -> UpdateSourceRequest:
     """The body, validated by the model, with errors that say where and why but never *what*: a
     client who pastes a token into the wrong field must not get it back in the answer (the
@@ -269,22 +239,6 @@ _SOURCE_BODY: dict[str, Any] = {
                             "additionalProperties": False,
                         },
                     },
-                    "additionalProperties": False,
-                }
-            }
-        },
-    }
-}
-
-_SECRET_BODY: dict[str, Any] = {
-    "requestBody": {
-        "required": True,
-        "content": {
-            "application/json": {
-                "schema": {
-                    "type": "object",
-                    "required": ["access_token"],
-                    "properties": {"access_token": {"type": "string", "writeOnly": True}},
                     "additionalProperties": False,
                 }
             }
@@ -338,14 +292,16 @@ def create_client_source_router(
             return lane_sources_fingerprint(application, client_id, document)
         return source_fingerprint(application, client_id, provider, document)
 
-    def credential_status(client_id: str, declaration: CredentialDeclaration):
+    def access_state(
+        client_id: str, declaration: CredentialDeclaration
+    ) -> Literal["ready", "waiting_platform"]:
+        """Whether the platform has connected what this source needs. A client never provides it:
+        it only learns whether it is in place."""
         try:
             status = application.credentials.status(client_scope(client_id), declaration.key)
         except SecretStoreError:
             raise HTTPException(503, "credential storage is temporarily unavailable") from None
-        return CredentialStatusResponse(
-            label=declaration.label, configured=status.configured, updated_at=status.updated_at
-        )
+        return "ready" if status.configured else "waiting_platform"
 
     def source_response(client_id: str) -> SourceResponse:
         current, raw, document, version = current_state(client_id)
@@ -380,7 +336,7 @@ def create_client_source_router(
                 if provider == SHEETS and not lanes  # a lane client's spreadsheets: `/lanes`
                 else None
             ),
-            credential=credential_status(client_id, declaration) if declaration else None,
+            access=access_state(client_id, declaration) if declaration else None,
             last_test=(
                 LastTestResponse(
                     ok=check.ok,
@@ -491,69 +447,6 @@ def create_client_source_router(
                     by=f"client:{client_id}",
                     at=application.clock.now(),
                 )
-
-    # ---- the credential -------------------------------------------------------------------
-
-    def declared_credential(client_id: str) -> CredentialDeclaration:
-        _, raw, document, _ = current_state(client_id)
-        declaration = _client_credential(registry.get(effective_provider(raw, document)))
-        if declaration is None:
-            raise HTTPException(409, "the source you chose needs no access token from you")
-        return declaration
-
-    @router.put(
-        "/source/credentials", response_model=CredentialStatusResponse, openapi_extra=_SECRET_BODY
-    )
-    async def put_credentials(
-        request: Request, client: ClientProfile = Depends(get_current_client)
-    ) -> CredentialStatusResponse:
-        value = await _read_secret(request)
-        client_id = client.client_id
-        try:
-            declaration = declared_credential(client_id)
-        except ConfigStoreError:
-            raise HTTPException(503, "settings are temporarily unavailable") from None
-        try:
-            status = application.credentials.save(
-                client_scope(client_id),
-                declaration.key,
-                value,
-                actor=f"client:{client_id}",
-                apply=True,  # the agent of a client on this source reads it: rebuild it
-            )
-        except InvalidCredentialError as error:
-            raise HTTPException(422, str(error)) from None  # words the rule, never the value
-        except DuplicateSecretError:
-            # Never say who holds it: only that it cannot be used.
-            raise HTTPException(409, "this access token cannot be used for your account") from None
-        except UnknownCredentialError:
-            raise HTTPException(
-                409, "the source you chose needs no access token from you"
-            ) from None
-        except SecretStoreError:
-            raise HTTPException(503, "credential storage is temporarily unavailable") from None
-        return CredentialStatusResponse(
-            label=declaration.label, configured=status.configured, updated_at=status.updated_at
-        )
-
-    @router.delete("/source/credentials", response_model=CredentialStatusResponse)
-    def delete_credentials(
-        client: ClientProfile = Depends(get_current_client),
-    ) -> CredentialStatusResponse:
-        client_id = client.client_id
-        try:
-            declaration = declared_credential(client_id)
-        except ConfigStoreError:
-            raise HTTPException(503, "settings are temporarily unavailable") from None
-        try:
-            status = application.credentials.remove(
-                client_scope(client_id), declaration.key, actor=f"client:{client_id}"
-            )
-        except SecretStoreError:
-            raise HTTPException(503, "credential storage is temporarily unavailable") from None
-        return CredentialStatusResponse(
-            label=declaration.label, configured=status.configured, updated_at=status.updated_at
-        )
 
     # ---- the test -------------------------------------------------------------------------
 

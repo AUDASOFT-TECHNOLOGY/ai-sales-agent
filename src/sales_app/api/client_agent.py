@@ -306,7 +306,7 @@ def _source_problem(
         except SecretStoreError:
             stored = False
         if not stored:
-            return f"Your {credential.label} is missing. Add it in your data source settings."
+            return f"{descriptor.label} is being connected by the platform. There is nothing for you to do."
     if not _operator_settings_ok(descriptor, document):
         return f"{descriptor.label} is not set up on the platform side yet. Contact your administrator."
     try:
@@ -416,7 +416,7 @@ def lane_source_static_problem(
         except SecretStoreError:
             stored = False
         if not stored:
-            return f"your {credential.label} is missing: add it in your data source settings"
+            return f"{descriptor.label} is being connected by the platform: nothing for you to do"
     model = descriptor.settings_models.get(ProviderKind.SOURCE)
     if model is not None:
         settings = source.get("settings")

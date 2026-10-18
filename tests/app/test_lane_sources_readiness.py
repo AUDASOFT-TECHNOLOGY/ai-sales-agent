@@ -23,8 +23,8 @@ from test_client_source_api import (  # noqa: F401 - fixtures
     TOKEN,
     alpha,
     beta,
+    give_token,
     history,
-    save_token,
     stored_token,
     world,
 )
@@ -156,8 +156,10 @@ def test_the_test_is_not_throttled_across_clients_and_each_keeps_its_own(lanes_w
 
 def test_a_hubspot_lane_waits_for_its_token_then_for_the_admin(lanes_world, alpha):
     assert hubspot_lane(alpha).status_code == 201
-    assert "'crm'" in source_message(alpha) and "access token is missing" in source_message(alpha)
-    assert save_token(alpha).status_code == 200  # the client's token routes follow its HubSpot lane
+    assert "'crm'" in source_message(alpha)
+    assert "being connected by the platform" in source_message(alpha)
+    assert "token" not in source_message(alpha).lower()  # nothing the client has to type
+    give_token(lanes_world)  # the platform connects the CRM account
     assert stored_token(lanes_world) == TOKEN
     assert "platform side" in source_message(alpha)
     assert "administrator" in source_message(alpha)
@@ -190,7 +192,7 @@ def test_the_admin_settles_the_mapping_of_the_lane_that_uses_hubspot(lanes_world
 
 def test_a_lane_with_hubspot_set_up_is_tested_and_ready(lanes_world, alpha):
     assert hubspot_lane(alpha).status_code == 201
-    assert save_token(alpha).status_code == 200
+    give_token(lanes_world)
     assert lanes_world.admin().put(ADMIN_SOURCE, json=SETTINGS).status_code == 200
     assert "not been tested" in source_message(alpha)
     body = alpha.post(TEST).json()
@@ -207,7 +209,7 @@ def test_a_refused_hubspot_token_fails_that_lane_only(lanes_world, alpha):
 
     lanes_world.net.hubspot = lambda request: httpx.Response(401, json={})
     hubspot_lane(alpha)
-    save_token(alpha)
+    give_token(lanes_world)
     lanes_world.admin().put(ADMIN_SOURCE, json=SETTINGS)
     body = alpha.post(TEST).json()
     assert body["ok"] is False
@@ -285,10 +287,10 @@ def test_changing_another_lane_keeps_the_admins_mapping(lanes_world, alpha):
 def test_one_clients_hubspot_never_reaches_another(lanes_world, alpha, beta):
     before = document_of(lanes_world, "beta")
     hubspot_lane(alpha)
-    save_token(alpha)
+    give_token(lanes_world)
     lanes_world.admin().put(ADMIN_SOURCE, json=SETTINGS)
     assert document_of(lanes_world, "beta") == before
-    assert beta.get(SOURCE).json()["credential"] is None
+    assert beta.get(SOURCE).json()["access"] is None
     assert stored_token(lanes_world, "beta") is None
     assert lanes_world.admin().get("/admin/v1/clients/beta/source").json()["provider"] == ""
 
@@ -296,10 +298,10 @@ def test_one_clients_hubspot_never_reaches_another(lanes_world, alpha, beta):
 # ---- the historical source routes for a client that runs lanes -------------------------------
 
 
-def test_a_lane_client_without_hubspot_has_no_token_to_give(lanes_world, alpha):
-    assert alpha.put(CREDENTIALS, json={"access_token": TOKEN}).status_code == 409
+def test_a_lane_client_has_no_token_to_give_whatever_its_sources(lanes_world, alpha):
+    assert alpha.put(CREDENTIALS, json={"access_token": TOKEN}).status_code in (404, 405)
     assert stored_token(lanes_world) is None
-    assert alpha.get(SOURCE).json()["credential"] is None
+    assert alpha.get(SOURCE).json()["access"] is None
 
 
 def test_the_historical_source_route_reads_a_lane_client_but_does_not_write_it(lanes_world, alpha):

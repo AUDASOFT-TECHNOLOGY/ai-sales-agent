@@ -8,12 +8,11 @@
  *  simulation), and only for the lanes the test named. A client that runs no lanes of its own sees
  *  its single implicit `default` lane, read-only. */
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Check, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
-import { TextInput } from "../ui/Controls";
 import { Glass } from "../ui/Glass";
 import { Modal } from "../ui/Overlays";
 import { useClientAuth } from "./ClientAuthContext";
@@ -23,8 +22,6 @@ import {
   clientDeleteLane,
   clientLanes,
   clientReadiness,
-  clientRemoveSourceToken,
-  clientSaveSourceToken,
   clientSourceState,
   clientTestSources,
   type Lane,
@@ -63,11 +60,10 @@ export function ClientLanesPage() {
   const [test, setTest] = useState<SourceTest | null>(null);
   const [form, setForm] = useState<"new" | Lane | null>(null);
   const [toDelete, setToDelete] = useState<Lane | null>(null);
-  const [busy, setBusy] = useState<null | "refresh" | "test" | "delete" | "token">(null);
+  const [busy, setBusy] = useState<null | "refresh" | "test" | "delete">(null);
   const [failure, setFailure] = useState<LanesFailure | null>(null);
   const [deleteFailure, setDeleteFailure] = useState<LanesFailure | null>(null);
   const [notice, setNotice] = useState<MessageKey | null>(null);
-  const [token, setToken] = useState("");
 
   const fail = useCallback(
     (err: LanesFailure) => {
@@ -153,47 +149,6 @@ export function ClientLanesPage() {
     setBusy(null);
   }
 
-  function saveToken(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    void storeToken();
-  }
-
-  async function storeToken() {
-    const value = token;
-    setToken(""); // gone from the page whatever the answer is
-    setFailure(null);
-    setNotice(null);
-    setBusy("token");
-    try {
-      await clientSaveSourceToken(value);
-      setTest(null);
-      setNotice("lanes.token.done");
-      await loadAll();
-    } catch (err) {
-      const problem = lanesFailureOf(err);
-      setFailure(problem);
-      fail(problem);
-    }
-    setBusy(null);
-  }
-
-  async function removeToken() {
-    setFailure(null);
-    setNotice(null);
-    setBusy("token");
-    try {
-      await clientRemoveSourceToken();
-      setTest(null);
-      setNotice("lanes.token.removed");
-      await loadAll();
-    } catch (err) {
-      const problem = lanesFailureOf(err);
-      setFailure(problem);
-      fail(problem);
-    }
-    setBusy(null);
-  }
-
   if (!state) {
     return (
       <div className="page page--focus">
@@ -222,8 +177,7 @@ export function ClientLanesPage() {
 
   const current = state;
   const working = busy !== null;
-  const needsToken = current.lanes.some((lane) => lane.source.source === "hubspot") && source?.credential != null;
-  const tokenStored = source?.credential?.configured === true;
+  const waitingForPlatform = current.lanes.some((lane) => lane.source.source === "hubspot") && source?.access === "waiting_platform";
   const addBlocked = !current.editable
     ? t("lanes.implicit")
     : current.channel_options.length === 0
@@ -447,32 +401,12 @@ export function ClientLanesPage() {
           ) : null}
         </Glass>
 
-        {needsToken ? (
-          <Glass level={1} as="form" className="client-card" onSubmit={saveToken} aria-label={t("lanes.token.title")}>
-            <h3 className="t-h2">{t("lanes.token.title")}</h3>
-            <p className="c-3">{t("lanes.token.help")}</p>
-            <p data-testid="token-status" className={tokenStored ? "c-success" : "c-3"}>
-              {t(tokenStored ? "lanes.token.stored" : "lanes.token.missing")}
+        {waitingForPlatform ? (
+          <Glass level={1} className="client-card">
+            <h3 className="t-h2">{t("lanes.access.title")}</h3>
+            <p data-testid="access-status" className="c-3" role="status">
+              {t("lanes.access.waiting")}
             </p>
-            <TextInput
-              label={t("lanes.token.field")}
-              name="access_token"
-              type="password"
-              autoComplete="new-password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              disabled={working}
-            />
-            <div className="row row--wrap">
-              <Button type="submit" variant="primary" loading={busy === "token"} disabled={token.trim() === "" || (working && busy !== "token")}>
-                {t(tokenStored ? "lanes.token.replace" : "lanes.token.save")}
-              </Button>
-              {tokenStored ? (
-                <Button variant="danger" onClick={() => void removeToken()} disabled={working}>
-                  {t("lanes.token.remove")}
-                </Button>
-              ) : null}
-            </div>
           </Glass>
         ) : null}
       </div>
