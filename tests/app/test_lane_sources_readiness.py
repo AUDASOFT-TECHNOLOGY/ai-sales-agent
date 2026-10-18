@@ -375,6 +375,7 @@ def test_readiness_of_a_client_without_lanes_is_what_it_was(world):
         "enabled_by_administrator",
         "loaded_by_platform",
         "model_assigned",
+        "brain_assigned",
         "settings_valid",
         "source_connected",
         "platform_connections",
