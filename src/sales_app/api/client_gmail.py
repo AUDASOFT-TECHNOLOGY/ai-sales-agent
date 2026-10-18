@@ -121,7 +121,9 @@ def create_client_gmail_router(
         cap = context.send_cap_configured(client_id)
         ready = held.state == CONNECTED and cap
         message = _CAP_MESSAGE if held.state == CONNECTED and not cap else _MESSAGES[held.state]
-        sync, last = context.sync_of(client_id) if held.state == CONNECTED else ("not_started", None)
+        sync, last = (
+            context.sync_of(client_id) if held.state == CONNECTED else ("not_started", None)
+        )
         return GmailStatusResponse(
             state=held.state,  # type: ignore[arg-type]  # one of the four states
             address=held.address,
@@ -135,7 +137,7 @@ def create_client_gmail_router(
     def refresh(client_id: str) -> None:
         try:
             context.changed(client_id)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - a refresh that fails must not fail the request
             pass
 
     @router.get("", response_model=GmailStatusResponse)
@@ -286,7 +288,7 @@ def create_application_gmail_router(application: Any) -> APIRouter | None:
             return None
         try:
             return limits.effective(client_id)
-        except Exception:
+        except Exception:  # noqa: BLE001 - an unreadable limit is shown as unknown, never guessed
             return None
 
     def mailbox_assigned(client_id: str) -> bool:

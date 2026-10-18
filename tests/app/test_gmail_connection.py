@@ -44,7 +44,7 @@ MAIL = "https://mail.google.com/"
 
 
 def connect_with(scope, **kw):
-    service, oauth, grants, pending, clock = build(**kw)
+    service, oauth, grants, _pending, clock = build(**kw)
     oauth.exchange_code = lambda *, code, code_verifier: TokenGrant("ya29.x", "1//R", 3600, scope)
     return service, oauth, grants, clock
 

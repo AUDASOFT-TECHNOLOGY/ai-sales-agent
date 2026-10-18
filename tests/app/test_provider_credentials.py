@@ -58,7 +58,11 @@ MODEL_LIST_KEYS = {"openai.model_sol", "openai.model_lune", "openai.models"}
 # The payment webhook's signing secret: a platform credential no provider declares.
 PLATFORM_PAYMENT_KEYS = {"payments.webhook_secret"}
 # The platform's Google OAuth application (Gmail mailbox mode): global, Admin only, no provider declares it.
-PLATFORM_GMAIL_KEYS = {"gmail.oauth_client_id", "gmail.oauth_client_secret", "gmail.oauth_state_key"}
+PLATFORM_GMAIL_KEYS = {
+    "gmail.oauth_client_id",
+    "gmail.oauth_client_secret",
+    "gmail.oauth_state_key",
+}
 PLATFORM_MAIL_KEYS = {
     "email.platform_domain",
     "email.platform_smtp_host",

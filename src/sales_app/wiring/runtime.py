@@ -400,7 +400,9 @@ def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> Sa
     return _stage(client_id, "repository", lambda: CompositeRepository(source, store, consent))
 
 
-def _metered(provider: Any, config: ClientConfig, builders: IntegrationBuilders) -> MessagingChannel:
+def _metered(
+    provider: Any, config: ClientConfig, builders: IntegrationBuilders
+) -> MessagingChannel:
     """The channel of this client as the Engine uses it. A metered channel (e-mail, whichever mode)
     goes behind the daily send cap here, the one place a client's channel is built for the Engine:
     prospecting, replies and follow-ups all pass through it. Without a guard (no database) it can

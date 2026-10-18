@@ -1,3 +1,4 @@
+# ruff: noqa: F401, F811, C408  (the fixtures are imported to be used by name)
 """Reliable payment confirmation: signature, idempotence, mismatches, isolation, persistence, and the
 conflict between a manual and an electronic settlement."""
 

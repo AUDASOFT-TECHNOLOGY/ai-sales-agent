@@ -64,7 +64,9 @@ class FakeOAuth:
 
     def exchange_code(self, *, code, code_verifier):
         self.exchanged.append((code, code_verifier))
-        return TokenGrant("ya29.first", self.refresh_token_returned, 3600, "https://mail.google.com/ openid email")
+        return TokenGrant(
+            "ya29.first", self.refresh_token_returned, 3600, "https://mail.google.com/ openid email"
+        )
 
     def refresh(self, refresh_token):
         self.refresh_calls += 1
@@ -363,7 +365,10 @@ class TestWrappers:
             return FakeSmtp(log)
 
         channel = OAuthMailChannel(
-            Tokens("ya29.one", "ya29.two"), ADDRESS, clock=FakeClock(NOW), smtp_factory=factory,
+            Tokens("ya29.one", "ya29.two"),
+            ADDRESS,
+            clock=FakeClock(NOW),
+            smtp_factory=factory,
             send_guard=OPEN_GUARD,
         )
         assert channel.send(outbound()).status is SendStatus.ACCEPTED
@@ -384,7 +389,10 @@ class TestWrappers:
             (GoogleTransientError("x"), "token_unavailable"),
         ):
             result = OAuthMailChannel(
-                Tokens(error=error), ADDRESS, clock=FakeClock(NOW), smtp_factory=boom,
+                Tokens(error=error),
+                ADDRESS,
+                clock=FakeClock(NOW),
+                smtp_factory=boom,
                 send_guard=OPEN_GUARD,
             ).send(outbound())
             assert result.status is SendStatus.FAILED_TRANSIENT and result.error_code == code

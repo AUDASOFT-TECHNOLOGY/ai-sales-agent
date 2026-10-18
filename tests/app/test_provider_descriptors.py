@@ -435,18 +435,21 @@ class TestTheBuildersTheRuntimeUsesAreUnchanged:
         return default_builders(make_settings(tmp_path))
 
     def test_the_integration_table_keeps_its_fields_and_adds_the_composed_source(self):
-        assert [f.name for f in dataclasses.fields(IntegrationBuilders)] == [
-            "repositories",
-            "llms",
-            "channels",
-            "sources",
-            "operational_stores",
-            "consent",
-            "source_instances",  # E5: added last, with a default, so older callers are unchanged
-            "writeback",  # E9: the same, and None (off) unless the deployment builds it
-            "llm_usage",  # the LLM usage register of a client, None without a database
-            "send_guards",  # the daily send cap of a client's metered channel, None without a database
-        ]
+        assert (
+            [f.name for f in dataclasses.fields(IntegrationBuilders)]
+            == [
+                "repositories",
+                "llms",
+                "channels",
+                "sources",
+                "operational_stores",
+                "consent",
+                "source_instances",  # E5: added last, with a default, so older callers are unchanged
+                "writeback",  # E9: the same, and None (off) unless the deployment builds it
+                "llm_usage",  # the LLM usage register of a client, None without a database
+                "send_guards",  # the daily send cap of a client's metered channel, None without a database
+            ]
+        )
 
     def test_the_channel_provider_keeps_its_fields_and_gains_the_inbox(self):
         assert [f.name for f in dataclasses.fields(ChannelProvider)] == [

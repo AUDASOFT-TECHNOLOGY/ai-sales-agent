@@ -275,7 +275,9 @@ class Inner:
         if self.outcome == "raise":
             raise TimeoutError("the connection dropped after the message was handed over")
         status = SendStatus.ACCEPTED if self.outcome == "ok" else SendStatus.FAILED_TRANSIENT
-        return SendResult(status=status, timestamp=AT, error_message=None if status.name == "ACCEPTED" else "x")
+        return SendResult(
+            status=status, timestamp=AT, error_message=None if status.name == "ACCEPTED" else "x"
+        )
 
 
 MESSAGE = SimpleNamespace()
@@ -368,4 +370,6 @@ class TestCapStore:
         g = DailySendGuard("alpha", "email", lambda: cap_store.get("alpha"), Clock(), counter)
         assert isinstance(g.reserve(), Reservation)
         assert g.reserve() == Refusal(CAP_REACHED)
-        assert DailySendGuard("beta", "email", lambda: cap_store.get("beta"), Clock(), counter).reserve() == Refusal(CAP_NOT_CONFIGURED)
+        assert DailySendGuard(
+            "beta", "email", lambda: cap_store.get("beta"), Clock(), counter
+        ).reserve() == Refusal(CAP_NOT_CONFIGURED)

@@ -620,7 +620,9 @@ def _merged_email_settings(
         if wanted is not None and wanted != email_mode_of(merged):
             if email_mode_of(merged) == CUSTOM_MODE:
                 # The historical mailbox is the Admin's: the client cannot swap it for another.
-                raise HTTPException(409, "your mailbox is set up by Revansa and cannot be changed here")
+                raise HTTPException(
+                    409, "your mailbox is set up by Revansa and cannot be changed here"
+                )
             merged = {"mode": wanted, **{k: merged[k] for k in EMAIL_WORDING if k in merged}}
         merged.update(data)
     try:

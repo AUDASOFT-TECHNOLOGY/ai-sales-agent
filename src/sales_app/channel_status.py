@@ -152,9 +152,7 @@ def channel_status(
 
 GMAIL_NOT_CONNECTED = "Connect your Gmail so Revansa can write to your prospects."
 GMAIL_REAUTH = "Google needs you to authorise Revansa again. Reconnect your Gmail."
-GMAIL_NO_CAP = (
-    "Your Gmail is connected. Sending starts once Revansa sets your daily sending limit."
-)
+GMAIL_NO_CAP = "Your Gmail is connected. Sending starts once Revansa sets your daily sending limit."
 
 
 def _gmail_status(application: Application, client_id: str) -> ChannelStatus:

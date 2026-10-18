@@ -144,7 +144,7 @@ class DailySendGuard:
             day = utc_day(self._clock.now())
             if not self._counter.try_increment(self._client_id, self._channel, day, limit):
                 return Refusal(CAP_REACHED)
-        except Exception as error:  # a store down, whatever its type: refuse, never send
+        except Exception as error:  # noqa: BLE001 - a store down, whatever its type: refuse, never send
             log.warning("send cap check failed: %s", type(error).__name__)
             return Refusal(CAP_UNAVAILABLE)
         return Reservation(day)
@@ -153,7 +153,7 @@ class DailySendGuard:
         """Give a place back. If the store is down the place stays used: that is the safe side."""
         try:
             self._counter.decrement(self._client_id, self._channel, reservation.day)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - the place stays used: the safe side
             log.warning("send cap release failed: %s", type(error).__name__)
 
 

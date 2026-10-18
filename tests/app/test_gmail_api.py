@@ -27,7 +27,7 @@ class Auth:
 def make(
     *, caps=None, refusal=None, configured=True, scope="https://mail.google.com/ openid email"
 ):
-    service, oauth, grants, *_ = build()
+    service, oauth, _grants, *_ = build()
     oauth.exchange_code = lambda *, code, code_verifier: TokenGrant("ya29.x", REFRESH, 3600, scope)
     changed = []
     ctx = GmailContext(
@@ -55,7 +55,7 @@ def test_requires_a_session():
 
 
 def test_journey_connect_status_disconnect():
-    client, service, oauth, changed = make(caps={"alpha": True})
+    client, _service, oauth, changed = make(caps={"alpha": True})
     login(client)
     assert client.get(BASE).json()["state"] == "not_connected"
     url = client.post(f"{BASE}/start").json()["authorize_url"]

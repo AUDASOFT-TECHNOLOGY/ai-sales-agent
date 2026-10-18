@@ -229,7 +229,7 @@ def _no_store(response: Response) -> None:
 async def _read_value(request: Request) -> str:
     try:
         body = await request.json()
-    except Exception:
+    except Exception:  # noqa: BLE001 - any unreadable body is simply a bad request
         raise HTTPException(400, "body must be JSON") from None
     if not isinstance(body, dict) or set(body) != {"value"} or not isinstance(body["value"], str):
         raise HTTPException(422, 'body must be {"value": "<text>"}')
@@ -756,7 +756,9 @@ def create_admin_integrations_router(
             status, message = "waiting_platform", "Meta credentials are still to be stored."
         elif not number or reconnect:
             status = "action_required"
-            message = "The client's WhatsApp number is missing or was changed and is not reconnected."
+            message = (
+                "The client's WhatsApp number is missing or was changed and is not reconnected."
+            )
         else:
             status = "ready"
             message = "Credentials are stored; run the test to check them with Meta."
@@ -795,7 +797,9 @@ def create_admin_integrations_router(
         simulation: `details.check` says so. Sends no message and changes nothing."""
         client_scope_for(admin, client_id)
         try:
-            result = await run_in_threadpool(check_bot_connection, application, client_id, bot_probe)
+            result = await run_in_threadpool(
+                check_bot_connection, application, client_id, bot_probe
+            )
         except TelegramConnectionError as error:
             raise HTTPException(error.status, error.message) from None
         return _test_response(result)

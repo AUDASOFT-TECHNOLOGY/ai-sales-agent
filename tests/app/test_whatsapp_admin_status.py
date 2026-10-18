@@ -30,9 +30,7 @@ def set_number(world, number, reconnect=False):
     store = world.application.client_profiles
     profile = store.get("alpha")
     store.update(
-        dataclasses.replace(
-            profile, whatsapp_number=number, whatsapp_reconnect_required=reconnect
-        )
+        dataclasses.replace(profile, whatsapp_number=number, whatsapp_reconnect_required=reconnect)
     )
 
 
