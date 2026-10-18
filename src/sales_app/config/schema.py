@@ -29,7 +29,7 @@ Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 WEEKDAY_INDEX = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 DEFAULT_DAYS: tuple[Weekday, ...] = ("mon", "tue", "wed", "thu", "fri", "sat")  # Sunday off
 
-_PLACEHOLDERS = {"todo", "change_me", "changeme", "tbd", "xxx"}
+PLACEHOLDERS = {"todo", "change_me", "changeme", "tbd", "xxx"}
 _FACTORY = re.compile(r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$")
 _CLOCK = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 _CLIENT_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -40,7 +40,7 @@ class _Section(BaseModel):
 
 
 def _reject_placeholder(value: str) -> str:
-    if value.strip().lower() in _PLACEHOLDERS or "CHANGE_ME" in value:
+    if value.strip().lower() in PLACEHOLDERS or "CHANGE_ME" in value:
         raise ValueError("is still a placeholder")
     return value
 

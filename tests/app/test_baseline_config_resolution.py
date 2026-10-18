@@ -38,11 +38,11 @@ UPSTREAM = "gpt-upstream-1"  # the `llm.model` of the legacy fixtures that carry
 
 
 class TestLegacyClientYaml:
-    def test_placeholders_in_an_enabled_client_are_errors(self, tmp_path):
+    def test_placeholders_in_an_enabled_client_await_configuration(self, tmp_path):
+        """The account is enabled, the agent is not built yet: not an error that stops startup."""
         place_yaml(tmp_path, "pholder", "legacy_with_placeholders.yaml")
         resolution = resolve(tmp_path, "pholder", env=env_for("pholder"))
-        assert resolution.config is None and not resolution.disabled
-        assert_golden("resolution_legacy_with_placeholders", snapshot_resolution(resolution))
+        assert resolution.config is None and resolution.disabled and resolution.errors == ()
 
     def test_placeholders_in_a_disabled_client_are_never_validated(self, tmp_path):
         place_yaml(tmp_path, "pholder", "legacy_disabled_placeholders.yaml")

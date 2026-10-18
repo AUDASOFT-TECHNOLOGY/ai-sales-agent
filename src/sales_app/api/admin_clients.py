@@ -47,12 +47,18 @@ from sales_app.config import (
     read_wiring,
     validate_settings_document,
 )
+from sales_app.config.loader import awaiting_configuration, brain_unassigned
 from sales_app.config.published import published_document, published_name, published_view
 from sales_app.config.resolution import (
     SETTINGS_SCHEMA_VERSION,
     SETTINGS_SECTION_KEYS,
     SETTINGS_TOP_KEYS,
+    SettingsCheck,
+    merge_document,
+    strip_settings,
+    upgrade_document,
 )
+from sales_app.config.schema import PLACEHOLDERS
 from sales_app.config_store import ConfigConflictError, ConfigVersion
 from sales_app.config_store.models import CLIENT_ID_PATTERN, thaw_document
 from sales_app.llm_models import check_model
@@ -175,8 +181,9 @@ class CreateClientRequest(BaseModel):
     logo: str | None = None  # optional; a small png/jpeg/webp `data:` URL
     login: str
     temporary_password: str = Field(min_length=8, max_length=128)
-    llm_provider: str = Field(min_length=1)
-    llm_model: str = Field(min_length=1)
+    # The model is assigned when the Admin has one to give: an account exists without it.
+    llm_provider: str | None = Field(default=None, min_length=1)
+    llm_model: str | None = Field(default=None, min_length=1)
     status: Literal["active", "inactive"]
     whatsapp_number: str = Field(min_length=1, max_length=40)
     plan_id: str | None = None  # optional: the plan the client starts on (an active one)
@@ -279,13 +286,16 @@ def _free_client_id(application: Application, base: str) -> str:
     return candidate
 
 
-def _new_client_yaml(client_id: str, display_name: str, provider: str, model: str) -> dict:
-    """A new client always starts disabled: it has no Brain, Sheet or WhatsApp wiring yet, and an
-    enabled client that fails validation would stop the whole application at its next start."""
+def _new_client_yaml(
+    client_id: str, display_name: str, provider: str | None, model: str | None, enabled: bool
+) -> dict:
+    """A new client has no Brain, Sheet, model or WhatsApp wiring yet: placeholders stand in for
+    them. The account may still be enabled -- the loader leaves such a client without an agent
+    (`awaiting_configuration`) until the Brain, the Sheet and the model are really there."""
     return {
         "client_id": client_id,
         "display_name": display_name,
-        "enabled": False,
+        "enabled": enabled,
         "mode": "dry_run",
         "timezone": "UTC",
         "daily_action_limit": 20,
@@ -302,7 +312,11 @@ def _new_client_yaml(client_id: str, display_name: str, provider: str, model: st
             "column_mapping": {},
             "credentials_env": "GOOGLE_APPLICATION_CREDENTIALS",
         },
-        "llm": {"provider": provider, "api_key_env": "OPENAI_API_KEY", "model": model},
+        "llm": {
+            "provider": provider or "openai",
+            "api_key_env": "OPENAI_API_KEY",
+            "model": model or "TODO",
+        },
         # No credential names, and not the client's WhatsApp number (that is profile data): Meta's
         # access token and phone number id come from the WhatsApp onboarding and live in the
         # credential store (see sales_app.secret_store).
@@ -733,7 +747,7 @@ def rename_client(application: Application, client_id: str, name: str, *, author
     if found is None:
         _write_skeleton_settings(application, client_id, raw, {"display_name": name})
         return
-    check = validate_settings_document(client_id, raw, {**found[1], "display_name": name})
+    check = validate_client_document(client_id, raw, {**found[1], "display_name": name})
     if check.errors or check.document is None:
         raise HTTPException(400, "; ".join(check.errors) or "invalid name")
     current = application.config_store.current(client_id)
@@ -819,6 +833,56 @@ def read_client_settings(
     )
 
 
+_STAND_IN = "pending-configuration"
+# What the Admin (the model) and the client (the Sheet) have not given yet. Neither blocks the other.
+_PENDING_VALUES = (("llm", "model"), ("sheets", "spreadsheet_id"))
+
+
+# A module that declares no settings rules: stands in for a Brain that is not assigned yet.
+_OPAQUE_BRAIN = "sales_app.config.loader:awaiting_configuration"
+
+
+def validate_client_document(
+    client_id: str,
+    raw: Mapping[str, Any],
+    document: Mapping[str, Any],
+    *,
+    saving: bool = False,
+) -> SettingsCheck:
+    """`validate_settings_document`, except that a model or a Sheet still at its placeholder does
+    not fail the client's other settings: a client without a model may save its Sheet, and one
+    without a Sheet its products. The placeholders stay as they are in the validated document --
+    they are what `awaiting_configuration` and the readiness checks look for.
+
+    `saving` is a client's own save: it must not wait for the Admin's Brain, nor for the client's own
+    commercial settings when it only enters its Sheet. With no Brain assigned yet, or no Brain
+    settings written yet, the Brain's rules are left out of that save. They are applied in full by
+    readiness (`saving=False`) and when the agent is built, so the agent does not start on them."""
+    candidate = thaw_document(document)
+    wiring = dict(raw)
+    brain = wiring.get("brain")
+    if saving and isinstance(brain, Mapping):
+        unassigned = brain_unassigned(brain)
+        written = (candidate.get("brain") or {}).get("settings")
+        if unassigned or not written:
+            wiring["brain"] = {**brain, "factory": _OPAQUE_BRAIN}
+    pending: list[tuple[str, str, Any]] = []
+    for section, key in _PENDING_VALUES:
+        body = candidate.get(section)
+        value = body.get(key) if isinstance(body, dict) else None
+        if isinstance(value, str) and value.strip().lower() in PLACEHOLDERS:
+            body[key] = _STAND_IN
+            pending.append((section, key, value))
+    check = validate_settings_document(client_id, wiring, candidate)
+    if check.document is None:
+        return check
+    restored = thaw_document(check.document)
+    for section, key, value in pending:
+        if restored.get(section, {}).get(key) == _STAND_IN:
+            restored[section][key] = value
+    return replace(check, document=restored)
+
+
 def publish_client_settings(
     application: Application,
     client_id: str,
@@ -858,7 +922,7 @@ def publish_client_settings(
             merged = dict(document.get(section) or {})
             merged.update({k: changes[section][k] for k in keys if k in changes[section]})
             document[section] = merged
-    check = validate_settings_document(client_id, raw, document)
+    check = validate_client_document(client_id, raw, document, saving=True)
     if check.errors or check.document is None:
         raise HTTPException(422, detail=list(check.errors) or ["invalid settings"])
     try:
@@ -1001,9 +1065,17 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             document_changes["daily_action_limit"] = body.daily_action_limit
         if body.status == "active" and _stored_enabled(application, client_id) is False:
             # Same guard as creation: an enabled client that fails validation would stop the whole
-            # application at its next start.
+            # application at its next start. One that merely awaits its model, Brain or Sheet is
+            # not invalid: its account opens, its agent waits (see `awaiting_configuration`).
+            in_force = (
+                raw
+                if base_document is None
+                else merge_document(
+                    strip_settings(raw), upgrade_document({**base_document, **document_changes})
+                )
+            )
             check = import_document(client_id, raw)
-            if check.errors:
+            if check.errors and not awaiting_configuration(in_force):
                 raise HTTPException(
                     400,
                     "this client cannot be activated yet: " + "; ".join(check.errors),
@@ -1022,9 +1094,7 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         if document_changes and base_document is None:
             _write_skeleton_settings(application, client_id, raw, document_changes)
         elif document_changes and base_document is not None:
-            check = validate_settings_document(
-                client_id, raw, {**base_document, **document_changes}
-            )
+            check = validate_client_document(client_id, raw, {**base_document, **document_changes})
             if check.errors or check.document is None:
                 raise HTTPException(400, "; ".join(check.errors) or "invalid configuration")
             current = application.config_store.current(client_id)
@@ -1088,22 +1158,20 @@ def create_admin_clients_router(application: Application) -> APIRouter:
     ) -> ClientSummaryResponse:
         display_name = body.display_name.strip()
         login = normalize_login(body.login)
-        provider, model = body.llm_provider.strip(), body.llm_model.strip()
+        if (body.llm_provider is None) != (body.llm_model is None):
+            raise HTTPException(400, "llm_provider and llm_model must be sent together")
+        provider = body.llm_provider.strip() if body.llm_provider is not None else None
+        model = body.llm_model.strip() if body.llm_model is not None else None
         if not display_name:
             raise HTTPException(400, "client name must not be empty")
         if not LOGIN_PATTERN.match(login):
             raise HTTPException(
                 400, "login must be 3-64 characters: letters, digits and . _ @ + - only"
             )
-        if body.status == "active":
-            raise HTTPException(
-                400,
-                "a new client cannot be active yet: its Brain, Google Sheet and WhatsApp are "
-                "not configured. Create it as inactive.",
-            )
-        problem = _assignment_problem(application, provider, model)
-        if problem is not None:
-            raise HTTPException(400, problem)
+        if provider is not None and model is not None:
+            problem = _assignment_problem(application, provider, model)
+            if problem is not None:
+                raise HTTPException(400, problem)
         if body.logo is not None:
             _check_logo(body.logo)
         if body.plan_id is not None:
@@ -1124,7 +1192,9 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         directory = application.settings.clients_dir / client_id
         directory.mkdir(parents=True)
         try:
-            raw = _new_client_yaml(client_id, display_name, provider, model)
+            raw = _new_client_yaml(
+                client_id, display_name, provider, model, enabled=body.status == "active"
+            )
             (directory / "client.yaml").write_text(
                 yaml.safe_dump(raw, sort_keys=False), encoding="utf-8"
             )
@@ -1172,7 +1242,7 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         raw, base_document = found
         document = {**base_document, "llm": {"provider": provider, "model": model}}
 
-        check = validate_settings_document(client_id, raw, document)
+        check = validate_client_document(client_id, raw, document)
         if check.errors or check.document is None or check.spec is None:
             raise HTTPException(400, "; ".join(check.errors) or "invalid configuration")
 
@@ -1244,7 +1314,7 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             document = {**base_document, "sources": sources}
         else:
             document = {**base_document, "source": {"provider": provider, "settings": settings}}
-        check = validate_settings_document(client_id, raw, document)
+        check = validate_client_document(client_id, raw, document)
         if check.errors or check.document is None:
             raise HTTPException(400, "; ".join(check.errors) or "invalid configuration")
         current = application.config_store.current(client_id)

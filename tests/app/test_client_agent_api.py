@@ -391,53 +391,51 @@ def test_the_running_agent_takes_the_saved_settings(world, alpha):
     assert config.config_version == 1
 
 
-def test_a_client_without_a_model_yet_reads_its_settings_but_cannot_publish(world):
+def test_a_client_without_a_model_yet_reads_its_settings_and_saves_them(world):
     naga = world.application  # naga is disabled with the placeholder model: no runtime yet
     assert naga.registry.get_config("naga") is None
     version, part, record = read_client_settings(naga, "naga")
     assert (version, record) == (None, None) and part["brain"]["settings"] == {"tone": "naga"}
-    with pytest.raises(HTTPException) as refused:
-        publish_client_settings(
-            naga, "naga", {"timezone": "Europe/Paris"}, expected_version=None, author="client:naga"
-        )
-    assert refused.value.status_code == 422
-    assert any("llm.model" in problem for problem in refused.value.detail)
-    assert world.config_store.history("naga") == ()
-    # the Admin assigns a model (the order of the journey): the same save now goes through
-    write_client(world.tmp_path, "naga", enabled=False, brain={"settings": {}})
+    # the model is the Admin's to give, and its absence does not stop the client's own settings
     publish_client_settings(
         naga, "naga", {"timezone": "Europe/Paris"}, expected_version=None, author="client:naga"
     )
     assert read_client_settings(naga, "naga")[0] == 1
+    profile = naga.client_profiles.get("naga")
+    assert {c.id: c.ok for c in evaluate_readiness(naga, profile)}["model_assigned"] is False
 
 
-def test_a_skeleton_client_publishes_its_first_settings_complete_or_not_at_all(world):
+def test_a_skeleton_client_saves_before_its_commercial_settings_are_complete(world):
     data = client_yaml("delta", enabled=False)
     data["brain"] = {"factory": SPEC_FACTORY, "settings": {}}  # no Brain settings written yet
     write_client(world.tmp_path, "delta", raw=yaml.safe_dump(data))
     application = world.application
     version, part, _ = read_client_settings(application, "delta")
     assert version is None and part["brain"]["settings"] == {}
+    # nothing written yet: a save of something else is not held back by the Brain's rules
+    publish_client_settings(
+        application, "delta", {"timezone": "Europe/Paris"}, expected_version=None, author="client:d"
+    )
+    # but written settings are still validated, and refused when incomplete
     with pytest.raises(HTTPException) as partial:
         publish_client_settings(
             application,
             "delta",
-            {"timezone": "Europe/Paris"},
-            expected_version=None,
+            {"brain": {"settings": {"business": {"name": "x"}}}},
+            expected_version=1,
             author="client:delta",
         )
     assert partial.value.status_code == 422
-    assert any("brain.settings" in problem for problem in partial.value.detail)
-    assert world.config_store.history("delta") == ()
+    assert len(world.config_store.history("delta")) == 1
     publish_client_settings(
         application,
         "delta",
         {"brain": {"settings": new_settings("Delta")}},
-        expected_version=None,
+        expected_version=1,
         author="client:delta",
     )
     version, part, record = read_client_settings(application, "delta")
-    assert version == 1 and part["brain"]["settings"]["business"]["name"] == "Delta"
+    assert version == 2 and part["brain"]["settings"]["business"]["name"] == "Delta"
     assert record.author == "client:delta"
 
 
@@ -455,6 +453,7 @@ def test_a_complete_client_is_ready(world, alpha):
         "enabled_by_administrator",
         "loaded_by_platform",
         "model_assigned",
+        "brain_assigned",
         "settings_valid",
         "source_connected",
         "platform_connections",
@@ -479,7 +478,8 @@ def test_a_disabled_client_without_a_model_or_settings_lists_every_reason(world)
     assert checks["enabled_by_administrator"] is False
     assert checks["loaded_by_platform"] is False
     assert checks["model_assigned"] is False  # the placeholder "TODO" is not a model
-    assert checks["settings_valid"] is False
+    # the business settings are judged apart from the model, which has its own check above
+    assert checks["settings_valid"] is True
     assert checks["whatsapp_number"] is True
 
 
@@ -1065,3 +1065,120 @@ def test_the_admin_cannot_enable_again_on_a_switch_store_that_cannot_be_paused(
         yaml.safe_load((world.tmp_path / "alpha" / "client.yaml").read_text("utf-8"))["enabled"]
         is False
     )
+
+
+# ---- the account is not the agent ---------------------------------------------------------------
+
+
+SOURCE = "/client/v1/source"
+SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcdef"
+
+
+def test_an_account_without_model_or_sheet_signs_in_and_configures_but_cannot_start(tmp_path):
+    """The Admin created `delta` and enabled it before any model, Sheet or Brain existed."""
+    data = client_yaml("delta", llm={"model": "TODO"}, sheets={"spreadsheet_id": "TODO"})
+    data["brain"] = {"factory": SPEC_FACTORY, "settings": {}}
+    write_client(tmp_path, "delta", raw=yaml.safe_dump(data))
+    PASSWORDS["delta"] = "delta-secret-123"
+    world = World(tmp_path)  # the application starts: an account awaiting setup is no error
+    try:
+        give_profile(world.application, "delta", "+216 20 000 009")
+        assert world.application.registry.get_config("delta") is None  # no agent built
+        delta = world.browser("delta")  # the account opens
+        assert delta.get("/client/v1/auth/me").json()["status"] == "active"
+
+        # it configures itself, Sheet first: no commercial settings and no Brain needed to save
+        sheet = delta.put(
+            SOURCE,
+            json={
+                "expected_version": None,
+                "source": "google_sheets",
+                "google_sheets": {"spreadsheet": SHEET_ID},
+            },
+        )
+        assert sheet.status_code == 200, sheet.text
+        document = world.config_store.current("delta").document
+        assert document["sheets"]["spreadsheet_id"] == SHEET_ID
+        assert document["llm"]["model"] == "TODO"  # the model stays the Admin's to assign
+
+        # ...but the agent cannot start, and says what is left
+        body = delta.get(READINESS).json()
+        assert body["ready"] is False
+        missing = check_ids(body, False)
+        assert {"model_assigned", "loaded_by_platform", "settings_valid"} <= missing
+        refused = delta.post(START)
+        assert refused.status_code == 409
+        assert {r["id"] for r in refused.json()["detail"]["reasons"]} == missing
+        assert world.agent_state.get("delta") is None
+        assert delta.get(AGENT).json()["state"] == "not_started"
+    finally:
+        world.application.close()
+
+
+def test_an_inactive_account_still_cannot_sign_in(world):
+    write_client(world.tmp_path, "gamma", enabled=False)
+    response = world.anonymous().post(
+        LOGIN, json={"login": "gamma.login", "password": PASSWORDS["gamma"]}
+    )
+    assert response.status_code == 403
+
+
+def test_a_fully_configured_client_meets_every_start_condition(world, alpha):
+    body = alpha.get(READINESS).json()
+    assert body["ready"] is True and check_ids(body, False) == set()
+    started = alpha.post(START)
+    assert started.status_code == 200
+    assert started.json()["state"] == "running" and started.json()["active"] is True
+    assert all(not c.sent for c in world.made.channels.values())  # nothing was sent
+
+
+def test_a_client_saves_its_data_while_the_admin_has_assigned_no_brain(tmp_path):
+    data = client_yaml("eps", llm={"model": "TODO"}, sheets={"spreadsheet_id": "TODO"})
+    data["brain"] = {"factory": "TODO", "settings": {}}
+    write_client(tmp_path, "eps", raw=yaml.safe_dump(data))
+    PASSWORDS["eps"] = "eps-secret-123"
+    world = World(tmp_path)
+    try:
+        give_profile(world.application, "eps", "+216 20 000 010")
+        eps = world.browser("eps")
+        saved = put(eps, None, commercial=new_settings("Eps"))
+        assert saved.status_code == 200, saved.text
+        sheet = eps.put(
+            SOURCE,
+            json={
+                "expected_version": 1,
+                "source": "google_sheets",
+                "google_sheets": {"spreadsheet": SHEET_ID},
+            },
+        )
+        assert sheet.status_code == 200, sheet.text
+        assert eps.post(START).status_code == 409
+        assert world.agent_state.get("eps") is None
+    finally:
+        world.application.close()
+
+
+def test_readiness_tells_apart_no_brain_no_model_and_incomplete_settings(tmp_path):
+    ids = {}
+    for cid, brain, llm in (
+        ("nobrain", {"factory": "TODO", "settings": {}}, {"model": "test-model"}),
+        ("nomodel", {"factory": SPEC_FACTORY, "settings": minimal()}, {"model": "TODO"}),
+        ("nodata", {"factory": SPEC_FACTORY, "settings": {}}, {"model": "test-model"}),
+    ):
+        data = client_yaml(cid, llm=llm)
+        data["brain"] = brain
+        write_client(tmp_path, cid, raw=yaml.safe_dump(data))
+        PASSWORDS[cid] = f"{cid}-secret-123"
+    world = World(tmp_path)
+    try:
+        for index, cid in enumerate(("nobrain", "nomodel", "nodata")):
+            give_profile(world.application, cid, f"+216 20 000 02{index}")
+            ids[cid] = check_ids(world.browser(cid).get(READINESS).json(), False)
+        assert {"brain_assigned"} <= ids["nobrain"] and "settings_valid" not in ids["nobrain"]
+        assert "model_assigned" not in ids["nobrain"]
+        assert {"model_assigned"} <= ids["nomodel"]
+        assert not {"brain_assigned", "settings_valid"} & ids["nomodel"]
+        assert {"settings_valid"} <= ids["nodata"]
+        assert not {"brain_assigned", "model_assigned"} & ids["nodata"]
+    finally:
+        world.application.close()

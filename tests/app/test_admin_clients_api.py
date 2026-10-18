@@ -9,6 +9,7 @@ secret value, only the names of the environment variables that hold one.
 from datetime import UTC, datetime
 
 import pytest
+import yaml
 from app_support import (
     InlineExecutor,
     declare_models,
@@ -384,9 +385,23 @@ class TestCreateClient:
         assert response.status_code == 409
         assert not (tmp_path / "other").exists()
 
-    def test_a_new_client_cannot_be_created_active(self, fx, tmp_path):
-        response = as_root(fx).post("/admin/v1/clients", json=new_client(status="active"))
-        assert response.status_code == 400
+    def test_a_new_client_can_be_created_active_without_model_or_sheet(self, fx, tmp_path):
+        """The account is not the agent: it opens before any model, Sheet or Brain exists."""
+        body = new_client(status="active")
+        del body["llm_provider"], body["llm_model"]
+        client = as_root(fx)
+        response = client.post("/admin/v1/clients", json=body)
+        assert response.status_code == 201, response.text
+        assert response.json()["status"] == "active"
+        assert response.json()["llm_model"] is None or response.json()["llm_model"] == "TODO"
+        stored = yaml.safe_load((tmp_path / "acme-corp" / "client.yaml").read_text())
+        assert stored["enabled"] is True and stored["llm"]["model"] == "TODO"
+        assert stored["sheets"]["spreadsheet_id"] == "TODO"
+
+    def test_a_model_is_sent_with_its_provider_or_not_at_all(self, fx, tmp_path):
+        body = new_client()
+        del body["llm_model"]
+        assert as_root(fx).post("/admin/v1/clients", json=body).status_code == 400
         assert not (tmp_path / "acme-corp").exists()
 
     def test_duplicate_login_is_refused_and_leaves_nothing_behind(self, fx, tmp_path):

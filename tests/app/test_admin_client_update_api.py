@@ -194,14 +194,14 @@ class TestUpdateStatus:
         assert reactivated["status"] == "active"
         assert reactivated["restart_required"] is False
 
-    def test_a_client_that_is_not_configured_cannot_be_activated(self, fx, tmp_path):
+    def test_an_account_not_configured_yet_can_still_be_activated(self, fx, tmp_path):
+        """Activating the account is not starting the agent: no model, Sheet or Brain is needed."""
         client = as_root(fx)
         client.post("/admin/v1/clients", json=new_client())
-        before = (tmp_path / "acme-corp" / "client.yaml").read_text()
         response = client.patch(URL, json={"status": "active"})
-        assert response.status_code == 400
-        assert (tmp_path / "acme-corp" / "client.yaml").read_text() == before
-        assert client.get(URL).json()["status"] == "disabled"
+        assert response.status_code == 200, response.text
+        assert client.get(URL).json()["status"] == "active"
+        assert "enabled: true" in (tmp_path / "acme-corp" / "client.yaml").read_text()
 
     def test_a_disabled_client_is_activated_once_it_is_valid(self, fx):
         client = as_root(fx)

@@ -32,7 +32,7 @@ from sales_app.config.resolution import (
     where,
     with_legacy_inbound,
 )
-from sales_app.config.schema import ClientFile
+from sales_app.config.schema import PLACEHOLDERS, ClientFile
 from sales_app.config.secrets import (
     CHANNELS_ACCESS,
     CHANNELS_ALLOWED,
@@ -172,6 +172,34 @@ def load_client_configs(
     return LoadedConfig(tuple(clients), tuple(disabled), tuple(errors))
 
 
+def brain_unassigned(brain: object) -> bool:
+    """Whether the Admin has not assigned this client a Brain yet (its factory is a placeholder)."""
+    if not isinstance(brain, Mapping) or brain.get("agent"):
+        return not isinstance(brain, Mapping)
+    factory = brain.get("factory")
+    return isinstance(factory, str) and factory.strip().lower() in PLACEHOLDERS
+
+
+def awaiting_configuration(candidate: Mapping[str, object]) -> bool:
+    """Whether a client still holds a placeholder where its model, its Brain or its Sheet goes.
+
+    This is the state of a new account: it is judged on the settings in force (the client.yaml with
+    the published version laid over), so a Sheet the client has entered since counts."""
+
+    def value(section: str, key: str) -> object:
+        body = candidate.get(section)
+        return body.get(key) if isinstance(body, Mapping) else None
+
+    def placeholder(item: object) -> bool:
+        return isinstance(item, str) and item.strip().lower() in PLACEHOLDERS
+
+    return (
+        brain_unassigned(candidate.get("brain"))
+        or placeholder(value("sheets", "spreadsheet_id"))
+        or placeholder(value("llm", "model"))
+    )
+
+
 def resolve_client_config(
     directory: Path,
     *,
@@ -213,6 +241,12 @@ def resolve_client_config(
         candidate = merge_document(strip_settings(raw), upgrade_document(version.document))
     else:
         candidate = with_legacy_inbound(raw)  # a client.yaml predates the inbound policy
+
+    if awaiting_configuration(candidate):
+        # An account the Admin enabled before its model, Brain or Sheet exist: it can sign in and
+        # configure itself, but has no agent to build yet. Not an error, or one such account would
+        # stop the whole application.
+        return Resolution(disabled=True)
 
     try:
         spec = ClientFile.model_validate(candidate)
@@ -267,7 +301,10 @@ def complete_client_config(
 
     # A Brain that declares settings rules gets its settings validated and normalised here. An
     # unimportable Brain module is left for the runtime build to report, with more context.
+    unwritten = not spec.brain.settings  # the client has not written its commercial settings yet
     spec, brain_problems = prepare_brain_settings(spec, require_module=False, brains=brains)
+    if brain_problems and unwritten and spec.client_id == name:
+        return Resolution(disabled=True)  # awaiting the client's data, like a missing model
     problems.extend(f"{name}: {message}" for message in brain_problems)
     if brain_problems and version_number is not None:
         problems.append(

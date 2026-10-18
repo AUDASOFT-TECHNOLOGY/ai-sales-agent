@@ -35,6 +35,7 @@ from sales_app.api.admin_clients import (
     client_wiring_and_document,
     publish_client_settings,
     read_client_settings,
+    validate_client_document,
 )
 from sales_app.api.client import make_current_client_dependency
 from sales_app.bootstrap import Application
@@ -45,7 +46,7 @@ from sales_app.channel_status import (
 )
 from sales_app.client_auth import is_client_active
 from sales_app.client_profiles import ClientProfile
-from sales_app.config import validate_settings_document
+from sales_app.config.loader import brain_unassigned
 from sales_app.config.schema import DEFAULT_SOURCE
 from sales_app.config_store import ConfigStoreError
 from sales_app.secret_store import ScopeKind, SecretStoreError, client_scope
@@ -134,6 +135,7 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
 
     found = client_wiring_and_document(application, client_id)
     model = ""
+    brain_assigned = False
     problems: tuple[str, ...] = ("no settings",)
     source_problem = "Choose where your prospects come from, in your data source settings."
     channel = "whatsapp"
@@ -154,7 +156,11 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
         llm = document.get("llm")
         value = llm.get("model") if isinstance(llm, Mapping) else None
         model = value.strip() if isinstance(value, str) else ""
-        problems = validate_settings_document(client_id, raw, document).errors
+        brain_assigned = not brain_unassigned(raw.get("brain"))
+        # Without a Brain its rules cannot be applied: that is `brain_assigned`'s to report.
+        problems = (
+            validate_client_document(client_id, raw, document).errors if brain_assigned else ()
+        )
 
     platform_ok = not [m for m in registry.missing(client_id) if not is_channel_reason(m)]
     # WhatsApp is connected by the administrator, so a client on it has only its number to give.
@@ -187,9 +193,15 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
             "No AI model is assigned to your agent yet. Contact your administrator.",
         ),
         _Check(
+            "brain_assigned",
+            brain_assigned,
+            "Your agent has not been set up by the platform yet. Contact your administrator.",
+        ),
+        _Check(
             "settings_valid",
             not problems,
-            "Your business settings are incomplete or invalid. Review and save them.",
+            "Your business settings (business, languages, products...) are incomplete or "
+            "invalid. Review and save them.",
         ),
         _Check("source_connected", source_problem is None, source_problem or ""),
         _Check(
