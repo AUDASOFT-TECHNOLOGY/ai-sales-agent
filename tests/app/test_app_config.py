@@ -171,8 +171,6 @@ class TestValidation:
     @pytest.mark.parametrize(
         ("override", "where"),
         [
-            ({"sheets": {"spreadsheet_id": "TODO"}}, "sheets.spreadsheet_id"),
-            ({"llm": {"model": "CHANGE_ME"}}, "llm.model"),
             ({"brain": {"factory": "CHANGE_ME_brain.brain:create"}}, "brain.factory"),
             ({"whatsapp": {"token_env": "CHANGE_ME_TOKEN"}}, "whatsapp.token_env"),
         ],
@@ -180,6 +178,19 @@ class TestValidation:
     def test_placeholders_are_rejected_for_enabled_clients(self, tmp_path, override, where):
         write_client(tmp_path, "alpha", **override)
         assert any(where in e and "placeholder" in e for e in load(tmp_path, "alpha").errors)
+
+    @pytest.mark.parametrize(
+        "override",
+        [{"sheets": {"spreadsheet_id": "TODO"}}, {"llm": {"model": "CHANGE_ME"}}],
+    )
+    def test_a_missing_sheet_or_model_leaves_an_enabled_account_awaiting_its_agent(
+        self, tmp_path, override
+    ):
+        """The account is enabled; its agent is not built until the Sheet and the model exist. That
+        is not an error that stops the application."""
+        write_client(tmp_path, "alpha", **override)
+        loaded = load(tmp_path, "alpha")
+        assert loaded.errors == () and loaded.clients == () and loaded.disabled == ("alpha",)
 
     def test_missing_required_sections(self, tmp_path):
         data = client_yaml("alpha")
@@ -357,12 +368,11 @@ class TestShippedConfiguration:
         assert loaded.disabled == ("naga", "tounesimmo")
 
     @pytest.mark.parametrize("client", ["naga", "tounesimmo"])
-    def test_the_shipped_files_become_invalid_if_enabled_with_placeholders(self, tmp_path, client):
+    def test_the_shipped_files_enabled_with_placeholders_await_their_agent(self, tmp_path, client):
         raw = (REPO_ROOT / "clients" / client / "client.yaml").read_text(encoding="utf-8")
         write_client(tmp_path, client, raw=raw.replace("enabled: false", "enabled: true"))
-        errors = load(tmp_path, env=env_for(client)).errors
-        assert any("spreadsheet_id" in e and "placeholder" in e for e in errors)
-        assert any("llm.model" in e for e in errors)
+        loaded = load(tmp_path, env=env_for(client))
+        assert loaded.errors == () and loaded.clients == () and loaded.disabled == (client,)
 
     def test_the_template_parses_but_is_never_loaded(self):
         template = yaml.safe_load((REPO_ROOT / "clients" / "_template" / "client.yaml").read_text())

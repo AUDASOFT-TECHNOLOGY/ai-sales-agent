@@ -26,7 +26,7 @@ import binascii
 import contextlib
 import re
 import shutil
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import replace
 from typing import Any, Literal
 
@@ -836,6 +836,7 @@ def read_client_settings(
 _STAND_IN = "pending-configuration"
 # What the Admin (the model) and the client (the Sheet) have not given yet. Neither blocks the other.
 _PENDING_VALUES = (("llm", "model"), ("sheets", "spreadsheet_id"))
+_GIVEN_MODEL = (("llm", "model"),)  # a model the Admin assigns is never a placeholder
 
 
 # A module that declares no settings rules: stands in for a Brain that is not assigned yet.
@@ -848,6 +849,7 @@ def validate_client_document(
     document: Mapping[str, Any],
     *,
     saving: bool = False,
+    given: Collection[tuple[str, str]] = (),
 ) -> SettingsCheck:
     """`validate_settings_document`, except that a model or a Sheet still at its placeholder does
     not fail the client's other settings: a client without a model may save its Sheet, and one
@@ -857,7 +859,10 @@ def validate_client_document(
     `saving` is a client's own save: it must not wait for the Admin's Brain, nor for the client's own
     commercial settings when it only enters its Sheet. With no Brain assigned yet, or no Brain
     settings written yet, the Brain's rules are left out of that save. They are applied in full by
-    readiness (`saving=False`) and when the agent is built, so the agent does not start on them."""
+    readiness (`saving=False`) and when the agent is built, so the agent does not start on them.
+
+    `given` names the (section, key) values the caller is itself assigning (the Admin's model):
+    a placeholder there is refused as before, never accepted as "still to come"."""
     candidate = thaw_document(document)
     wiring = dict(raw)
     brain = wiring.get("brain")
@@ -868,6 +873,8 @@ def validate_client_document(
             wiring["brain"] = {**brain, "factory": _OPAQUE_BRAIN}
     pending: list[tuple[str, str, Any]] = []
     for section, key in _PENDING_VALUES:
+        if (section, key) in given:
+            continue
         body = candidate.get(section)
         value = body.get(key) if isinstance(body, dict) else None
         if isinstance(value, str) and value.strip().lower() in PLACEHOLDERS:
@@ -1094,7 +1101,12 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         if document_changes and base_document is None:
             _write_skeleton_settings(application, client_id, raw, document_changes)
         elif document_changes and base_document is not None:
-            check = validate_client_document(client_id, raw, {**base_document, **document_changes})
+            check = validate_client_document(
+                client_id,
+                raw,
+                {**base_document, **document_changes},
+                given=_GIVEN_MODEL if "llm" in document_changes else (),
+            )
             if check.errors or check.document is None:
                 raise HTTPException(400, "; ".join(check.errors) or "invalid configuration")
             current = application.config_store.current(client_id)
@@ -1242,7 +1254,7 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         raw, base_document = found
         document = {**base_document, "llm": {"provider": provider, "model": model}}
 
-        check = validate_client_document(client_id, raw, document)
+        check = validate_client_document(client_id, raw, document, given=_GIVEN_MODEL)
         if check.errors or check.document is None or check.spec is None:
             raise HTTPException(400, "; ".join(check.errors) or "invalid configuration")
 
