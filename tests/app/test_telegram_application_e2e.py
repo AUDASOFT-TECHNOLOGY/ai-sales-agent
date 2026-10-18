@@ -238,19 +238,22 @@ class Telegram:
         assert response.status_code == 200, response.text
 
     def set_up_telegram(self, cid, *, start=True, connect=True):
-        """What a client does: choose the channel, give its bot, connect it, start the agent."""
+        """What the client does (choose the channel, start the agent) and what the platform does for
+        it (store the bot's token, connect the bot): the client types and clicks nothing technical."""
         browser = self.browser(cid)
         version = browser.get("/client/v1/channel").json()["version"]
         response = browser.put(
             "/client/v1/channel", json={"expected_version": version, "channel": "telegram"}
         )
         assert response.status_code == 200, response.text
-        response = browser.put(
-            "/client/v1/channel/credentials", json={"bot_token": self.tokens[cid]}
+        admin = self.admin()
+        response = admin.put(
+            f"/admin/v1/clients/{cid}/integrations/telegram.bot_token",
+            json={"value": self.tokens[cid]},
         )
         assert response.status_code == 200, response.text
         if connect:
-            response = browser.post("/client/v1/channel/connect")
+            response = admin.post(f"/admin/v1/clients/{cid}/integrations/telegram/connect")
             assert response.status_code == 200 and response.json()["ok"], response.text
         if start:
             response = browser.post("/client/v1/agent/start")
@@ -719,9 +722,13 @@ class TestIsolation:
     def test_a_second_client_cannot_connect_the_bot_of_the_first(self, pair):
         r = pair
         r.tokens["beta"] = r.tokens["alpha"]  # beta pastes alpha's token
-        beta = r.browser("beta")
-        assert beta.put("/client/v1/channel/credentials", json={"bot_token": r.tokens["alpha"]})
-        response = beta.post("/client/v1/channel/connect")
+        admin = r.admin()
+        response = admin.put(
+            "/admin/v1/clients/beta/integrations/telegram.bot_token",
+            json={"value": r.tokens["alpha"]},
+        )
+        assert response.status_code == 200
+        response = admin.post("/admin/v1/clients/beta/integrations/telegram/connect")
         assert response.status_code == 409 and "alpha" not in response.text
 
     def test_a_second_client_cannot_take_over_a_bot_at_runtime(self, pair):
@@ -805,7 +812,8 @@ class TestAuthority:
 
     def test_removing_the_token_stops_the_client_without_a_secret_in_the_report(self, room):
         r = room
-        r.browser("alpha").delete("/client/v1/channel/credentials")
+        path = "/admin/v1/clients/alpha/integrations/telegram.bot_token?confirm=true"
+        assert r.admin().delete(path).status_code == 200
         missing = " ".join(r.application.registry.missing("alpha"))
         assert missing and r.tokens["alpha"] not in missing
         assert r.tick() == []

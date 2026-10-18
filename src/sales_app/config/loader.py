@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from sales_app.brain_registry import BrainRegistry
 from sales_app.config.brain_settings import prepare_brain_settings
 from sales_app.config.channel_access import GOVERNED, effective_channels
+from sales_app.config.email_activation import blocks_sending, parse_record
 from sales_app.config.email_settings import (
     GMAIL_MODE,
     PLATFORM_MODE,
@@ -37,6 +38,7 @@ from sales_app.config.schema import PLACEHOLDERS, ClientFile
 from sales_app.config.secrets import (
     CHANNELS_ACCESS,
     CHANNELS_ALLOWED,
+    EMAIL_ACTIVATION,
     EMAIL_PASSWORD,
     EMAIL_PLATFORM_MAILBOX,
     EMAIL_PLATFORM_PROFILE_KEYS,
@@ -496,6 +498,17 @@ def _resolve_secrets(
             missing.append("Email mailbox has not been assigned to this account yet")
         if any(key not in values for key in EMAIL_PLATFORM_PROFILE_KEYS):
             missing.append("The platform mail servers are not configured")
+        # The client confirms its Sender Name before the first message leaves under it: saving the
+        # name is the confirmation, so none stored means none confirmed.
+        sender = spec.channel_settings_for("email").get("from_name")
+        if not (isinstance(sender, str) and sender.strip()):
+            missing.append("Email sender name has not been confirmed yet")
+        # A client that asked for its mailbox to be activated sends nothing until the Admin has
+        # activated it. One that never asked is left as it was.
+        if secret_store is not None and blocks_sending(
+            parse_record(secret_store.get(client, EMAIL_ACTIVATION))
+        ):
+            missing.append("Email activation has not been approved yet")
     if "telegram" in channels and live:
         try:
             TelegramChannelSettings.model_validate(spec.channel_settings_for("telegram"))

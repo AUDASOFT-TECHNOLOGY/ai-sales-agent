@@ -15,13 +15,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from sales_app.admin_auth import AdminRole, AdminUser
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency, require_role
 from sales_app.bootstrap import Application
 from sales_app.config.resolution import CONFIG_FILENAME
-from sales_app.config.secrets import OPENAI_MODELS
+from sales_app.config.secrets import EMAIL_PASSWORD, EMAIL_PLATFORM_MAILBOX, OPENAI_MODELS
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_app.connection_tests import (
     INFERENCE_MAX_TOKENS,
@@ -33,11 +33,28 @@ from sales_app.connection_tests import (
     default_http_client,
 )
 from sales_app.email_platform import (
+    AUTHENTICATED,
+    NOT_CONFIGURED,
+    MailLoginProbe,
+    MailLoginProbeFactory,
     PlatformMailProbe,
     PlatformMailProbeFactory,
     check_platform_servers,
+    fingerprint,
+    login_problem,
+    read_profile,
+    run_login_check,
 )
+from sales_app.gmail_wiring import redirect_uri_for
 from sales_app.llm_models import ModelTest, foreign_model_keys, record_test, stored_models
+from sales_app.mailbox_exclusivity import dedicated_credential_conflict
+from sales_app.mailbox_proof import (
+    NOT_AUTHENTICATED,
+    READY,
+    client_mailbox,
+    protocol_states,
+    verify_client_mailbox,
+)
 from sales_app.model_usage import impact_of_credential_write
 from sales_app.secret_store import (
     GLOBAL_SCOPE,
@@ -51,6 +68,16 @@ from sales_app.secret_store import (
     client_scope,
 )
 from sales_app.secret_store.catalog import normalize_value, spec_for
+from sales_app.telegram_connection import (
+    BotProbeFactory,
+    TelegramConnectionError,
+    check_bot_connection,
+    connect_bot,
+    disconnect_bot,
+)
+from sales_app.wiring.providers import ProviderKind
+from sales_app.wiring.providers import telegram as telegram_provider
+from sales_integrations.mail import ImapSettings, SmtpSettings
 from sales_integrations.whatsapp.channel import DEFAULT_API_VERSION
 
 _BODY_SCHEMA: dict[str, Any] = {
@@ -101,6 +128,18 @@ class ConnectionTestResponse(BaseModel):
     details: dict[str, str] = {}
 
 
+class WhatsAppStatusResponse(BaseModel):
+    """What is in place for one client's WhatsApp, from what is stored only: nothing here asked
+    Meta, so nothing here says the number is connected (the test route does that)."""
+
+    status: str  # ready | waiting_platform | action_required
+    verified_with_meta: bool = False  # always false here: only the test route calls Meta
+    whatsapp_number_given: bool
+    reconnect_required: bool
+    missing_platform: list[str]  # credential keys the Admin still has to store (no values)
+    message: str
+
+
 class ModelTestResponse(BaseModel):
     """The outcome of a real request to one model. Never carries a credential."""
 
@@ -114,6 +153,44 @@ class ModelTestResponse(BaseModel):
     max_tokens: int  # the most the request could generate
     tested_at: str | None = None  # None: nothing was sent, so nothing was tested
     recorded: bool = False  # whether the outcome is kept with the model (the catalog shows it)
+
+
+class _NotReady(Exception):
+    """A login check that cannot start: the message is a fixed sentence naming what is missing."""
+
+
+class EmailServiceStatus(BaseModel):
+    """Whether the platform's mail servers can be used. Nothing here is a credential."""
+
+    state: str  # "missing_configuration" | "server_not_authenticated" | "ready"
+    smtp: str  # "not_configured" | "not_tested" | "authenticated" | "failed"
+    imap: str
+    missing: list[str] = []  # the server settings still to give
+    smtp_problem: str | None = None  # why SMTP is not authenticated, as a fixed sentence
+    imap_problem: str | None = None
+    # Whether clients created from now on are given Email access (the Admin's switch). Existing
+    # clients are never changed by it.
+    new_clients_access: bool = False
+    # Clients that may use Email and have no mailbox assigned yet: what waits for an assignment.
+    clients_awaiting_mailbox: list[str] = []
+
+
+class NewClientsAccessRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
+class EmailMailboxStatus(BaseModel):
+    """Where one client's mailbox stands. Nothing here is a credential or an address."""
+
+    state: str  # "missing_configuration" | "mailbox_not_assigned" | "password_missing" |
+    #            "not_authenticated" | "ready"
+    smtp: str | None = None  # "not_tested" | "authenticated" | "failed", once there is a mailbox
+    imap: str | None = None
+    problem: str | None = None  # a fixed sentence when the mailbox is not ready
+    smtp_problem: str | None = None
+    imap_problem: str | None = None
 
 
 def _test_response(result: ConnectionResult) -> ConnectionTestResponse:
@@ -133,6 +210,18 @@ def _response(status: CredentialStatus, scope: ScopeKind) -> CredentialResponse:
     )
 
 
+class GmailPlatformStatus(BaseModel):
+    """Whether the Google application of the Gmail mailbox mode is set. `configured` means the
+    credentials are stored and the public URL is usable: it does NOT mean Google accepts them (that
+    is only proven by a real consent, and by Google's verification of the application)."""
+
+    configured: bool
+    missing: list[str]
+    redirect_uri: str | None  # to copy into the Google Cloud OAuth client (not a secret)
+    verified: bool = False  # never true here: nothing is checked against Google
+    note: str
+
+
 def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
 
@@ -140,7 +229,7 @@ def _no_store(response: Response) -> None:
 async def _read_value(request: Request) -> str:
     try:
         body = await request.json()
-    except Exception:  # noqa: BLE001 - any unreadable body is simply a bad request
+    except Exception:
         raise HTTPException(400, "body must be JSON") from None
     if not isinstance(body, dict) or set(body) != {"value"} or not isinstance(body["value"], str):
         raise HTTPException(422, 'body must be {"value": "<text>"}')
@@ -171,6 +260,8 @@ def create_admin_integrations_router(
     application: Application,
     http: HttpClientFactory = default_http_client,
     platform_mail_probe: PlatformMailProbeFactory = PlatformMailProbe,
+    bot_probe: BotProbeFactory = telegram_provider.TelegramProbe,
+    mail_login_probe: MailLoginProbeFactory = MailLoginProbe,
 ) -> APIRouter:
     credentials = application.credentials
     get_current_admin = make_current_admin_dependency(application.admin_auth)
@@ -280,6 +371,229 @@ def create_admin_integrations_router(
             check_platform_servers(lambda key: stored(GLOBAL_SCOPE, key), platform_mail_probe)
         )
 
+    # ---- e-mail: logging in (platform test login, and one client's assigned mailbox) ---------
+
+    def platform_login(protocol: str) -> tuple[SmtpSettings | None, ImapSettings | None, str, str]:
+        """The platform's test login for one protocol, as the settings the probe takes, with the
+        subject and fingerprint its result is remembered under. Raises `_NotReady` with a fixed
+        sentence when the profile or the login is incomplete."""
+        profile, missing = read_profile(lambda key: stored(GLOBAL_SCOPE, key))
+        if profile is None:
+            raise _NotReady(f"the server settings are not complete yet ({', '.join(missing)})")
+        username = stored(GLOBAL_SCOPE, f"email.platform_{protocol}_username")
+        password = stored(GLOBAL_SCOPE, f"email.platform_{protocol}_password")
+        if not username or not password:
+            raise _NotReady(f"the {protocol.upper()} username or password is not set yet")
+        if protocol == "smtp":
+            smtp = SmtpSettings(
+                host=profile.smtp_host,
+                port=profile.smtp_port,
+                security=profile.smtp_security,
+                username=username,
+                password=password,
+                from_address=username,
+            )
+            print_ = fingerprint(
+                profile.smtp_host, str(profile.smtp_port), profile.smtp_security, username, password
+            )
+            return smtp, None, f"platform:{protocol}", print_
+        imap = ImapSettings(
+            host=profile.imap_host,
+            port=profile.imap_port,
+            security=profile.imap_security,
+            username=username,
+            password=password,
+        )
+        print_ = fingerprint(
+            profile.imap_host, str(profile.imap_port), profile.imap_security, username, password
+        )
+        return None, imap, f"platform:{protocol}", print_
+
+    def platform_login_test(protocol: str) -> ConnectionTestResponse:
+        label = f"Email {protocol.upper()}"
+        try:
+            smtp, imap, subject, print_ = platform_login(protocol)
+        except _NotReady as problem:
+            return ConnectionTestResponse(
+                ok=False, message=f"{label}: {problem}.", details={protocol: "not_ready"}
+            )
+        probe = mail_login_probe(smtp, imap)
+        return _test_response(
+            run_login_check(protocol, probe, application.mail_auth, subject, print_, label)
+        )
+
+    @router.post("/settings/integrations/email/test-smtp", response_model=ConnectionTestResponse)
+    def test_email_smtp_login(_admin: AdminUser = Depends(require_owner)) -> ConnectionTestResponse:
+        """Connects to the SMTP server over an encrypted connection and logs in with the stored
+        username and password. Nothing is sent."""
+        return platform_login_test("smtp")
+
+    @router.post("/settings/integrations/email/test-imap", response_model=ConnectionTestResponse)
+    def test_email_imap_login(_admin: AdminUser = Depends(require_owner)) -> ConnectionTestResponse:
+        """Connects to the IMAP server over an encrypted connection, logs in and opens the folder.
+        No message is read or changed."""
+        return platform_login_test("imap")
+
+    def platform_state() -> tuple[str, dict[str, str], dict[str, str | None], list[str]]:
+        """(overall state, state of each protocol, why, settings still missing)."""
+        _, missing = read_profile(lambda key: stored(GLOBAL_SCOPE, key))
+        states: dict[str, str] = {}
+        problems: dict[str, str | None] = {}
+        for protocol in ("smtp", "imap"):
+            try:
+                _s, _i, subject, print_ = platform_login(protocol)
+            except _NotReady as reason:
+                states[protocol] = NOT_CONFIGURED
+                problems[protocol] = f"{reason}"
+            else:
+                states[protocol] = application.mail_auth.state(subject, print_)
+                kind = application.mail_auth.failure(subject, print_)
+                problems[protocol] = login_problem(kind) if kind else None
+        if NOT_CONFIGURED in states.values():
+            overall = "missing_configuration"
+        elif all(state == AUTHENTICATED for state in states.values()):
+            overall = "ready"
+        else:
+            overall = "server_not_authenticated"
+        return overall, states, problems, missing
+
+    def known_channels() -> list[str]:
+        return [
+            d.key
+            for d in application.provider_registry.list(ProviderKind.CHANNEL)
+            if d.kind is ProviderKind.CHANNEL and d.runnable
+        ]
+
+    def awaiting_mailbox() -> list[str]:
+        """Clients that may use Email and have no mailbox yet. Revansa has no way to create one at
+        the provider: an administrator assigns it (see docs/email-channel.md)."""
+        policy = application.channel_policy
+        if policy is None:
+            return []
+        waiting = []
+        for profile in application.client_profiles.list():
+            try:
+                if "email" in policy.effective(profile.client_id) and not credential_present(
+                    profile.client_id
+                ):
+                    waiting.append(profile.client_id)
+            except SecretStoreError:
+                continue
+        return sorted(waiting)
+
+    def credential_present(client_id: str) -> bool:
+        return credentials.status(client_scope(client_id), EMAIL_PLATFORM_MAILBOX).configured
+
+    @router.get("/settings/integrations/email/status", response_model=EmailServiceStatus)
+    def email_platform_status(_admin: AdminUser = Depends(get_current_admin)) -> EmailServiceStatus:
+        """Whether the platform's mail servers are set up and have been proven to accept a login.
+        The proof is the last test of the current settings: a changed setting voids it."""
+        overall, states, problems, missing = platform_state()
+        policy = application.channel_policy
+        return EmailServiceStatus(
+            state=overall,
+            missing=missing,
+            smtp_problem=problems["smtp"],
+            imap_problem=problems["imap"],
+            new_clients_access=policy is not None and "email" in policy.new_client_channels(),
+            clients_awaiting_mailbox=awaiting_mailbox(),
+            **states,
+        )
+
+    @router.put("/settings/integrations/email/new-clients", response_model=EmailServiceStatus)
+    def set_email_for_new_clients(
+        body: NewClientsAccessRequest, admin: AdminUser = Depends(require_owner)
+    ) -> EmailServiceStatus:
+        """Turn on (or off) Email access for the clients created from now on. Turning it on needs
+        the platform's servers to have been proven (`ready`); nothing changes for the clients that
+        already exist. Turning it off stops giving access to new clients and takes nothing away."""
+        policy = application.channel_policy
+        if policy is None:
+            raise HTTPException(503, "channel authorizations are not available")
+        if body.enabled:
+            overall, _states, _problems, _missing = platform_state()
+            if overall != "ready":
+                raise HTTPException(
+                    409,
+                    "the email servers are not ready: save the settings and test both logins first",
+                )
+        channels = set(policy.new_client_channels())
+        channels.add("email") if body.enabled else channels.discard("email")
+        try:
+            policy.set_new_client_channels(channels, actor=admin.username, known=known_channels())
+        except SecretStoreError:
+            raise HTTPException(503, "credential storage is temporarily unavailable") from None
+        return email_platform_status(admin)
+
+    def mailbox_status(client_id: str) -> EmailMailboxStatus:
+        mailbox = client_mailbox(application, client_id)
+        if mailbox.access is None:
+            return EmailMailboxStatus(state=mailbox.state, problem=mailbox.problem)
+        smtp, imap = protocol_states(application, client_id, mailbox)
+        ledger = application.mail_auth
+        kinds = {
+            p: ledger.failure(f"client:{client_id}:{p}", mailbox.print_) for p in ("smtp", "imap")
+        }
+        ready = smtp == imap == AUTHENTICATED
+        return EmailMailboxStatus(
+            state=READY if ready else NOT_AUTHENTICATED,
+            smtp=smtp,
+            imap=imap,
+            problem=None if ready else "the mailbox has not been authenticated on both servers",
+            smtp_problem=login_problem(kinds["smtp"]) if kinds["smtp"] else None,
+            imap_problem=login_problem(kinds["imap"]) if kinds["imap"] else None,
+        )
+
+    @router.get("/clients/{client_id}/integrations/email/status", response_model=EmailMailboxStatus)
+    def client_mailbox_status(
+        client_id: str, admin: AdminUser = Depends(get_current_admin)
+    ) -> EmailMailboxStatus:
+        """Where one client's mailbox stands: servers set up, mailbox assigned, password stored,
+        login proven. `ready` only when both logins were accepted with the current settings."""
+        client_scope_for(admin, client_id)
+        return mailbox_status(client_id)
+
+    @router.post(
+        "/clients/{client_id}/integrations/email/test", response_model=ConnectionTestResponse
+    )
+    def test_client_mailbox(
+        client_id: str, admin: AdminUser = Depends(require_owner)
+    ) -> ConnectionTestResponse:
+        """Logs in to the sending server and to the mailbox assigned to this client, with its own
+        address and password. Nothing is sent and nothing is read."""
+        client_scope_for(admin, client_id)
+        mailbox, results = verify_client_mailbox(application, client_id, mail_login_probe)
+        if mailbox.access is None:
+            return ConnectionTestResponse(ok=False, message=f"Email: {mailbox.problem}.")
+        ok = all(r.ok for r in results)
+        return ConnectionTestResponse(
+            ok=ok,
+            message=(
+                "Email: both logins were accepted. No message was sent and none was read."
+                if ok
+                else "Email: " + " ".join(r.message for r in results if not r.ok)
+            ),
+            details={k: v for r in results for k, v in r.details.items()},
+        )
+
+    @router.get("/settings/integrations/gmail/status", response_model=GmailPlatformStatus)
+    def gmail_platform_status(
+        _admin: AdminUser = Depends(get_current_admin),
+    ) -> GmailPlatformStatus:
+        """Config-only (no network): the Google OAuth credentials and the public base URL
+        (`SALES_AGENT_PUBLIC_BASE_URL`). Values are never returned."""
+        gmail = application.gmail
+        missing = gmail.missing() if gmail is not None else ["Gmail service"]
+        return GmailPlatformStatus(
+            configured=not missing,
+            missing=missing,
+            redirect_uri=redirect_uri_for(application.settings.public_base_url),
+            note=(
+                "Stored is not verified: Google accepts the application only after a consent has "
+                "succeeded, and for other people's accounts only once Google has verified it."
+            ),
+        )
+
     @router.post("/settings/openai/models/{model_id}/test", response_model=ModelTestResponse)
     def test_openai_model(
         model_id: str, confirm: bool = False, admin: AdminUser = Depends(require_owner)
@@ -384,6 +698,15 @@ def create_admin_integrations_router(
     ) -> CredentialResponse:
         scope = client_scope_for(admin, client_id)
         value = await _read_value(request)
+        if key in (EMAIL_PASSWORD, EMAIL_PLATFORM_MAILBOX):
+            from sales_app.api.admin_clients import client_wiring_and_document
+
+            found = client_wiring_and_document(application, client_id)
+            conflict = dedicated_credential_conflict(
+                application, client_id, found[1] if found is not None else {}
+            )
+            if conflict is not None:
+                raise HTTPException(409, conflict)
         return await run_in_threadpool(save, scope, ScopeKind.CLIENT, key, value, admin)
 
     @router.delete("/clients/{client_id}/integrations/{key}", response_model=CredentialResponse)
@@ -413,5 +736,85 @@ def create_admin_integrations_router(
                 http=http,
             )
         )
+
+    @router.get(
+        "/clients/{client_id}/integrations/whatsapp/status", response_model=WhatsAppStatusResponse
+    )
+    def client_whatsapp_status(
+        client_id: str, admin: AdminUser = Depends(get_current_admin)
+    ) -> WhatsAppStatusResponse:
+        """Read-only: which WhatsApp pieces are stored. Meta is not called. The client supplies only
+        its number; every Meta credential is the Admin's."""
+        scope = client_scope_for(admin, client_id)
+        profile = application.client_profiles.get(client_id)
+        number = bool(profile and profile.whatsapp_number)
+        reconnect = bool(profile and profile.whatsapp_reconnect_required)
+        wanted = [(GLOBAL_SCOPE, "whatsapp.app_secret"), (GLOBAL_SCOPE, "whatsapp.verify_token")]
+        wanted += [(scope, "whatsapp.access_token"), (scope, "whatsapp.phone_number_id")]
+        missing = [key for sc, key in wanted if not stored(sc, key)]
+        if missing:
+            status, message = "waiting_platform", "Meta credentials are still to be stored."
+        elif not number or reconnect:
+            status = "action_required"
+            message = "The client's WhatsApp number is missing or was changed and is not reconnected."
+        else:
+            status = "ready"
+            message = "Credentials are stored; run the test to check them with Meta."
+        return WhatsAppStatusResponse(
+            status=status,
+            whatsapp_number_given=number,
+            reconnect_required=reconnect,
+            missing_platform=missing,
+            message=message,
+        )
+
+    @router.post(
+        "/clients/{client_id}/integrations/telegram/connect", response_model=ConnectionTestResponse
+    )
+    async def connect_client_telegram(
+        client_id: str, admin: AdminUser = Depends(require_owner)
+    ) -> ConnectionTestResponse:
+        """Tells Telegram to deliver this client's bot to the platform. The client never does this:
+        its bot token is a credential the Admin stored above."""
+        client_scope_for(admin, client_id)
+        try:
+            result = await run_in_threadpool(
+                connect_bot, application, client_id, bot_probe, actor=f"admin:{admin.username}"
+            )
+        except TelegramConnectionError as error:
+            raise HTTPException(error.status, error.message) from None
+        return _test_response(result)
+
+    @router.post(
+        "/clients/{client_id}/integrations/telegram/test", response_model=ConnectionTestResponse
+    )
+    async def test_client_telegram(
+        client_id: str, admin: AdminUser = Depends(require_owner)
+    ) -> ConnectionTestResponse:
+        """A real, read-only question to Telegram (who is the bot, where does it deliver). Never a
+        simulation: `details.check` says so. Sends no message and changes nothing."""
+        client_scope_for(admin, client_id)
+        try:
+            result = await run_in_threadpool(check_bot_connection, application, client_id, bot_probe)
+        except TelegramConnectionError as error:
+            raise HTTPException(error.status, error.message) from None
+        return _test_response(result)
+
+    @router.post(
+        "/clients/{client_id}/integrations/telegram/disconnect",
+        response_model=ConnectionTestResponse,
+    )
+    async def disconnect_client_telegram(
+        client_id: str, admin: AdminUser = Depends(require_owner)
+    ) -> ConnectionTestResponse:
+        """Tells Telegram to stop delivering this client's bot, and forgets the webhook secret."""
+        client_scope_for(admin, client_id)
+        try:
+            result = await run_in_threadpool(
+                disconnect_bot, application, client_id, bot_probe, actor=f"admin:{admin.username}"
+            )
+        except TelegramConnectionError as error:
+            raise HTTPException(error.status, error.message) from None
+        return _test_response(result)
 
     return router

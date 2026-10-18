@@ -74,6 +74,10 @@ class TelegramApi:
             },
         )
 
+    def delete_webhook(self) -> BotReply:
+        """Stops Telegram delivering to us. Pending updates are kept, not dropped."""
+        return self.call("deleteWebhook", {"drop_pending_updates": False})
+
     def send_text(
         self, chat_id: str, text: str, *, reply_markup: dict[str, Any] | None = None
     ) -> BotReply:

@@ -20,6 +20,8 @@ from sales_app.config.channel_access import DEFAULT_ALLOWED
 from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
 from sales_app.config_store import ConfigStore
 from sales_app.daily_report import DailyReportService
+from sales_app.email_activation import EmailActivationService
+from sales_app.email_platform import AuthLedger
 from sales_app.errors import ConfigurationError
 from sales_app.gmail_wiring import GmailMailService
 from sales_app.inbox import PositionStore
@@ -101,8 +103,14 @@ class Application:
     source_checks: SourceCheckStore = field(default_factory=InMemorySourceCheckStore)
     # Which channels clients may use: the Admin's decision (see `sales_app.channel_policy`).
     channel_policy: ChannelPolicyService | None = None
+    # Clients' requests to have their e-mail mailbox activated by the Admin (see
+    # `sales_app.email_activation`).
+    email_activation: EmailActivationService | None = None
     # How each channel is run, kept for what the webhook route needs of it (answering a stranger).
     builders: IntegrationBuilders | None = None
+    # The last login test of the platform's mail servers and of each client's mailbox, in memory (see
+    # `sales_app.email_platform.AuthLedger`): a mailbox is only "ready" while its proof holds.
+    mail_auth: AuthLedger = field(default_factory=AuthLedger)
     # The Admin's price list for model calls; None when the deployment has no database (prices are
     # then not kept, and the Admin API says so rather than keeping them only in memory).
     llm_pricing: LLMPricingStore | None = None
@@ -391,6 +399,7 @@ def _assemble(
         agent_state=agent_state,
         source_checks=source_checks,
         channel_policy=channel_policy,
+        email_activation=EmailActivationService(secrets, audit, now=clock.now),
         builders=builders,
         llm_pricing=_llm_pricing_store(account_stores),
         plans=plans,

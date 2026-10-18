@@ -22,7 +22,7 @@ from sales_app.config.channel_access import (
     parse_access,
     parse_allowed,
 )
-from sales_app.config.secrets import CHANNELS_ACCESS, CHANNELS_ALLOWED
+from sales_app.config.secrets import CHANNELS_ACCESS, CHANNELS_ALLOWED, CHANNELS_NEW_CLIENTS
 from sales_app.secret_store import GLOBAL_SCOPE, client_scope
 from sales_app.secret_store.audit import SecretAudit, SecretAuditEvent
 from sales_app.secret_store.port import SecretStore
@@ -68,6 +68,14 @@ class ChannelPolicyService:
             self._store.get(client_scope(client_id), CHANNELS_ACCESS),
         )
 
+    def new_client_channels(self) -> frozenset[str]:
+        """The channels a client created from now on is given access to. None until the Admin says."""
+        value = self._store.get(GLOBAL_SCOPE, CHANNELS_NEW_CLIENTS)
+        if value is None or not ALLOWED_PATTERN.match(value.strip()):
+            return frozenset()
+        text = value.strip()
+        return frozenset() if text == "none" else frozenset(text.split(","))
+
     # ---- writing (administrators only: the routes that call these check the role) -----------
 
     def set_global(self, channels: Collection[str], *, actor: str, known: Collection[str]) -> None:
@@ -77,6 +85,30 @@ class ChannelPolicyService:
         self._store.set(GLOBAL_SCOPE, CHANNELS_ALLOWED, text, by=actor)
         self._record(actor, "set", GLOBAL_SCOPE, CHANNELS_ALLOWED, "stored")
         self._changed(GLOBAL_SCOPE, CHANNELS_ALLOWED)
+
+    def set_new_client_channels(
+        self, channels: Collection[str], *, actor: str, known: Collection[str]
+    ) -> None:
+        """Which channels new clients are given. Existing clients are not touched."""
+        _require_known(channels, known)
+        text = format_allowed(channels)
+        assert ALLOWED_PATTERN.match(text)
+        self._store.set(GLOBAL_SCOPE, CHANNELS_NEW_CLIENTS, text, by=actor)
+        self._record(actor, "set", GLOBAL_SCOPE, CHANNELS_NEW_CLIENTS, "stored")
+
+    def grant_new_client(
+        self, client_id: str, *, actor: str, known: Collection[str]
+    ) -> frozenset[str]:
+        """Give a client that has just been created the channels meant for new clients, as its own
+        exception (what the global list already allows needs none). Returns what was added."""
+        wanted = self.new_client_channels() - self.global_allowed()
+        if not wanted:
+            return frozenset()
+        added, removed = self.client_access(client_id)
+        self.set_client_access(
+            client_id, added | wanted, removed - wanted, actor=actor, known=known
+        )
+        return wanted
 
     def set_client_access(
         self,

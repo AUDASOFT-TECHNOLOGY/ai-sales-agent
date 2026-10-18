@@ -64,19 +64,39 @@ function stubFetch({
   detail = ALPHA_DETAIL,
   onPut,
   onPatch,
+  credentials = [],
+  calls,
 }: {
   role?: string;
   llmSettings?: unknown;
   detail?: unknown;
   onPut?: (body: unknown) => Response;
   onPatch?: (body: Record<string, unknown>) => Response;
+  /** What the client's stored credentials report (configured or not; never a value). */
+  credentials?: Array<{ key: string; configured: boolean }>;
+  /** Every request made, as "METHOD path", to check which routes a page used. */
+  calls?: string[];
 } = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
+      calls?.push(`${init?.method ?? "GET"} ${url.replace(/^.*\/admin\/v1/, "")}`);
       if (url.endsWith("/auth/me")) {
         return jsonResponse(200, { username: "alice", role, client_ids: ["alpha"] });
+      }
+      if (url.endsWith("/clients/alpha/integrations")) {
+        return jsonResponse(
+          200,
+          credentials.map((c) => ({ ...c, label: c.key, scope: "client", sensitive: true, value: null, updated_at: null, updated_by: null })),
+        );
+      }
+      if (url.endsWith("/clients/alpha/integrations/telegram.bot_token") && init?.method === "PUT") {
+        return jsonResponse(200, { key: "telegram.bot_token", label: "Telegram bot token", scope: "client", sensitive: true, configured: true, value: null, updated_at: null, updated_by: null });
+      }
+      if (url.includes("/clients/alpha/integrations/telegram/")) {
+        const action = url.split("/").pop();
+        return jsonResponse(200, { ok: true, message: `telegram ${action} ok`, details: {} });
       }
       if (url.endsWith("/settings/llm")) {
         return jsonResponse(200, llmSettings);
@@ -360,5 +380,57 @@ describe("AdminClientDetailPage edit mode", () => {
     await user.click(screen.getByRole("button", { name: "Annuler" }));
     expect(screen.getByRole("heading", { level: 2, name: "Alpha" })).toBeInTheDocument();
     expect(patch).not.toHaveBeenCalled();
+  });
+});
+
+describe("AdminClientDetailPage Telegram bot", () => {
+  it("shows a bot that is not set up yet, with no token field filled", async () => {
+    stubFetch();
+    renderApp();
+    expect(await screen.findByText("Not configured")).toBeInTheDocument();
+    expect(screen.getByLabelText("Bot token")).toHaveValue("");
+  });
+
+  it("reports a stored and connected bot from the stored credentials, never from a value", async () => {
+    stubFetch({
+      credentials: [
+        { key: "telegram.bot_token", configured: true },
+        { key: "telegram.webhook_secret", configured: true },
+      ],
+    });
+    renderApp();
+    expect(await screen.findByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("Configured")).toBeInTheDocument();
+  });
+
+  it("lets an owner test the bot with a read-only call and says so", async () => {
+    const calls: string[] = [];
+    stubFetch({ credentials: [{ key: "telegram.bot_token", configured: true }], calls });
+    renderApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Test bot" }));
+    expect(await screen.findByText(/Test passed\. telegram test ok/)).toBeInTheDocument();
+    expect(calls).toContain("POST /clients/alpha/integrations/telegram/test");
+    expect(calls.some((c) => c.includes("telegram/connect"))).toBe(false);
+  });
+
+  it("saves a token write-only and connects the bot", async () => {
+    const calls: string[] = [];
+    stubFetch({ calls });
+    renderApp();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Bot token"), "123456:ABC-secret");
+    await user.click(screen.getByRole("button", { name: "Save token" }));
+    expect(await screen.findByText(/Connected\. telegram connect ok/)).toBeInTheDocument();
+    expect(calls).toContain("PUT /clients/alpha/integrations/telegram.bot_token");
+    expect(calls).toContain("POST /clients/alpha/integrations/telegram/connect");
+    expect(screen.getByLabelText("Bot token")).toHaveValue("");
+  });
+
+  it("leaves the bot to an owner: another role cannot change it", async () => {
+    stubFetch({ role: "editor", credentials: [{ key: "telegram.bot_token", configured: true }] });
+    renderApp();
+    expect(await screen.findByRole("button", { name: "Test bot" })).toBeDisabled();
+    expect(screen.getByLabelText("Bot token")).toBeDisabled();
   });
 });

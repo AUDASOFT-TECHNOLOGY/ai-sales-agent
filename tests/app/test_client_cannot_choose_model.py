@@ -33,6 +33,7 @@ CLIENT_ROUTES = {
     ("GET", "/client/v1/reporting"),
     ("GET", "/client/v1/reports"),
     ("GET", "/client/v1/reports/{day}"),
+    ("POST", "/client/v1/channel/email-activation"),
     ("POST", "/client/v1/channel/google/disconnect"),
     ("POST", "/client/v1/channel/google/start"),
     ("POST", "/client/v1/reports/generate"),
@@ -59,14 +60,12 @@ CLIENT_ROUTES = {
     ("GET", "/client/v1/source"),
     ("PUT", "/client/v1/source"),
     ("POST", "/client/v1/source/test"),
-    # Lot E: the channel (e-mail or WhatsApp) and the mailbox password; the API field is `channel`.
+    # Lot E: the channel (e-mail, Telegram or WhatsApp), chosen and worded by the client; the API
+    # field is `channel`. Connecting it is the platform's work: there is no route for a credential,
+    # a test of a server or a bot, or a connection (see `TestTheClientApiCarriesNothingTechnical`).
     ("GET", "/client/v1/channel"),
     ("PUT", "/client/v1/channel"),
-    ("PUT", "/client/v1/channel/credentials"),
-    ("DELETE", "/client/v1/channel/credentials"),
-    ("POST", "/client/v1/channel/test"),
-    # Telegram: connecting the client's own bot, and the links that let its prospects start it.
-    ("POST", "/client/v1/channel/connect"),
+    # Telegram: the links that let the client's prospects start the platform-connected bot.
     ("GET", "/client/v1/channel/invitations"),
     # The client's prospects, their conversations and its dashboard summary (read-only).
     ("GET", "/client/v1/prospects"),
@@ -173,6 +172,68 @@ class TestTheClientApiCarriesNoModel:
             "whatsapp_reconnect_required",
         }
         assert "test-model" not in client.get("/client/v1/auth/me").text
+
+
+TECHNICAL_PATH = re.compile(r"credential|connect|webhook|token|smtp|imap|secret", re.IGNORECASE)
+TECHNICAL_FIELD = re.compile(
+    r"password|token|secret|credential|webhook|smtp|imap|^username$|from_address|mailbox|"
+    r"connected|api_key|^host$|_host$|^port$|_port$",  # a server's host or port, not "reports"
+    re.IGNORECASE,
+)
+
+
+# The client's own Google authorization (Gmail mode) is the one place it acts on a connection: it
+# consents on Google's page, which Revansa never sees the password of, and it can withdraw that
+# consent. Neither route takes or gives a token, a password or a server.
+OWN_GOOGLE_AUTHORIZATION = {"/client/v1/channel/google/disconnect"}
+# `mailbox_sync` is a status word about reading replies, not a mailbox setting.
+STATUS_FIELDS = {
+    "/client/v1/channel/google": {"mailbox_sync"},
+    "/client/v1/channel/google/disconnect": {"mailbox_sync"},
+}
+
+
+class TestTheClientApiCarriesNothingTechnical:
+    """The client never configures a channel's or a source's technology: nothing in its API takes or
+    gives a token, a password, a server, a login or a webhook. The platform (Admin) does that."""
+
+    def test_no_client_route_is_about_a_credential_or_a_connection(self, h):
+        spec = create_app(h.application, run_scheduler=False).openapi()
+        paths = [p for p in spec["paths"] if p.startswith("/client/v1")]
+        assert paths and not [
+            p for p in paths if TECHNICAL_PATH.search(p) and p not in OWN_GOOGLE_AUTHORIZATION
+        ]
+
+    def test_no_request_or_response_field_is_technical(self, h):
+        spec = create_app(h.application, run_scheduler=False).openapi()
+        schemas = spec["components"]["schemas"]
+
+        def names(node, seen=()):
+            if isinstance(node, dict):
+                if "$ref" in node:
+                    ref = node["$ref"].rsplit("/", 1)[-1]
+                    return set() if ref in seen else names(schemas[ref], (*seen, ref))
+                found = set(node.get("properties", {}))
+                for value in node.values():
+                    found |= names(value, seen)
+                return found
+            if isinstance(node, list):
+                return set().union(*(names(item, seen) for item in node)) if node else set()
+            return set()
+
+        # `/profile/password` is the client's own login password for Revansa, not a technical secret.
+        for path, operations in spec["paths"].items():
+            if not path.startswith("/client/v1") or path.startswith("/client/v1/profile"):
+                continue
+            if path.startswith("/client/v1/auth"):
+                continue
+            for operation in operations.values():
+                fields = names(operation) | {p["name"] for p in operation.get("parameters", [])}
+                allowed = STATUS_FIELDS.get(path, set())
+                assert not {f for f in fields - allowed if TECHNICAL_FIELD.search(f)}, (
+                    path,
+                    fields,
+                )
 
 
 FORGED = [

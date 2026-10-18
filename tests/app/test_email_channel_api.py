@@ -1,20 +1,21 @@
-"""`/client/v1/channel` and `/admin/v1/.../channels`: who may use which channel, and the mailbox.
+"""`/client/v1/channel` and `/admin/v1/.../channels`: who may use which channel, and what a client says.
 
 Covers: authentication and isolation between clients; the Admin's authority (the global list, a
 client's exceptions, who may write them) and the client's choice only among what is allowed; what a
-client may change (its channel and its mailbox's non-secret settings) and what it may not (anything
-of WhatsApp or Meta, the model, the mode); version conflicts and validation, with nothing written on
-a refusal and nothing echoed back; the password's whole life (stored write-only, never in any
-response, error, audit event or log); the connection test through a double of the mail servers; a
-mailbox that belongs to one client only; and the readiness check that keeps an agent from starting
-on a channel that is not ready.
+client may change (its channel and how its e-mails are worded) and what it may not (anything
+technical -- servers, ports, logins, passwords, tokens, webhooks -- anything of WhatsApp or Meta, the
+model, the mode); version conflicts and validation, with nothing written on a refusal and nothing
+echoed back; that no route lets a client write, remove, test or connect a credential; and where the
+channel stands (ready, waiting for the platform, action required) in words with nothing technical.
 
-The mail servers are doubles: nothing here proves a real server accepts the login.
+The mail servers are never contacted: nothing here proves a real server accepts the login.
 """
 
+import contextlib
 import json
 import logging
 from dataclasses import asdict
+from typing import ClassVar
 
 import pytest
 from test_admin_clients_api import PASSWORD
@@ -22,16 +23,20 @@ from test_client_agent_api import AGENT, READINESS, START, World, check_ids
 
 from sales_app.admin_auth import AdminRole
 from sales_app.api.admin_clients import publish_client_settings
-from sales_app.connection_tests import MailProbeFailure
-from sales_app.secret_store import InMemorySecretAudit, InMemorySecretStore, client_scope
+from sales_app.secret_store import (
+    GLOBAL_SCOPE,
+    InMemorySecretAudit,
+    InMemorySecretStore,
+    client_scope,
+)
 
 CHANNEL = "/client/v1/channel"
-CREDENTIALS = f"{CHANNEL}/credentials"
-TEST = f"{CHANNEL}/test"
 GLOBAL = "/admin/v1/settings/channels"
 SECRET = "S3cret-mail-pass!"
-OTHER_SECRET = "An0ther-Mail-pass?"
-MAIL = {
+# What a client may say about its e-mails: nothing but wording.
+MAIL = {"from_name": "Naga Sales", "subject": "About your enquiry"}
+# What an administrator wires for a client that keeps a mailbox of its own (never typed by a client).
+LEGACY_MAILBOX = {
     "from_address": "sales@example.org",
     "from_name": "Naga Sales",
     "username": "sales@example.org",
@@ -40,39 +45,11 @@ MAIL = {
 }
 
 
-class Probe:
-    """Stands for the two mail servers: records what it was asked, fails as told."""
-
-    def __init__(self):
-        self.calls: list[tuple[str, str]] = []
-        self.smtp_failure: str | None = None
-        self.imap_failure: str | None = None
-
-    def __call__(self, settings, password):
-        self.calls.append((settings.smtp_host, password))
-        probe = self
-
-        class _Probe:
-            def check_smtp(self):
-                if probe.smtp_failure:
-                    raise MailProbeFailure(probe.smtp_failure)
-
-            def check_imap(self):
-                if probe.imap_failure:
-                    raise MailProbeFailure(probe.imap_failure)
-
-        return _Probe()
-
-
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    from sales_app.api import client_channel
-
-    monkeypatch.setattr(client_channel, "TEST_MIN_INTERVAL_SECONDS", 0.0)
+def world(tmp_path):
     audit = InMemorySecretAudit()
     w = World(tmp_path, secret_store=InMemorySecretStore(), secret_audit=audit)
-    w.audit, w.probe = audit, Probe()
-    w.app_kwargs = {"mail_probe": w.probe}
+    w.audit = audit
     yield w
     w.application.close()
 
@@ -108,12 +85,26 @@ def choose(client, channel="email", settings=MAIL, expected="current"):
     return client.put(CHANNEL, json=body)
 
 
-def save_password(client, value=SECRET):
-    return client.put(CREDENTIALS, json={"password": value})
-
-
-def stored_password(world, cid="alpha"):
-    return world.application.credentials.reveal(client_scope(cid), "email.password")
+def wire_legacy_mailbox(world, cid="alpha", *, password=True):
+    """What the Admin does for a client with a mailbox of its own: the servers in its settings and
+    the password in the credential store. The client does neither."""
+    current = world.config_store.current(cid)
+    publish_client_settings(
+        world.application,
+        cid,
+        {"channel": {"provider": "email", "settings": LEGACY_MAILBOX}},
+        expected_version=current.version if current else None,
+        author="root",
+        top_keys=(),
+        sections={"channel": ("provider", "settings")},
+    )
+    if world.application.registry.get_config(cid) is not None:  # the running agent takes it
+        with contextlib.suppress(Exception):
+            world.application.runtime_manager.refresh_client(cid)
+    if password:
+        world.application.credentials.save(
+            client_scope(cid), "email.password", SECRET, actor="root", apply=True
+        )
 
 
 def history(world, cid="alpha"):
@@ -123,16 +114,7 @@ def history(world, cid="alpha"):
 # ---- authentication -------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("method", "url"),
-    [
-        ("get", CHANNEL),
-        ("put", CHANNEL),
-        ("put", CREDENTIALS),
-        ("delete", CREDENTIALS),
-        ("post", TEST),
-    ],
-)
+@pytest.mark.parametrize(("method", "url"), [("get", CHANNEL), ("put", CHANNEL)])
 def test_every_client_route_needs_a_client_session(world, method, url):
     response = getattr(world.anonymous(), method)(url, **({"json": {}} if method == "put" else {}))
     assert response.status_code == 401
@@ -261,10 +243,11 @@ class TestTheAdminsDecision:
 
 
 class TestTheClientsChoice:
-    def test_it_sees_only_the_channels_it_may_choose(self, alpha, admin):
+    def test_it_sees_only_the_channels_it_may_choose(self, world, alpha, admin):
+        wire_whatsapp(world)
         body = alpha.get(CHANNEL).json()
         assert body["channel"] == "whatsapp" and [o["key"] for o in body["options"]] == ["whatsapp"]
-        assert body["email"] is None and body["credential"] is None and body["authorized"] is True
+        assert body["email"] is None and body["authorized"] is True and body["status"] == "ready"
         allow_email(admin)
         assert [o["key"] for o in alpha.get(CHANNEL).json()["options"]] == ["email", "whatsapp"]
 
@@ -277,17 +260,25 @@ class TestTheClientsChoice:
     def test_a_refusal_says_the_same_for_a_channel_that_does_not_exist(self, alpha):
         assert choose(alpha, "carrier_pigeon", settings=None).status_code == 422
 
-    def test_an_allowed_channel_is_chosen_and_its_settings_kept(self, world, alpha, admin):
+    def test_an_allowed_channel_is_chosen_with_wording_only(self, world, alpha, admin):
         allow_email(admin)
         response = choose(alpha)
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["channel"] == "email" and body["authorized"] is True
-        assert body["email"]["from_address"] == "sales@example.org"
-        assert body["email"]["smtp_port"] == 587 and body["email"]["imap_port"] == 993
+        sending = body["email"].pop("sending")  # the daily limit's state: said, never a setting
+        assert sending["state"] in {"ok", "not_set", "reached", "unavailable"}
+        assert body["email"] == {
+            "mode": "platform",
+            "from_name": "Naga Sales",
+            "sender_name_confirmed": True,
+            "activation": None,
+            "subject": "About your enquiry",
+        }
         document = dict(world.config_store.current("alpha").document)
         assert document["channel"]["provider"] == "email"
-        assert document["channel"]["settings"]["smtp_host"] == "smtp.example.org"
+        # What the client chose is the platform's mailbox: no server, port or login in it.
+        assert dict(document["channel"]["settings"]) == {"mode": "platform", **MAIL}
 
     def test_an_exception_for_one_client_does_not_open_the_channel_to_another(
         self, alpha, beta, admin
@@ -301,22 +292,25 @@ class TestTheClientsChoice:
         assert choose(alpha).status_code == 200
         assert choose(alpha, settings={"subject": "Hello"}, expected=None).status_code == 409
 
-    def test_an_invalid_mailbox_is_refused_without_repeating_a_value(self, world, alpha, admin):
+    def test_invalid_wording_is_refused_without_repeating_a_value(self, world, alpha, admin):
         allow_email(admin)
         before = len(history(world))
-        response = choose(alpha, settings=MAIL | {"smtp_port": 8080})
-        assert response.status_code == 422 and "8080" not in response.text
-        response = choose(alpha, settings=MAIL | {"from_address": "not an address"})
-        assert response.status_code == 422 and "not an address" not in response.text
+        response = choose(alpha, settings={"from_name": "Sales <script>"})
+        assert response.status_code == 422 and "script" not in response.text
+        response = choose(alpha, settings={"subject": "two\nlines"})
+        assert response.status_code == 422 and "two" not in response.text
         assert len(history(world)) == before
 
     def test_a_partial_change_keeps_the_rest(self, alpha, admin):
         allow_email(admin)
         choose(alpha)
-        response = choose(alpha, settings={"subject": "About your enquiry"})
+        response = choose(alpha, settings={"subject": "Following up"})
         assert response.status_code == 200
         email = response.json()["email"]
-        assert email["subject"] == "About your enquiry" and email["smtp_host"] == "smtp.example.org"
+        assert {k: email[k] for k in ("from_name", "subject")} == {
+            "from_name": "Naga Sales",
+            "subject": "Following up",
+        }
 
     def test_the_same_choice_again_publishes_nothing(self, world, alpha, admin):
         allow_email(admin)
@@ -346,6 +340,170 @@ class TestTheClientsChoice:
     def test_email_settings_cannot_go_with_another_channel(self, alpha):
         assert choose(alpha, "whatsapp").status_code == 422
 
+    def test_wording_is_applied_to_a_mailbox_the_admin_wired_without_changing_it(
+        self, world, alpha, admin
+    ):
+        allow_email(admin)
+        wire_legacy_mailbox(world)
+        response = choose(alpha, settings={"subject": "A new subject"})
+        assert response.status_code == 200, response.text
+        assert set(response.json()["email"]) == {
+            "mode",
+            "from_name",
+            "sender_name_confirmed",
+            "subject",
+            "activation",
+            "sending",
+        }  # wording and the mode: never a server, a login or a password
+        stored = dict(world.config_store.current("alpha").document)["channel"]["settings"]
+        assert stored["smtp_host"] == "smtp.example.org" and stored["subject"] == "A new subject"
+
+
+# ---- nothing technical is the client's --------------------------------------------------------
+
+TECHNICAL_WORDS = (
+    "password",
+    "token",
+    "smtp",
+    "imap",
+    "webhook",
+    "server",
+    "port",
+    "login",
+    "secret",
+)
+TECHNICAL_KEYS = {
+    "password",
+    "bot_token",
+    "access_token",
+    "token",
+    "credential",
+    "secret",
+    "smtp_host",
+    "smtp_port",
+    "smtp_security",
+    "imap_host",
+    "imap_port",
+    "imap_security",
+    "username",
+    "mailbox",
+    "from_address",
+    "webhook",
+    "connected",
+    "problem",
+}
+CREDENTIAL_ROUTES = [
+    ("put", "/client/v1/channel/credentials"),
+    ("delete", "/client/v1/channel/credentials"),
+    ("post", "/client/v1/channel/test"),
+    ("post", "/client/v1/channel/connect"),
+    ("put", "/client/v1/source/credentials"),
+    ("delete", "/client/v1/source/credentials"),
+]
+
+
+def _keys(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from _keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _keys(item)
+
+
+def _is_plain(text):
+    return not any(word in text.lower() for word in TECHNICAL_WORDS)
+
+
+class TestNoTechnicalConfiguration:
+    @pytest.mark.parametrize(("method", "url"), CREDENTIAL_ROUTES)
+    def test_there_is_no_route_to_write_remove_test_or_connect_a_credential(
+        self, world, alpha, admin, method, url
+    ):
+        allow_email(admin)
+        choose(alpha)
+        body = {"json": {"password": SECRET, "bot_token": SECRET, "access_token": SECRET}}
+        response = getattr(alpha, method)(url, **(body if method == "put" else {}))
+        assert response.status_code in (404, 405)
+        assert SECRET not in response.text
+        for key in ("email.password", "telegram.bot_token", "hubspot.access_token"):
+            assert world.application.credentials.reveal(client_scope("alpha"), key) is None
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "smtp_host",
+            "smtp_port",
+            "smtp_security",
+            "imap_host",
+            "imap_port",
+            "imap_security",
+            "username",
+            "mailbox",
+            "from_address",
+            "password",
+            "bot_token",
+            "access_token",
+            "webhook_url",
+            "mode",
+        ],
+    )
+    def test_a_technical_email_setting_is_refused_and_not_echoed(self, world, alpha, admin, name):
+        allow_email(admin)
+        before = len(history(world))
+        response = choose(alpha, settings=MAIL | {name: "leak-me-please-1234"})
+        assert response.status_code == 422 and "leak-me-please-1234" not in response.text
+        assert len(history(world)) == before
+
+    @pytest.mark.parametrize(
+        "name", ["password", "bot_token", "access_token", "webhook_url", "smtp_host"]
+    )
+    def test_a_technical_key_beside_the_channel_is_refused_and_not_echoed(
+        self, world, alpha, admin, name
+    ):
+        allow_email(admin)
+        version = alpha.get(CHANNEL).json()["version"]
+        before = len(history(world))
+        response = alpha.put(
+            CHANNEL,
+            json={"expected_version": version, "channel": "email", "email": MAIL}
+            | {name: "leak-me-please-1234"},
+        )
+        assert response.status_code == 422 and "leak-me-please-1234" not in response.text
+        assert len(history(world)) == before
+
+    def test_a_response_carries_no_technical_field_or_secret(self, world, alpha, admin, caplog):
+        caplog.set_level(logging.DEBUG)
+        allow_email(admin)
+        wire_legacy_mailbox(world)
+        response = alpha.get(CHANNEL)
+        assert response.status_code == 200
+        body = response.json()
+        assert not (set(_keys(body)) & TECHNICAL_KEYS)
+        for hidden in (SECRET, "smtp.example.org", "imap.example.org", "sales@example.org"):
+            assert hidden not in response.text and hidden not in caplog.text
+        assert body["status"] == "ready"
+
+    def test_an_answer_to_a_change_carries_none_either(self, world, alpha, admin):
+        allow_email(admin)
+        wire_legacy_mailbox(world)
+        response = choose(alpha, settings={"subject": "New subject"})
+        assert response.status_code == 200
+        assert not (set(_keys(response.json())) & TECHNICAL_KEYS)
+        assert SECRET not in response.text and "smtp.example.org" not in response.text
+
+    def test_a_refusal_never_carries_a_secret(self, world, alpha, admin):
+        wire_legacy_mailbox(world)
+        for response in (choose(alpha), choose(alpha, "carrier_pigeon", settings=None)):
+            assert SECRET not in response.text and "smtp.example.org" not in response.text
+
+    def test_the_audit_trail_holds_no_secret(self, world, alpha, admin):
+        allow_email(admin)
+        wire_legacy_mailbox(world)
+        choose(alpha)
+        assert SECRET not in json.dumps([asdict(e) for e in world.audit.recent()], default=str)
+
 
 class TestWhatsAppAndMetaStayWithTheAdmin:
     @pytest.mark.parametrize(
@@ -370,12 +528,6 @@ class TestWhatsAppAndMetaStayWithTheAdmin:
         assert not any(str(v) in response.text for v in _leaves(extra))
         assert len(history(world)) == before
 
-    def test_a_mailbox_setting_cannot_be_a_password_or_a_meta_field(self, alpha, admin):
-        allow_email(admin)
-        for name in ("password", "access_token", "phone_number_id", "app_secret"):
-            response = choose(alpha, settings=MAIL | {name: "leak-me-please-1234"})
-            assert response.status_code == 422 and "leak-me-please-1234" not in response.text
-
     def test_a_response_never_shows_a_meta_credential(self, world, alpha):
         world.application.credentials.save(
             client_scope("alpha"), "whatsapp.access_token", "EAAG-never-shown", actor="root"
@@ -384,193 +536,90 @@ class TestWhatsAppAndMetaStayWithTheAdmin:
         assert "EAAG-never-shown" not in text and "whatsapp.access_token" not in text
         assert "phone_number_id" not in text
 
-    def test_a_client_cannot_write_a_meta_credential_through_the_password_route(
+
+# ---- where the channel stands ---------------------------------------------------------------
+
+
+def wire_whatsapp(world):
+    """What the Admin stores for WhatsApp: it is ready only once every Meta credential is stored."""
+    credentials = world.application.credentials
+    credentials.save(GLOBAL_SCOPE, "whatsapp.app_secret", "app-secret-marker", actor="test")
+    credentials.save(GLOBAL_SCOPE, "whatsapp.verify_token", "verify-marker", actor="test")
+    scope = client_scope("alpha")
+    credentials.save(scope, "whatsapp.access_token", "token-alpha", actor="test")
+    credentials.save(scope, "whatsapp.phone_number_id", "1234567890001", actor="test")
+
+
+class TestWhereTheChannelStands:
+    def test_whatsapp_waits_for_the_platform_until_meta_is_wired(self, alpha):
+        body = alpha.get(CHANNEL).json()
+        assert body["status"] == "waiting_platform" and body["status_message"]
+
+    def test_whatsapp_is_ready_once_every_meta_credential_is_stored(self, world, alpha):
+        wire_whatsapp(world)
+        body = alpha.get(CHANNEL).json()
+        assert body["status"] == "ready" and body["status_message"] is None
+
+    def test_a_platform_mailbox_not_yet_assigned_is_waiting_for_the_platform(self, alpha, admin):
+        allow_email(admin)
+        body = choose(alpha).json()
+        assert body["status"] == "waiting_platform"
+        assert body["status_message"] and _is_plain(body["status_message"])
+
+    def test_a_mailbox_the_admin_wired_is_ready(self, world, alpha, admin):
+        allow_email(admin)
+        wire_legacy_mailbox(world)
+        assert alpha.get(CHANNEL).json()["status"] == "ready"
+
+    def test_a_mailbox_missing_its_password_is_waiting_for_the_platform_not_for_the_client(
         self, world, alpha, admin
     ):
         allow_email(admin)
-        choose(alpha)
-        response = alpha.put(CREDENTIALS, json={"access_token": "EAAG-never-stored"})
-        assert response.status_code == 422 and "EAAG-never-stored" not in response.text
-        assert (
-            world.application.credentials.reveal(client_scope("alpha"), "whatsapp.access_token")
-            is None
-        )
+        wire_legacy_mailbox(world, password=False)
+        body = alpha.get(CHANNEL).json()
+        assert body["status"] == "waiting_platform" and _is_plain(body["status_message"])
 
-
-# ---- the password ---------------------------------------------------------------------------
-
-
-class TestThePassword:
-    @pytest.fixture
-    def emailing(self, alpha, admin):
+    def test_a_channel_the_admin_took_away_asks_the_client_to_choose_another(
+        self, world, alpha, admin
+    ):
         allow_email(admin)
-        assert choose(alpha).status_code == 200
-        return alpha
-
-    def test_it_is_stored_and_never_returned(self, world, emailing, caplog):
-        caplog.set_level(logging.DEBUG)
-        response = save_password(emailing)
-        assert response.status_code == 200
-        assert response.json()["configured"] is True and "updated_at" in response.json()
-        assert stored_password(world) == SECRET
-        for text in (response.text, emailing.get(CHANNEL).text, caplog.text):
-            assert SECRET not in text
-        events = json.dumps([asdict(e) | {"at": ""} for e in world.audit.recent()])
-        assert SECRET not in events
-
-    def test_the_status_says_stored_or_not(self, emailing):
-        assert emailing.get(CHANNEL).json()["credential"]["configured"] is False
-        save_password(emailing)
-        assert emailing.get(CHANNEL).json()["credential"]["configured"] is True
-
-    def test_it_can_be_replaced_and_removed(self, world, emailing):
-        save_password(emailing)
-        save_password(emailing, OTHER_SECRET)
-        assert stored_password(world) == OTHER_SECRET
-        response = emailing.delete(CREDENTIALS)
-        assert response.status_code == 200 and response.json()["configured"] is False
-        assert stored_password(world) is None
-
-    @pytest.mark.parametrize(
-        "body",
-        [
-            {},
-            {"password": SECRET, "extra": 1},
-            {"pass": SECRET},
-            {"access_token": SECRET},
-            {"password": 12345},
-            [SECRET],
-        ],
-    )
-    def test_any_other_body_is_refused_without_being_echoed(self, world, emailing, body):
-        response = emailing.put(CREDENTIALS, json=body)
-        assert response.status_code == 422 and SECRET not in response.text
-        assert stored_password(world) is None
-
-    def test_a_body_that_is_not_json_is_refused(self, emailing):
-        response = emailing.put(
-            CREDENTIALS, content=SECRET, headers={"Content-Type": "application/json"}
-        )
-        assert response.status_code == 400 and SECRET not in response.text
-
-    def test_a_value_the_store_refuses_is_refused_without_repeating_it(self, emailing):
-        response = emailing.put(CREDENTIALS, json={"password": "line one\nline two " + SECRET})
-        assert response.status_code == 422 and SECRET not in response.text
-
-    def test_each_client_has_its_own(self, world, alpha, beta, admin):
-        admin.put(GLOBAL, json={"allowed": ["whatsapp", "email"]})
-        choose(alpha)
-        choose(
-            beta,
-            settings=MAIL | {"username": "other@example.org", "imap_host": "imap2.example.org"},
-        )
-        save_password(alpha, SECRET)
-        save_password(beta, OTHER_SECRET)
-        assert stored_password(world, "alpha") == SECRET
-        assert stored_password(world, "beta") == OTHER_SECRET
-
-    def test_a_client_on_whatsapp_has_no_password_to_give(self, alpha):
-        assert save_password(alpha).status_code == 409
-        assert alpha.delete(CREDENTIALS).status_code == 409
-
-    def test_a_channel_the_admin_has_taken_away_takes_no_password(self, emailing, admin):
+        wire_legacy_mailbox(world)
         admin.put("/admin/v1/clients/alpha/channels", json={"removed": ["email"]})
-        response = save_password(emailing)
-        assert response.status_code == 403 and SECRET not in response.text
-
-
-# ---- one mailbox, one client ----------------------------------------------------------------
-
-
-def test_a_mailbox_another_client_uses_cannot_be_used_and_whose_it_is_is_not_said(
-    alpha, beta, admin
-):
-    allow_email(admin)
-    assert choose(alpha).status_code == 200
-    response = choose(beta)
-    assert response.status_code == 409
-    assert "alpha" not in response.text and "sales@example.org" not in response.text
-    assert beta.get(CHANNEL).json()["channel"] == "whatsapp"
-
-
-def test_the_same_client_may_keep_its_own_mailbox(alpha, admin):
-    allow_email(admin)
-    assert choose(alpha).status_code == 200
-    assert choose(alpha, settings={"subject": "Hello again"}).status_code == 200
-
-
-# ---- the test -------------------------------------------------------------------------------
-
-
-class TestTheConnectionTest:
-    @pytest.fixture
-    def ready(self, world, alpha, admin):
-        allow_email(admin)
-        choose(alpha)
-        save_password(alpha)
-        return alpha
-
-    def test_both_servers_answer(self, world, ready):
-        response = ready.post(TEST)
-        assert response.status_code == 200
-        body = response.json()
-        assert body["ok"] is True and body["details"] == {"smtp": "ok", "imap": "ok"}
-        assert world.probe.calls == [("smtp.example.org", SECRET)]  # the stored one was used
-        assert SECRET not in response.text
-
-    @pytest.mark.parametrize("kind", ["auth", "unreachable", "refused"])
-    def test_a_failure_is_a_fixed_sentence(self, world, ready, kind):
-        world.probe.smtp_failure = kind
-        body = ready.post(TEST).json()
-        assert body["ok"] is False and body["details"]["smtp"] == kind
-        assert body["details"]["imap"] == "ok"
-        assert SECRET not in json.dumps(body) and "example.org" not in body["message"]
-
-    def test_the_mailbox_can_fail_while_sending_works(self, world, ready):
-        world.probe.imap_failure = "auth"
-        body = ready.post(TEST).json()
-        assert body["ok"] is False and body["details"] == {"smtp": "ok", "imap": "auth"}
-
-    def test_nothing_is_tested_before_the_mailbox_is_set_up(self, world, alpha, admin):
-        allow_email(admin)
-        choose(alpha)  # no password yet
-        body = alpha.post(TEST).json()
-        assert body["ok"] is False and world.probe.calls == []
-
-    def test_a_channel_with_nothing_to_test_says_so(self, alpha):
-        assert alpha.post(TEST).status_code == 409
-
-    def test_it_is_refused_when_the_admin_forbids_the_channel(self, ready, admin):
-        admin.put("/admin/v1/clients/alpha/channels", json={"removed": ["email"]})
-        assert ready.post(TEST).status_code == 403
-
-    def test_the_test_is_rate_limited(self, world, ready, monkeypatch):
-        from sales_app.api import client_channel
-
-        monkeypatch.setattr(client_channel, "TEST_MIN_INTERVAL_SECONDS", 60.0)
-        ready.post(TEST)
-        assert ready.post(TEST).status_code == 429
+        body = alpha.get(CHANNEL).json()
+        assert body["authorized"] is False and body["status"] == "action_required"
+        assert "choose another" in body["status_message"].lower()
 
 
 # ---- readiness ------------------------------------------------------------------------------
 
 
 class TestReadiness:
+    def checks(self, client):
+        return {c["id"]: c for c in client.get(READINESS).json()["checks"]}
+
     def test_a_client_on_whatsapp_keeps_its_checks(self, alpha):
         body = alpha.get(READINESS).json()
         ids = check_ids(body, True) | check_ids(body, False)
         assert "whatsapp_number" in ids and "channel_ready" not in ids
 
-    def test_a_client_on_email_is_asked_for_its_mailbox_not_a_whatsapp_number(
-        self, world, alpha, admin
-    ):
+    def test_a_client_on_email_is_not_asked_for_a_whatsapp_number(self, alpha, admin):
         allow_email(admin)
         choose(alpha)
-        checks = {c["id"]: c for c in alpha.get(READINESS).json()["checks"]}
+        checks = self.checks(alpha)
         assert "whatsapp_number" not in checks
         assert checks["channel_ready"]["ok"] is False
 
-    def test_a_channel_chosen_without_its_settings_says_so(self, world, alpha, admin):
+    def test_what_the_platform_has_to_do_is_said_without_anything_technical(self, alpha, admin):
+        allow_email(admin)
+        choose(alpha)
+        message = self.checks(alpha)["channel_ready"]["message"]
+        assert _is_plain(message) and "nothing for you to do" in message.lower()
+        reasons = {r["id"]: r["message"] for r in alpha.get(AGENT).json()["reasons"]}
+        assert reasons["channel_ready"] == message
+
+    def test_a_channel_chosen_without_any_wording_still_waits_for_the_platform(
+        self, world, alpha, admin
+    ):
         allow_email(admin)
         version = alpha.get(CHANNEL).json()["version"]
         publish_client_settings(  # what an administrator could publish: the channel, no mailbox
@@ -582,45 +631,328 @@ class TestReadiness:
             top_keys=(),
             sections={"channel": ("provider", "settings")},
         )
-        checks = {c["id"]: c for c in alpha.get(READINESS).json()["checks"]}
-        assert checks["channel_ready"]["ok"] is False
-        assert "email settings" in checks["channel_ready"]["message"].lower()
+        check = self.checks(alpha)["channel_ready"]
+        assert check["ok"] is False and _is_plain(check["message"])
 
-    def test_the_password_is_the_last_thing_missing(self, alpha, admin):
+    def test_the_channel_is_ready_once_the_admin_has_wired_it(self, world, alpha, admin):
         allow_email(admin)
         choose(alpha)
-        checks = {c["id"]: c for c in alpha.get(READINESS).json()["checks"]}
-        assert "password" in checks["channel_ready"]["message"].lower()
-        save_password(alpha)
-        checks = {c["id"]: c for c in alpha.get(READINESS).json()["checks"]}
-        assert checks["channel_ready"]["ok"] is True
+        assert self.checks(alpha)["channel_ready"]["ok"] is False
+        wire_legacy_mailbox(world)
+        assert self.checks(alpha)["channel_ready"]["ok"] is True
 
-    def test_a_forbidden_channel_is_not_ready_even_when_fully_set_up(self, alpha, admin):
+    def test_a_forbidden_channel_is_not_ready_even_when_fully_wired(self, world, alpha, admin):
         allow_email(admin)
-        choose(alpha)
-        save_password(alpha)
+        wire_legacy_mailbox(world)
         admin.put("/admin/v1/clients/alpha/channels", json={"removed": ["email"]})
-        checks = {c["id"]: c for c in alpha.get(READINESS).json()["checks"]}
-        assert checks["channel_ready"]["ok"] is False
-        assert "not authorized" in checks["channel_ready"]["message"]
+        check = self.checks(alpha)["channel_ready"]
+        assert check["ok"] is False and "no longer available" in check["message"]
         assert alpha.get(CHANNEL).json()["authorized"] is False
 
     def test_the_agent_cannot_start_on_a_forbidden_channel(self, world, alpha, admin):
         allow_email(admin)
-        choose(alpha)
-        save_password(alpha)
+        wire_legacy_mailbox(world)
         admin.put("/admin/v1/clients/alpha/channels", json={"removed": ["email"]})
         response = alpha.post(START)
         assert response.status_code == 409
         assert "channel_ready" in {r["id"] for r in response.json()["detail"]["reasons"]}
         assert alpha.get(AGENT).json()["active"] is False
 
-    def test_the_missing_password_is_a_reason_the_client_can_act_on(self, alpha, admin):
+
+class _AcceptingLogin:
+    """Both logins of a mailbox are accepted (a double: no server is contacted)."""
+
+    def __init__(self, smtp, imap):
+        pass
+
+    def check_smtp(self):
+        pass
+
+    def check_imap(self):
+        pass
+
+
+class TestAPlatformMailboxNeedsAProvenLogin:
+    """Stored fields are not enough: the client's status and the agent's start follow the proof."""
+
+    SERVERS: ClassVar[dict[str, str]] = {
+        "email.platform_smtp_host": "smtp.platform.example",
+        "email.platform_smtp_port": "465",
+        "email.platform_smtp_security": "ssl",
+        "email.platform_imap_host": "imap.platform.example",
+        "email.platform_imap_port": "993",
+        "email.platform_imap_security": "ssl",
+    }
+
+    def wire(self, admin, cid="alpha", address="alpha@mail.example.org", password="Pw-alpha-1234"):
+        for key, value in self.SERVERS.items():
+            assert admin.put(
+                f"/admin/v1/settings/integrations/{key}", json={"value": value}
+            ).is_success
+        base = f"/admin/v1/clients/{cid}/integrations"
+        assert admin.put(f"{base}/email.platform_mailbox", json={"value": address}).is_success
+        assert admin.put(f"{base}/email.password", json={"value": password}).is_success
+
+    def channel_ready(self, client):
+        return {c["id"]: c for c in client.get(READINESS).json()["checks"]}["channel_ready"]["ok"]
+
+    def test_stored_but_unproven_is_not_ready_and_the_agent_does_not_start(
+        self, world, alpha, admin
+    ):
         allow_email(admin)
         choose(alpha)
-        reasons = {r["id"]: r["message"] for r in alpha.get(AGENT).json()["reasons"]}
-        assert "channel_ready" in reasons
-        assert "administrator" not in reasons["channel_ready"].lower()
+        self.wire(admin)
+        body = alpha.get(CHANNEL).json()
+        assert body["status"] == "waiting_platform" and _is_plain(body["status_message"])
+        assert self.channel_ready(alpha) is False
+        response = alpha.post(START)
+        assert response.status_code == 409
+        assert "channel_ready" in {r["id"] for r in response.json()["detail"]["reasons"]}
+
+    def test_a_proven_login_makes_it_ready_and_a_new_password_voids_it(self, world, alpha, admin):
+        from sales_app.mailbox_proof import verify_client_mailbox
+
+        allow_email(admin)
+        choose(alpha)
+        self.wire(admin)
+        verify_client_mailbox(world.application, "alpha", _AcceptingLogin)
+        body = alpha.get(CHANNEL).json()
+        assert body["status"] == "ready" and body["status_message"] is None
+        assert self.channel_ready(alpha) is True
+        response = alpha.post(START)
+        assert "channel_ready" not in {
+            r["id"] for r in response.json().get("detail", {}).get("reasons", [])
+        }
+        admin.put(
+            "/admin/v1/clients/alpha/integrations/email.password", json={"value": "Other-Pw-5678"}
+        )
+        assert alpha.get(CHANNEL).json()["status"] == "waiting_platform"
+        assert self.channel_ready(alpha) is False
+
+    def test_the_proof_of_one_client_does_not_make_another_ready(self, world, alpha, beta, admin):
+        from sales_app.mailbox_proof import verify_client_mailbox
+
+        allow_email(admin)
+        choose(alpha)
+        choose(beta)
+        self.wire(admin)
+        self.wire(admin, "beta", "beta@mail.example.org", "Pw-beta-5678")
+        verify_client_mailbox(world.application, "alpha", _AcceptingLogin)
+        assert alpha.get(CHANNEL).json()["status"] == "ready"
+        assert beta.get(CHANNEL).json()["status"] == "waiting_platform"
+        assert self.channel_ready(beta) is False
+
+    def test_what_the_client_is_told_reveals_nothing(self, world, alpha, admin):
+        allow_email(admin)
+        choose(alpha)
+        self.wire(admin)
+        text = alpha.get(CHANNEL).text + alpha.get(READINESS).text + alpha.get(AGENT).text
+        for secret in ("alpha@mail.example.org", "Pw-alpha-1234", "smtp.platform.example"):
+            assert secret not in text
+
+
+class TestTheSenderName:
+    """Platform mailbox: the Sender Name is the client's own, confirmed by saving it; the commercial
+    name is only the proposal. A historical mailbox keeps its field as it always was."""
+
+    def email(self, client):
+        return client.get(CHANNEL).json()["email"]
+
+    def test_the_commercial_name_is_proposed_and_not_taken_for_a_confirmation(self, alpha, admin):
+        allow_email(admin)
+        body = choose(alpha, settings={"subject": "About your enquiry"}).json()
+        assert body["sender_name_proposal"] == "Alpha"
+        assert body["email"]["mode"] == "platform"
+        assert body["email"]["from_name"] is None
+        assert body["email"]["sender_name_confirmed"] is False
+
+    def test_the_proposal_is_known_before_email_is_chosen(self, alpha):
+        body = alpha.get(CHANNEL).json()
+        assert body["email"] is None and body["sender_name_proposal"] == "Alpha"
+
+    def test_saving_a_name_confirms_it_and_it_is_kept_by_later_changes(self, world, alpha, admin):
+        allow_email(admin)
+        choose(alpha, settings={"subject": "First"})
+        saved = choose(alpha, settings={"from_name": "Alpha Boutique", "subject": "First"}).json()
+        assert saved["email"]["from_name"] == "Alpha Boutique"
+        assert saved["email"]["sender_name_confirmed"] is True
+        assert saved["sender_name_proposal"] == "Alpha"  # the commercial name is a separate thing
+        # A change of subject alone neither erases nor re-proposes the confirmed name.
+        later = choose(alpha, settings={"subject": "Second"}).json()
+        assert (
+            later["email"]["from_name"] == "Alpha Boutique"
+            and later["email"]["subject"] == "Second"
+        )
+        # It can be changed after activation.
+        renamed = choose(alpha, settings={"from_name": "Alpha Studio"}).json()
+        assert renamed["email"]["from_name"] == "Alpha Studio"
+
+    def test_the_name_is_stored_in_the_clients_own_settings_only(self, world, alpha, beta, admin):
+        allow_email(admin)
+        choose(alpha, settings={"from_name": "Alpha Boutique"})
+        choose(beta, settings={"subject": "Hello"})
+        assert self.email(alpha)["from_name"] == "Alpha Boutique"
+        assert self.email(beta)["from_name"] is None
+        assert beta.get(CHANNEL).json()["sender_name_proposal"] == "Beta"
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Evil <evil@x.org>",
+            "Name" + chr(13) + chr(10) + "Bcc: victim@example.com",
+            'Quote "inside"',
+            "A, B",
+            "x" * 81,
+        ],
+    )
+    def test_a_name_that_could_hurt_a_header_is_refused_and_not_echoed(
+        self, world, alpha, admin, name
+    ):
+        allow_email(admin)
+        choose(alpha, settings={"subject": "First"})
+        before = len(history(world))
+        version = alpha.get(CHANNEL).json()["version"]
+        response = alpha.put(
+            CHANNEL,
+            json={"expected_version": version, "channel": "email", "email": {"from_name": name}},
+        )
+        assert response.status_code == 422
+        assert "victim@example.com" not in response.text and "evil@x.org" not in response.text
+        assert len(history(world)) == before
+
+    def test_a_historical_mailbox_keeps_a_visible_working_field(self, world, alpha, admin):
+        allow_email(admin)
+        wire_legacy_mailbox(world)
+        body = alpha.get(CHANNEL).json()
+        assert body["email"]["mode"] == "custom"
+        assert body["email"]["sender_name_confirmed"] is False  # nothing to confirm in this mode
+        changed = alpha.put(
+            CHANNEL,
+            json={
+                "expected_version": body["version"],
+                "channel": "email",
+                "email": {"from_name": "Own Name"},
+            },
+        ).json()
+        assert changed["email"]["mode"] == "custom" and changed["email"]["from_name"] == "Own Name"
+
+    def test_the_response_adds_no_technical_field(self, world, alpha, admin):
+        allow_email(admin)
+        body = choose(alpha, settings={"from_name": "Alpha Boutique"}).json()
+        assert set(body["email"]) == {
+            "mode",
+            "from_name",
+            "sender_name_confirmed",
+            "subject",
+            "activation",
+            "sending",
+        }
+        assert "smtp" not in json.dumps(body).lower() and "password" not in json.dumps(body).lower()
+
+    def test_changing_the_name_leaves_the_login_proof_alone(self, world, alpha, admin):
+        from sales_app.mailbox_proof import verify_client_mailbox
+
+        wiring = TestAPlatformMailboxNeedsAProvenLogin()
+        allow_email(admin)
+        choose(alpha, settings={"from_name": "Alpha First", "subject": "First"})
+        wiring.wire(admin)
+        verify_client_mailbox(world.application, "alpha", _AcceptingLogin)
+        assert alpha.get(CHANNEL).json()["status"] == "ready"
+        choose(alpha, settings={"from_name": "Alpha Boutique"})
+        body = alpha.get(CHANNEL).json()
+        assert body["status"] == "ready" and body["email"]["from_name"] == "Alpha Boutique"
+        assert wiring.channel_ready(alpha) is True
+
+
+class TestTheSenderNameIsConfirmedBeforeTheFirstSend:
+    """Platform mailbox: until the client has saved (confirmed) a Sender Name, the channel is not
+    ready, the agent cannot start and the client is told what to do. A historical mailbox is not
+    concerned."""
+
+    def wiring(self):
+        return TestAPlatformMailboxNeedsAProvenLogin()
+
+    def reasons(self, response):
+        return {r["id"]: r["message"] for r in response.json()["detail"]["reasons"]}
+
+    def test_no_confirmed_name_means_not_ready_and_the_client_is_told_what_to_do(
+        self, world, alpha, admin
+    ):
+        from sales_app.mailbox_proof import verify_client_mailbox
+
+        allow_email(admin)
+        choose(alpha, settings={"subject": "First"})
+        wiring = self.wiring()
+        wiring.wire(admin)
+        verify_client_mailbox(world.application, "alpha", _AcceptingLogin)  # logins are fine
+        body = alpha.get(CHANNEL).json()
+        assert body["status"] == "action_required"
+        assert "confirm your sender name" in body["status_message"].lower()
+        assert _is_plain(body["status_message"])
+        assert wiring.channel_ready(alpha) is False
+        response = alpha.post(START)
+        assert response.status_code == 409
+        assert "sender name" in self.reasons(response)["channel_ready"].lower()
+
+    def test_confirming_the_name_removes_that_obstacle_and_the_agent_can_start(
+        self, world, alpha, admin
+    ):
+        from sales_app.mailbox_proof import verify_client_mailbox
+
+        allow_email(admin)
+        choose(alpha, settings={"subject": "First"})
+        wiring = self.wiring()
+        wiring.wire(admin)
+        verify_client_mailbox(world.application, "alpha", _AcceptingLogin)
+        choose(alpha, settings={"from_name": "Alpha Boutique"})
+        assert alpha.get(CHANNEL).json()["status"] == "ready"
+        assert wiring.channel_ready(alpha) is True
+        response = alpha.post(START)
+        assert "channel_ready" not in {
+            r["id"] for r in response.json().get("detail", {}).get("reasons", [])
+        }
+
+    def test_the_name_is_the_last_step_not_a_substitute_for_the_platforms_work(
+        self, world, alpha, admin
+    ):
+        allow_email(admin)
+        choose(alpha, settings={"from_name": "Alpha Boutique"})  # confirmed, nothing else done
+        body = alpha.get(CHANNEL).json()
+        assert body["status"] == "waiting_platform"
+
+    def test_a_refused_new_name_leaves_the_old_one_active(self, world, alpha, admin):
+        from sales_app.mailbox_proof import verify_client_mailbox
+
+        allow_email(admin)
+        choose(alpha, settings={"from_name": "Alpha Boutique"})
+        self.wiring().wire(admin)
+        verify_client_mailbox(world.application, "alpha", _AcceptingLogin)
+        version = alpha.get(CHANNEL).json()["version"]
+        refused = alpha.put(
+            CHANNEL,
+            json={
+                "expected_version": version,
+                "channel": "email",
+                "email": {"from_name": "Bad <x>"},
+            },
+        )
+        assert refused.status_code == 422
+        body = alpha.get(CHANNEL).json()
+        assert body["email"]["from_name"] == "Alpha Boutique" and body["status"] == "ready"
+        assert body["version"] == version  # nothing was published
+
+    def test_a_historical_mailbox_needs_no_confirmation(self, world, alpha, admin):
+        allow_email(admin)
+        wire_legacy_mailbox(world)
+        body = alpha.get(CHANNEL).json()
+        assert body["status"] == "ready" and body["email"]["mode"] == "custom"
+
+    def test_each_client_confirms_its_own_name(self, world, alpha, beta, admin):
+        allow_email(admin)
+        choose(alpha, settings={"from_name": "Alpha Boutique"})
+        choose(beta, settings={"subject": "Hello"})
+        assert beta.get(CHANNEL).json()["status"] == "action_required"
+        assert alpha.get(CHANNEL).json()["status"] == "waiting_platform"
 
 
 # ---- helpers --------------------------------------------------------------------------------

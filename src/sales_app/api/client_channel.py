@@ -1,7 +1,12 @@
-"""Client API: how a client talks to its prospects (its channel), and the password that needs.
+"""Client API: how a client talks to its prospects (its channel), and nothing technical about it.
 
 Like `client.py`, `client_agent.py` and `client_source.py`, no route takes a client id: who is asking
 comes only from the session cookie, so nothing the browser sends can reach another client's channel.
+
+**The client never configures a channel's technology.** Servers, mailboxes, passwords, bot tokens and
+webhooks are connected by the platform (Revansa Admin) and are not part of this API: it accepts none
+of them and returns none of them. There is no route to write, remove, test or connect a credential
+here; a body that names any technical setting is refused (422) without repeating it.
 
 - **The channel** (`GET/PUT /client/v1/channel`): the client sees only the channels the Admin allows
   it, and chooses among them. A channel it is not allowed is refused (403) when chosen, and one the
@@ -9,32 +14,23 @@ comes only from the session cookie, so nothing the browser sends can reach anoth
   work, whatever the client had set up. A write carries the version it was based on and is refused
   (409) if the settings moved; it is validated by the same rules as every publication (422) and
   **nothing is written** if it is not valid.
-- **The mailbox** (`email` in that body) holds the non-secret settings of the client's own mailbox:
-  addresses, servers, ports. WhatsApp is not configured here at all: its account is connected by the
-  administrator, so a body that names anything of WhatsApp or Meta is refused (422).
-- **The password** (`PUT/DELETE /client/v1/channel/credentials`) is written, never read: no response
-  and no message carries it, whatever happens, and a body that is not exactly what is expected is
-  refused without being echoed.
-- **The test** (`POST /client/v1/channel/test`) logs in to the sending server and to the mailbox
-  with what is stored, without sending or reading a message. A success proves the access works at
-  that moment and nothing more; a failure is a fixed sentence.
-
-- **Telegram** is the client's own bot. The client gives the token BotFather made
-  (`PUT /channel/credentials`, body exactly `{"bot_token": ...}`), then **connects** it
-  (`POST /channel/connect`): the platform generates the webhook secret, tells Telegram where to
-  deliver and keeps the secret, write-only like the token. A Telegram bot cannot write to a person
-  who has not started it, so the prospects who have not are listed with a personal invitation link
-  (`GET /channel/invitations`) for the client to send them; they wait, they are never lost.
+- **What the client may say** is business wording only: for e-mail, the name it writes under and the
+  subject of its messages; for Telegram, the sentences its bot uses before it knows who it is talking
+  to. WhatsApp is not configured here at all: a body that names anything of WhatsApp or Meta is
+  refused (422).
+- **Where the channel stands** is `status`: `ready`, `waiting_platform` (Revansa has to finish
+  setting it up; the client has nothing to do) or `action_required` (the client has to choose or fix
+  something of its own), with a sentence that mentions nothing technical.
+- **Telegram invitations** (`GET /channel/invitations`): a Telegram bot cannot write to a person who
+  has not started it, so the prospects who have not are listed with a personal invitation link for
+  the client to send them; they wait, they are never lost.
 
 Switching channel pauses an agent that was running: the client starts it again deliberately.
 """
 
 import contextlib
-import secrets
-import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import datetime
-from threading import Lock
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -48,73 +44,68 @@ from sales_app.bootstrap import Application
 from sales_app.channel_status import (
     EMAIL,
     TELEGRAM,
+    activation_of,
     allowed_channels,
-    channel_problem,
     channel_provider_of,
     channel_settings_of,
+    channel_status,
 )
 from sales_app.client_profiles import ClientProfile
-from sales_app.config.email_settings import EmailChannelSettings
-from sales_app.config.secrets import EMAIL_PASSWORD, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
-from sales_app.config.telegram_settings import TelegramChannelSettings, bot_id_of
+from sales_app.config.email_activation import ActivationRecord
+from sales_app.config.email_settings import (
+    CUSTOM_MODE,
+    GMAIL_MODE,
+    PLATFORM_MODE,
+    GmailEmailSettings,
+    PlatformEmailSettings,
+    email_mode_of,
+    parse_email_settings,
+)
+from sales_app.config.secrets import TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
+from sales_app.config.telegram_settings import TelegramChannelSettings
 from sales_app.config_store import ConfigStoreError
-from sales_app.connection_tests import (
-    BotProbe,
-    BotProbeFailure,
-    ConnectionResult,
-    MailProbe,
-    check_email,
-    check_telegram,
-)
+from sales_app.connection_tests import BotProbeFailure
+from sales_app.email_activation import ActivationConflictError
 from sales_app.errors import ClientNotReadyError
-from sales_app.secret_store import (
-    InvalidCredentialError,
-    SecretStoreError,
-    UnknownCredentialError,
-    client_scope,
-)
-from sales_app.secret_store.catalog import normalize_value, spec_for
+from sales_app.mailbox_access import sender_name
+from sales_app.mailbox_exclusivity import mode_conflict
+from sales_app.secret_store import SecretStoreError, client_scope
+from sales_app.send_cap_status import email_sending
+from sales_app.telegram_connection import BotProbeFactory
 from sales_app.wiring.providers import ProviderKind
-from sales_app.wiring.providers import email as email_provider
 from sales_app.wiring.providers import telegram as telegram_provider
 from sales_integrations.telegram import invitation_link, make_invitation
 
-TEST_MIN_INTERVAL_SECONDS = 3.0
-
-MailProbeFactory = Callable[[EmailChannelSettings, str], MailProbe]
-BotProbeFactory = Callable[[str], BotProbe]  # from the bot token
-
-# What this route may change in a stored settings document: the channel and its non-secret settings.
+# What this route may change in a stored settings document: the channel and its business wording.
 CHANNEL_SETTINGS_SECTIONS: dict[str, tuple[str, ...]] = {"channel": ("provider", "settings")}
 
-Short = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=254)]
+# The only e-mail settings a client may state: how its messages are written.
+EMAIL_WORDING = ("from_name", "subject")
+
+# Where a channel stands, as the client is told. Mirrors `sales_app.channel_status`.
+ChannelStatusName = Literal["ready", "waiting_platform", "action_required"]
 
 
 # ---- models -----------------------------------------------------------------------------------
 
 
 class EmailSettingsChanges(BaseModel):
-    """The non-secret settings of a mailbox. A key left out keeps its value; none of them may be a
-    password (there is no such field: `extra="forbid"`)."""
+    """How the client's e-mails are written. A key left out keeps its value. There is no field for a
+    server, a port, a login or a password, and `extra="forbid"` refuses any that is sent."""
 
     model_config = ConfigDict(extra="forbid")
 
-    from_address: str | None = None
     from_name: str | None = None
-    username: str | None = None
-    smtp_host: str | None = None
-    smtp_port: int | None = None
-    smtp_security: str | None = None
-    imap_host: str | None = None
-    imap_port: int | None = None
-    imap_security: str | None = None
-    mailbox: str | None = None
     subject: str | None = None
+    # Which mailbox: true, the client's own Gmail; false, back to the mailbox Revansa provides. They
+    # exclude each other: the server refuses (409) a switch that would leave both. A client never
+    # names a mode, a server or a mailbox (`extra="forbid"`).
+    use_gmail: bool | None = None
 
 
 class TelegramSettingsChanges(BaseModel):
     """The sentences the bot uses before it knows who it is talking to. A key left out keeps its
-    value; there is no token field (`extra="forbid"`: that has its own route)."""
+    value; there is no token field (`extra="forbid"`)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -124,7 +115,8 @@ class TelegramSettingsChanges(BaseModel):
 
 
 class UpdateChannelRequest(BaseModel):
-    """`extra="forbid"`: any other key (a Meta setting, the model, the mode...) answers 422."""
+    """`extra="forbid"`: any other key (a Meta setting, a server, the model, the mode...) answers
+    422."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -141,33 +133,58 @@ class ChannelOption(BaseModel):
     label: str
 
 
+class ActivationResponse(BaseModel):
+    """Where the client's request to have its e-mail activated stands. `reason` is the Admin's, shown
+    when the request was rejected. Nothing here names a mailbox."""
+
+    status: Literal["pending", "in_progress", "rejected", "active"]
+    requested_at: datetime
+    updated_at: datetime
+    reason: str | None = None
+
+
+def activation_response(record: ActivationRecord | None) -> ActivationResponse | None:
+    if record is None:
+        return None
+    return ActivationResponse(
+        status=record.status,  # type: ignore[arg-type]  # one of the four statuses
+        requested_at=record.requested_at,
+        updated_at=record.updated_at,
+        reason=record.reason,
+    )
+
+
+class SendingResponse(BaseModel):
+    """`ok`, or why no e-mail leaves: `not_set` (the limit is not set yet), `reached` (today's is
+    used up), `unavailable` (it cannot be checked). `message` is null when `ok`."""
+
+    state: Literal["ok", "not_set", "reached", "unavailable"]
+    message: str | None = None
+    daily_limit: int | None = None
+    sent_today: int | None = None
+
+
 class EmailSettingsResponse(BaseModel):
-    from_address: str | None = None
+    """How the e-mails are written, and whose mailbox it is (`mode`: `platform`, a mailbox Revansa
+    provides, or `custom`, the historical one). In `platform` mode `from_name` is the Sender Name the
+    client confirmed, null until it has (then `sender_name_confirmed` is false and the page offers
+    `sender_name_proposal` of `ChannelResponse`). Nothing here is technical."""
+
+    mode: Literal["platform", "custom", "gmail"] = "platform"
     from_name: str | None = None
-    username: str | None = None
-    smtp_host: str | None = None
-    smtp_port: int | None = None
-    smtp_security: str | None = None
-    imap_host: str | None = None
-    imap_port: int | None = None
-    imap_security: str | None = None
-    mailbox: str | None = None
+    sender_name_confirmed: bool = False
     subject: str | None = None
+    # The request to have the mailbox activated; null until the client has made one. Only the
+    # platform's mailbox has one.
+    activation: ActivationResponse | None = None
+    # Whether e-mails can leave today against the daily sending limit the Revansa team sets.
+    sending: SendingResponse | None = None
 
 
 class TelegramSettingsResponse(BaseModel):
     contact_prompt: str
     contact_button: str
     not_found_text: str
-    connected: bool  # the bot was connected: it has a webhook secret and Telegram was told
-
-
-class CredentialStatusResponse(BaseModel):
-    """Whether the password is stored. Never its value, never part of it."""
-
-    label: str
-    configured: bool
-    updated_at: datetime | None = None
 
 
 class ChannelResponse(BaseModel):
@@ -175,10 +192,13 @@ class ChannelResponse(BaseModel):
     channel: str  # the chosen channel's key (the API never says "provider": see the contract test)
     authorized: bool  # False: the Admin does not allow it (any more): the agent cannot run on it
     options: list[ChannelOption]  # only the channels this client may choose
+    status: ChannelStatusName
+    status_message: str | None = None  # what the client should know, when it is not ready
     email: EmailSettingsResponse | None = None  # when the channel is e-mail
+    # The client's commercial name, as a Sender Name it may start from (a proposal, never a
+    # confirmation: only a saved `from_name` is one).
+    sender_name_proposal: str | None = None
     telegram: TelegramSettingsResponse | None = None  # when the channel is Telegram
-    credential: CredentialStatusResponse | None = None  # when the channel needs one from the client
-    problem: str | None = None  # what to do next, when the channel cannot run the agent yet
     updated_at: datetime | None = None
     updated_by: Literal["client", "administrator"] | None = None
 
@@ -198,31 +218,11 @@ class InvitationsResponse(BaseModel):
     invitations: list[InvitationResponse]  # the first `limit` of them
 
 
-class ChannelTestResponse(BaseModel):
-    channel: str
-    ok: bool
-    message: str  # a fixed sentence: never the password, never what the server said
-    details: dict[str, str] = {}
-    checked_at: datetime
-
-
 # ---- helpers ----------------------------------------------------------------------------------
 
 
 def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
-
-
-async def _read_secret(request: Request, field: str) -> str:
-    """The body must be exactly `{"<field>": "<text>"}`. Anything else is refused with a fixed
-    sentence that repeats nothing of it (it may be a secret under the wrong name)."""
-    try:
-        body = await request.json()
-    except Exception:  # noqa: BLE001 - any unreadable body is simply a bad request
-        raise HTTPException(400, "body must be JSON") from None
-    if not isinstance(body, dict) or set(body) != {field} or not isinstance(body[field], str):
-        raise HTTPException(422, f'body must be {{"{field}": "<text>"}}')
-    return body[field]
 
 
 async def _read_update(request: Request) -> UpdateChannelRequest:
@@ -277,37 +277,14 @@ _CHANNEL_BODY: dict[str, Any] = {
     }
 }
 
-_SECRET_BODY: dict[str, Any] = {
-    "requestBody": {
-        "required": True,
-        "content": {
-            "application/json": {
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "password": {"type": "string", "writeOnly": True},
-                        "bot_token": {"type": "string", "writeOnly": True},
-                    },
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "additionalProperties": False,
-                }
-            }
-        },
-    }
-}
-
 
 def create_client_channel_router(
     application: Application,
-    mail_probe: MailProbeFactory = email_provider.MailProbe,
     bot_probe: BotProbeFactory = telegram_provider.TelegramProbe,
 ) -> APIRouter:
     get_current_client = make_current_client_dependency(application.client_auth)
     router = APIRouter(prefix="/client/v1", tags=["client"], dependencies=[Depends(_no_store)])
     registry = application.provider_registry
-    last_test: dict[str, float] = {}
-    last_test_lock = Lock()
 
     def channel_options(client_id: str) -> list[ChannelOption]:
         allowed = allowed_channels(application, client_id)
@@ -316,12 +293,6 @@ def create_client_channel_router(
             for d in registry.list(ProviderKind.CHANNEL)
             if d.kind is ProviderKind.CHANNEL and d.runnable and d.key in allowed
         ]
-
-    def _stored(client_id: str, key: str) -> bool:
-        try:
-            return application.credentials.status(client_scope(client_id), key).configured
-        except SecretStoreError:
-            raise HTTPException(503, "credential storage is temporarily unavailable") from None
 
     def current_state(client_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any], int | None]:
         found = client_wiring_and_document(application, client_id)
@@ -337,12 +308,21 @@ def create_client_channel_router(
         descriptor = registry.get(provider)
         email_settings = None
         if provider == EMAIL:
+            stored = channel_settings_of(document)
+            mode = _email_mode(stored)
             email_settings = EmailSettingsResponse(
-                **{
-                    k: v
-                    for k, v in channel_settings_of(document).items()
-                    if k in EmailSettingsResponse.model_fields
-                }
+                mode=mode,
+                from_name=stored.get("from_name"),
+                # Only the platform's mailbox has a name to confirm: a historical one is the
+                # client's own setting, as it always was.
+                sender_name_confirmed=mode == "platform" and bool(stored.get("from_name")),
+                subject=stored.get("subject"),
+                activation=(
+                    activation_response(activation_of(application, client_id))
+                    if mode == "platform"
+                    else None
+                ),
+                sending=SendingResponse(**email_sending(application, client_id)),
             )
         telegram_settings = None
         if provider == TELEGRAM:
@@ -350,33 +330,24 @@ def create_client_channel_router(
                 shown = TelegramChannelSettings.model_validate(channel_settings_of(document))
             except ValueError:  # settings that cannot be read are shown as the defaults they act as
                 shown = TelegramChannelSettings()
-            telegram_settings = TelegramSettingsResponse(
-                **shown.model_dump(),
-                connected=_stored(client_id, TELEGRAM_WEBHOOK_SECRET),
+            telegram_settings = TelegramSettingsResponse(**shown.model_dump())
+        if descriptor is None:
+            status, message = (
+                "action_required",
+                "The channel you chose is not available. Choose another one.",
             )
-        credential = None
-        secret_key = _secret_key_for(provider)
-        if secret_key is not None:
-            try:
-                status = application.credentials.status(client_scope(client_id), secret_key)
-            except SecretStoreError:
-                raise HTTPException(503, "credential storage is temporarily unavailable") from None
-            credential = CredentialStatusResponse(
-                label=status.label, configured=status.configured, updated_at=status.updated_at
-            )
+        else:
+            status, message = channel_status(application, client_id, provider, document)
         return ChannelResponse(
             version=version,
             channel=provider,
             authorized=provider in allowed_channels(application, client_id),
             options=channel_options(client_id),
+            status=status,  # type: ignore[arg-type]  # one of the three names of channel_status
+            status_message=message,
             email=email_settings,
             telegram=telegram_settings,
-            credential=credential,
-            problem=(
-                channel_problem(application, client_id, provider, document)
-                if descriptor is not None
-                else "The channel you chose is not available. Choose another one."
-            ),
+            sender_name_proposal=sender_name(raw.get("display_name")),
             updated_at=current.created_at if current is not None else None,
             updated_by=(
                 None
@@ -433,12 +404,20 @@ def create_client_channel_router(
                 settings = _merged_email_settings(
                     channel_settings_of(document) if current_provider == EMAIL else {}, body.email
                 )
-                _require_unused_mailbox(application, client_id, settings)
             if body.channel == TELEGRAM:
                 settings = _merged_telegram_settings(
                     channel_settings_of(document) if current_provider == TELEGRAM else {},
                     body.telegram,
                 )
+            if body.channel == EMAIL:
+                conflict = mode_conflict(
+                    application,
+                    client_id,
+                    channel_settings_of(document) if current_provider == EMAIL else {},
+                    settings,
+                )
+                if conflict is not None:
+                    raise HTTPException(409, conflict)
             if body.channel == current_provider and settings == (
                 channel_settings_of(document) if current_provider in (EMAIL, TELEGRAM) else {}
             ):
@@ -465,6 +444,39 @@ def create_client_channel_router(
                 application.runtime_manager.refresh_client(client_id)
         return channel_response(client_id)
 
+    @router.post("/channel/email-activation", response_model=ChannelResponse, status_code=201)
+    def request_email_activation(client: ClientProfile = Depends(get_current_client)):
+        """Ask for the e-mail to be activated. The Sender Name must have been confirmed (saved), the
+        channel must be e-mail on a mailbox Revansa provides, and the Admin must allow Email to this
+        client: a request is not that permission. One open or active request at most; after a
+        rejection the client may ask again."""
+        client_id = client.client_id
+        service = application.email_activation
+        if service is None:
+            raise HTTPException(503, "email activation is not available")
+        try:
+            raw, document, _ = current_state(client_id)
+            if EMAIL not in allowed_channels(application, client_id):
+                raise HTTPException(403, "this channel is not available for your account")
+            if channel_provider_of(raw, document) != EMAIL:
+                raise HTTPException(409, "your channel is not email")
+            stored = channel_settings_of(document)
+            if _email_mode(stored) != "platform":
+                raise HTTPException(409, "this account's email does not need an activation")
+            if not sender_name(stored.get("from_name")):
+                raise HTTPException(409, "confirm your sender name first")
+            service.request(client_id, actor=f"client:{client_id}")
+        except ConfigStoreError:
+            raise HTTPException(503, "settings are temporarily unavailable") from None
+        except SecretStoreError:
+            raise HTTPException(503, "request storage is temporarily unavailable") from None
+        except ActivationConflictError as conflict:
+            raise HTTPException(409, str(conflict)) from None
+        with contextlib.suppress(Exception):  # the Admin's runtime status says how it ended
+            if application.registry.get_config(client_id) is not None:
+                application.runtime_manager.refresh_client(client_id)
+        return channel_response(client_id)
+
     def _pause_agent(client_id: str) -> None:
         with switch_available():
             state = application.agent_state.get(client_id)
@@ -476,89 +488,7 @@ def create_client_channel_router(
                     at=application.clock.now(),
                 )
 
-    # ---- the password ---------------------------------------------------------------------
-
-    def require_secret_channel(client_id: str) -> tuple[str, str, str]:
-        """(channel, the credential it holds for the client, the name of that credential in a body):
-        what the client may write, for the channel it is on."""
-        try:
-            raw, document, _ = current_state(client_id)
-        except ConfigStoreError:
-            raise HTTPException(503, "settings are temporarily unavailable") from None
-        provider = channel_provider_of(raw, document)
-        key = _secret_key_for(provider)
-        if key is None:
-            raise HTTPException(409, "the channel you chose needs no password from you")
-        if provider not in allowed_channels(application, client_id):
-            raise HTTPException(403, "this channel is not available for your account")
-        return provider, key, _SECRET_FIELD[provider]
-
-    @router.put(
-        "/channel/credentials", response_model=CredentialStatusResponse, openapi_extra=_SECRET_BODY
-    )
-    async def put_credentials(
-        request: Request, client: ClientProfile = Depends(get_current_client)
-    ) -> CredentialStatusResponse:
-        client_id = client.client_id
-        provider, key, field = require_secret_channel(client_id)
-        value = await _read_secret(request, field)
-        try:
-            if provider == TELEGRAM and reveal(client_id, key) != value.strip():
-                # Another bot is not the one that was connected: the connection (and the
-                # invitations signed under it) is dropped, and the client connects the new one. A
-                # value that is not a token is refused first, so a mistake never disconnects a bot.
-                normalize_value(spec_for(client_scope(client_id), key), value)
-                application.credentials.remove(
-                    client_scope(client_id), TELEGRAM_WEBHOOK_SECRET, actor=f"client:{client_id}"
-                )
-            status = application.credentials.save(
-                client_scope(client_id),
-                key,
-                value,
-                actor=f"client:{client_id}",
-                apply=True,  # the agent of a client on this channel reads it: rebuild it
-            )
-        except InvalidCredentialError as error:
-            raise HTTPException(422, str(error)) from None  # words the rule, never the value
-        except UnknownCredentialError:
-            raise HTTPException(409, "the channel you chose needs no password from you") from None
-        except SecretStoreError:
-            raise HTTPException(503, "credential storage is temporarily unavailable") from None
-        return CredentialStatusResponse(
-            label=status.label, configured=status.configured, updated_at=status.updated_at
-        )
-
-    @router.delete("/channel/credentials", response_model=CredentialStatusResponse)
-    def delete_credentials(
-        client: ClientProfile = Depends(get_current_client),
-    ) -> CredentialStatusResponse:
-        client_id = client.client_id
-        provider, key, _ = require_secret_channel(client_id)
-        try:
-            if provider == TELEGRAM:
-                application.credentials.remove(
-                    client_scope(client_id), TELEGRAM_WEBHOOK_SECRET, actor=f"client:{client_id}"
-                )
-            status = application.credentials.remove(
-                client_scope(client_id), key, actor=f"client:{client_id}"
-            )
-        except SecretStoreError:
-            raise HTTPException(503, "credential storage is temporarily unavailable") from None
-        return CredentialStatusResponse(
-            label=status.label, configured=status.configured, updated_at=status.updated_at
-        )
-
-    # ---- the test -------------------------------------------------------------------------
-
-    def throttle(client_id: str) -> None:
-        with last_test_lock:
-            now = time.monotonic()
-            if (
-                now - last_test.get(client_id, -TEST_MIN_INTERVAL_SECONDS)
-                < TEST_MIN_INTERVAL_SECONDS
-            ):
-                raise HTTPException(429, "a test was just made: wait a few seconds")
-            last_test[client_id] = now
+    # ---- Telegram invitations -------------------------------------------------------------
 
     def reveal(client_id: str, key: str) -> str | None:
         try:
@@ -566,55 +496,9 @@ def create_client_channel_router(
         except SecretStoreError:
             raise HTTPException(503, "credential storage is temporarily unavailable") from None
 
-    @router.post("/channel/test", response_model=ChannelTestResponse)
-    def test_channel(client: ClientProfile = Depends(get_current_client)) -> ChannelTestResponse:
-        client_id = client.client_id
-        try:
-            raw, document, _ = current_state(client_id)
-        except ConfigStoreError:
-            raise HTTPException(503, "settings are temporarily unavailable") from None
-        provider = channel_provider_of(raw, document)
-        if provider not in allowed_channels(application, client_id):
-            raise HTTPException(403, "this channel is not available for your account")
-        if provider not in (EMAIL, TELEGRAM):
-            raise HTTPException(409, "there is nothing for you to test on this channel")
-        throttle(client_id)
-        if provider == TELEGRAM:
-            token = reveal(client_id, TELEGRAM_BOT_TOKEN)
-            result = check_telegram(
-                probe=bot_probe(token) if token else None,
-                expected_url=telegram_provider.webhook_url(application.settings.public_base_url),
-            )
-            return ChannelTestResponse(
-                channel=provider,
-                ok=result.ok,
-                message=result.message,
-                details=dict(result.details),
-                checked_at=application.clock.now(),
-            )
-        probe = None
-        try:
-            settings = EmailChannelSettings.model_validate(channel_settings_of(document))
-            password = application.credentials.reveal(client_scope(client_id), EMAIL_PASSWORD)
-        except ValueError:
-            settings, password = None, None
-        except SecretStoreError:
-            raise HTTPException(503, "credential storage is temporarily unavailable") from None
-        if settings is not None and password:
-            probe = mail_probe(settings, password)
-        result: ConnectionResult = check_email(probe=probe)
-        return ChannelTestResponse(
-            channel=provider,
-            ok=result.ok,
-            message=result.message,
-            details=dict(result.details),
-            checked_at=application.clock.now(),
-        )
-
-    # ---- connecting a Telegram bot ---------------------------------------------------------
-
-    def require_telegram(client_id: str) -> str:
-        """The bot token of a client that is on Telegram and may be."""
+    def telegram_ready(client_id: str) -> tuple[str, str]:
+        """The bot token and the webhook secret of a client that is on Telegram, may be, and whose
+        bot the platform has connected. Said as plainly for each way it is not."""
         try:
             raw, document, _ = current_state(client_id)
         except ConfigStoreError:
@@ -624,61 +508,10 @@ def create_client_channel_router(
         if TELEGRAM not in allowed_channels(application, client_id):
             raise HTTPException(403, "this channel is not available for your account")
         token = reveal(client_id, TELEGRAM_BOT_TOKEN)
-        if not token:
-            raise HTTPException(409, "add your Telegram bot token first")
-        return token
-
-    @router.post("/channel/connect", response_model=ChannelTestResponse)
-    def connect_channel(client: ClientProfile = Depends(get_current_client)) -> ChannelTestResponse:
-        """Tell Telegram to deliver this bot's messages to the platform, with a secret only the
-        platform and Telegram know. Safe to repeat: the secret, and the links signed under it, stay."""
-        client_id = client.client_id
-        token = require_telegram(client_id)
-        throttle(client_id)
-        url = telegram_provider.webhook_url(application.settings.public_base_url)
-        if url is None:
-            raise HTTPException(
-                409,
-                "the platform has no public https address to receive Telegram messages on: "
-                "contact your administrator",
-            )
-        bot = bot_id_of(token)
-        for config in application.registry.configs():
-            if config.client_id != client_id and config.telegram_bot_id == bot:
-                raise HTTPException(409, "this bot cannot be used for your account")
-        probe = bot_probe(token)
-        secret = reveal(client_id, TELEGRAM_WEBHOOK_SECRET) or secrets.token_urlsafe(32)
-        try:
-            probe.check_bot()
-            probe.register_webhook(url, secret)
-        except BotProbeFailure as failure:
-            result = check_telegram(probe=_Failed(failure), expected_url=url)
-            return ChannelTestResponse(
-                channel=TELEGRAM,
-                ok=False,
-                message=result.message,
-                details=dict(result.details),
-                checked_at=application.clock.now(),
-            )
-        try:
-            # Stored only now that Telegram was told: "connected" must never be said before it is.
-            application.credentials.save(
-                client_scope(client_id),
-                TELEGRAM_WEBHOOK_SECRET,
-                secret,
-                actor=f"client:{client_id}",
-                apply=True,
-            )
-        except SecretStoreError:
-            raise HTTPException(503, "credential storage is temporarily unavailable") from None
-        result = check_telegram(probe=probe, expected_url=url)
-        return ChannelTestResponse(
-            channel=TELEGRAM,
-            ok=result.ok,
-            message=result.message,
-            details=dict(result.details),
-            checked_at=application.clock.now(),
-        )
+        secret = reveal(client_id, TELEGRAM_WEBHOOK_SECRET)
+        if not token or not secret:
+            raise HTTPException(409, "your Telegram channel is not ready yet")
+        return token, secret
 
     @router.get("/channel/invitations", response_model=InvitationsResponse)
     def get_invitations(
@@ -689,10 +522,7 @@ def create_client_channel_router(
         send them. The links are personal: pressing Start on one attaches that prospect to that
         person's Telegram, and to no one else's."""
         client_id = client.client_id
-        token = require_telegram(client_id)
-        secret = reveal(client_id, TELEGRAM_WEBHOOK_SECRET)
-        if not secret:
-            raise HTTPException(409, "connect your Telegram bot first")
+        token, secret = telegram_ready(client_id)
         runtime = application.registry.get(client_id)
         if runtime is None:
             raise HTTPException(409, "your agent is not ready yet")
@@ -731,20 +561,17 @@ def create_client_channel_router(
     return router
 
 
-class _Failed:
-    """A probe that is already known to have failed, so the same sentence is told as for a test."""
-
-    def __init__(self, failure: BotProbeFailure) -> None:
-        self._failure = failure
-
-    def check_bot(self) -> str:
-        raise self._failure
-
-    def register_webhook(self, url: str, secret: str) -> None:
-        raise self._failure
-
-    def webhook_state(self, expected_url: str | None) -> str:
-        raise self._failure
+def _email_mode(stored: Mapping[str, Any]) -> Literal["platform", "custom", "gmail"]:
+    """`gmail` for the client's own Gmail, `custom` only for a valid historical mailbox. Anything
+    else (the platform's mailbox, or settings not made yet) is what the next save turns into the
+    platform's mailbox."""
+    try:
+        settings = parse_email_settings(stored)
+    except ValueError:
+        return "gmail" if email_mode_of(stored) == GMAIL_MODE else "platform"
+    if isinstance(settings, GmailEmailSettings):
+        return "gmail"
+    return "platform" if isinstance(settings, PlatformEmailSettings) else "custom"
 
 
 def _merged_telegram_settings(
@@ -768,27 +595,36 @@ def _merged_telegram_settings(
     return merged
 
 
-_SECRET_FIELD = {EMAIL: "password", TELEGRAM: "bot_token"}
-_SECRET_KEY = {EMAIL: EMAIL_PASSWORD, TELEGRAM: TELEGRAM_BOT_TOKEN}
-
-
-def _secret_key_for(provider: str) -> str | None:
-    """The credential a client writes for its channel, or None when it has none to give."""
-    return _SECRET_KEY.get(provider)
+def _email_base(current: Mapping[str, Any]) -> dict[str, Any]:
+    """The settings the client's wording is applied to. A mailbox that already works is kept exactly
+    as it is, whatever mode it is in (the client never sees how it is wired). Anything else starts
+    as the platform's mailbox, which holds nothing technical."""
+    try:
+        parse_email_settings(current)
+    except ValueError:
+        kept = {key: current[key] for key in EMAIL_WORDING if key in current}
+        return {"mode": PLATFORM_MODE, **kept}
+    return dict(current)
 
 
 def _merged_email_settings(
     current: Mapping[str, Any], changes: EmailSettingsChanges | None
 ) -> dict[str, Any]:
-    """The mailbox settings after the changes, complete and valid, or a 422 that names the fields
-    but never repeats a value."""
-    merged = dict(current)
+    """The e-mail settings after the client's wording, valid, or a 422 that names the fields but
+    never repeats a value."""
+    merged = _email_base(current)
     if changes is not None:
-        merged.update(changes.model_dump(exclude_none=True))
+        data = changes.model_dump(exclude_none=True)
+        choice = data.pop("use_gmail", None)
+        wanted = None if choice is None else (GMAIL_MODE if choice else PLATFORM_MODE)
+        if wanted is not None and wanted != email_mode_of(merged):
+            if email_mode_of(merged) == CUSTOM_MODE:
+                # The historical mailbox is the Admin's: the client cannot swap it for another.
+                raise HTTPException(409, "your mailbox is set up by Revansa and cannot be changed here")
+            merged = {"mode": wanted, **{k: merged[k] for k in EMAIL_WORDING if k in merged}}
+        merged.update(data)
     try:
-        return EmailChannelSettings.model_validate(merged).model_dump(
-            mode="json", exclude_none=True
-        )
+        return parse_email_settings(merged).model_dump(mode="json", exclude_none=True)
     except ValidationError as error:
         raise HTTPException(
             422,
@@ -797,14 +633,3 @@ def _merged_email_settings(
                 for e in error.errors()
             ],
         ) from None
-
-
-def _require_unused_mailbox(
-    application: Application, client_id: str, settings: Mapping[str, Any]
-) -> None:
-    """A mailbox belongs to one client: two reading it would take each other's replies. Never says
-    whose it is."""
-    key = EmailChannelSettings.model_validate(settings).mailbox_key
-    for config in application.registry.configs():
-        if config.client_id != client_id and config.mailbox_key == key:
-            raise HTTPException(409, "this mailbox cannot be used for your account")

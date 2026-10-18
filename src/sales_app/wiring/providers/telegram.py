@@ -127,6 +127,9 @@ class TelegramProbe:
     def webhook_state(self, expected_url: str | None) -> str:
         return self._translated(lambda: self._check.webhook_state(expected_url))
 
+    def delete_webhook(self) -> None:
+        self._translated(self._check.delete_webhook)
+
     @staticmethod
     def _translated(call):
         try:

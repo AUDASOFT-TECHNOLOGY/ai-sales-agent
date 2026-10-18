@@ -42,6 +42,7 @@ from test_mail_mailbox import FakeImap, raw_mail
 from sales_app.admin_auth import InMemoryAdminSessionStore, InMemoryAdminUserStore
 from sales_app.agent_state import InMemoryAgentStateStore
 from sales_app.api import create_app
+from sales_app.api.admin_clients import publish_client_settings
 from sales_app.bootstrap import build_application
 from sales_app.client_profiles import InMemoryClientProfileStore
 from sales_app.config_store import InMemoryConfigStore
@@ -215,18 +216,24 @@ class Mailroom:
         assert response.status_code == 200, response.text
 
     def set_up_email(self, cid, *, password=SECRET, start=True):
-        """What a client does: choose the channel, give its mailbox and password, start the agent."""
-        browser = self.browser(cid)
-        version = browser.get("/client/v1/channel").json()["version"]
-        response = browser.put(
-            "/client/v1/channel",
-            json={"expected_version": version, "channel": "email", "email": mailbox_of(cid)},
+        """What the platform does, then what the client does: the Admin wires the client's mailbox
+        and stores its password (the client types neither), and the client starts its agent."""
+        current = self.config_store.current(cid)
+        publish_client_settings(
+            self.application,
+            cid,
+            {"channel": {"provider": "email", "settings": mailbox_of(cid)}},
+            expected_version=current.version if current else None,
+            author="root",
+            top_keys=(),
+            sections={"channel": ("provider", "settings")},
+        )
+        self.application.runtime_manager.refresh_client(cid).result()
+        response = self.admin().put(
+            f"/admin/v1/clients/{cid}/integrations/email.password", json={"value": password}
         )
         assert response.status_code == 200, response.text
-        assert (
-            browser.put("/client/v1/channel/credentials", json={"password": password}).status_code
-            == 200
-        )
+        browser = self.browser(cid)
         if start:
             response = browser.post("/client/v1/agent/start")
             assert response.status_code == 200, response.text
@@ -594,7 +601,6 @@ def test_a_client_on_whatsapp_keeps_its_webhook_while_another_uses_email(tmp_pat
 def test_a_second_client_cannot_take_over_a_mailbox_at_runtime(pair):
     r = pair
     version = r.config_store.current("beta").version
-    from sales_app.api.admin_clients import publish_client_settings
 
     publish_client_settings(  # an administrator publishes beta on alpha's mailbox
         r.application,
@@ -638,11 +644,14 @@ def test_a_channel_the_admin_takes_away_stops_working_at_once(room):
     browser = r.browser("alpha")
     assert browser.get("/client/v1/channel").json()["authorized"] is False
     assert browser.get("/client/v1/agent").json()["active"] is False
-    assert (
-        browser.put("/client/v1/channel/credentials", json={"password": "x" * 10}).status_code
-        == 403
+    # the client has no route to store a password or test a server, whatever the channel's state
+    assert browser.put(
+        "/client/v1/channel/credentials", json={"password": "x" * 10}
+    ).status_code in (
+        404,
+        405,
     )
-    assert browser.post("/client/v1/channel/test").status_code == 403
+    assert browser.post("/client/v1/channel/test").status_code in (404, 405)
 
 
 def test_the_channel_works_again_when_the_admin_gives_it_back(room):
@@ -691,8 +700,9 @@ def test_a_forbidden_channel_survives_a_restart(room):
 
 def test_the_password_is_removed_the_client_stops_without_a_secret_in_the_report(room):
     r = room
-    browser = r.browser("alpha")
-    assert browser.delete("/client/v1/channel/credentials").status_code == 200
+    admin = r.admin()  # taking a password away is the platform's act, not the client's
+    path = "/admin/v1/clients/alpha/integrations/email.password?confirm=true"
+    assert admin.delete(path).status_code == 200
     missing = r.application.registry.missing("alpha")
     assert missing and SECRET not in " ".join(missing)
     assert r.tick() == []

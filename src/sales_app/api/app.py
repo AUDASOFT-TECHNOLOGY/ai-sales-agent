@@ -19,6 +19,7 @@ from sales_app.api.admin_agents import create_admin_agents_router
 from sales_app.api.admin_billing import create_admin_billing_router
 from sales_app.api.admin_channels import create_admin_channels_router
 from sales_app.api.admin_clients import create_admin_clients_router
+from sales_app.api.admin_email_activation import create_admin_email_activation_router
 from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_llm_pricing import create_admin_llm_pricing_router
 from sales_app.api.admin_plans import create_admin_plans_router
@@ -27,11 +28,7 @@ from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
 from sales_app.api.client_approvals import create_client_approvals_router
-from sales_app.api.client_channel import (
-    BotProbeFactory,
-    MailProbeFactory,
-    create_client_channel_router,
-)
+from sales_app.api.client_channel import create_client_channel_router
 from sales_app.api.client_gmail import create_application_gmail_router
 from sales_app.api.client_lanes import create_client_lanes_router
 from sales_app.api.client_prospects import create_client_prospects_router
@@ -44,11 +41,17 @@ from sales_app.api.client_source import (
 from sales_app.api.payments import create_payments_router
 from sales_app.bootstrap import Application
 from sales_app.connection_tests import HttpClientFactory, default_http_client
-from sales_app.email_platform import PlatformMailProbe, PlatformMailProbeFactory
+from sales_app.email_platform import (
+    MailLoginProbe,
+    MailLoginProbeFactory,
+    PlatformMailProbe,
+    PlatformMailProbeFactory,
+)
 from sales_app.errors import ClientNotReadyError
 from sales_app.logs import client_logger
+from sales_app.mailbox_proof import verify_all
+from sales_app.telegram_connection import BotProbeFactory
 from sales_app.wiring import ClientRuntime
-from sales_app.wiring.providers import email as email_provider
 from sales_app.wiring.providers import telegram as telegram_provider
 from sales_core.engine import InboundReceipt, InboundStatus
 from sales_core.ports import InvalidSignatureError, MalformedPayloadError
@@ -63,17 +66,24 @@ def create_app(
     run_scheduler: bool = True,
     connection_http: HttpClientFactory = default_http_client,
     sheets_probe: SheetsProbeFactory = default_sheets_probe,
-    mail_probe: MailProbeFactory = email_provider.MailProbe,
     bot_probe: BotProbeFactory = telegram_provider.TelegramProbe,
     platform_mail_probe: PlatformMailProbeFactory = PlatformMailProbe,
+    mail_login_probe: MailLoginProbeFactory = MailLoginProbe,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         stop = asyncio.Event()
         task = None
+        verify = None
         if run_scheduler:
             task = asyncio.create_task(
                 application.scheduler.run(stop, application.settings.tick_seconds)
+            )
+            # The proof of a login is kept in memory: after a restart the platform mailboxes are
+            # checked again (login only, nothing is sent or read) so that clients are not left
+            # waiting for an administrator to press a button.
+            verify = asyncio.create_task(
+                asyncio.to_thread(verify_all, application, mail_login_probe)
             )
         try:
             yield
@@ -81,6 +91,8 @@ def create_app(
             stop.set()
             if task is not None:
                 await task
+            if verify is not None:
+                await asyncio.gather(verify, return_exceptions=True)
             try:
                 await asyncio.wait_for(
                     asyncio.to_thread(application.close), timeout=SHUTDOWN_GRACE_SECONDS
@@ -100,14 +112,17 @@ def create_app(
     app.include_router(create_payments_router(application))
     app.include_router(create_admin_channels_router(application))
     app.include_router(
-        create_admin_integrations_router(application, connection_http, platform_mail_probe)
+        create_admin_integrations_router(
+            application, connection_http, platform_mail_probe, bot_probe, mail_login_probe
+        )
     )
+    app.include_router(create_admin_email_activation_router(application, mail_login_probe))
     app.include_router(create_client_router(application))
     app.include_router(create_client_agent_router(application))
     app.include_router(create_client_approvals_router(application))
     app.include_router(create_client_prospects_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))
-    app.include_router(create_client_channel_router(application, mail_probe, bot_probe))
+    app.include_router(create_client_channel_router(application, bot_probe))
     gmail_router = create_application_gmail_router(application)
     if gmail_router is not None:
         app.include_router(gmail_router)

@@ -5,19 +5,20 @@
  *  - Meta / WhatsApp Cloud API: Revansa-wide only (app secret, verify token, API version). A
  *    client's own access token and phone number id come from the WhatsApp onboarding of that client's
  *    number, not from this page; the phone number id is Meta's id, NOT the client's WhatsApp number.
- *  - Email: the servers of the mailboxes Revansa provides. Only the servers are described here;
- *    which mailbox a client gets is decided client by client, elsewhere.
+ *  - Email: the servers of the mailboxes Revansa provides, and a test login for each, so that a real
+ *    authentication can be checked (never a client's mailbox: that is set on the client's page).
  *  - Muse Spark: no adapter exists in the backend yet, so nothing can be configured; it says so.
  *
  *  Everything is stored by the backend's credential store. A sensitive value is write-only: it is
  *  never displayed again, only "configured". Connection tests call the real services. */
 
 import { useEffect, useId, useState } from "react";
-import { Glass } from "../../ui/Glass";
+import { Glass, type Tint } from "../../ui/Glass";
 import { Chip } from "../../ui/Chip";
 import { Button } from "../../ui/Button";
 import { FieldShell } from "../../ui/Controls";
 import { useAdminAuth } from "../AdminAuthContext";
+import { AdminEmailActivationRequests } from "./AdminEmailActivation";
 import {
   AdminApiError,
   adminListGlobalCredentials,
@@ -26,11 +27,18 @@ import {
   adminAddOpenAIModel,
   adminDeleteOpenAIModel,
   adminListOpenAIModels,
+  adminEmailServiceStatus,
+  adminGmailPlatformStatus,
+  adminSetEmailForNewClients,
+  adminTestEmailImap,
   adminTestEmailServers,
+  adminTestEmailSmtp,
   adminTestOpenAI,
   adminUpdateOpenAIModel,
   type ConnectionTest,
   type Credential,
+  type EmailServiceStatus,
+  type GmailPlatformStatus,
   type OpenAIModel,
 } from "../api";
 
@@ -45,14 +53,30 @@ const OPENAI_FIELDS: FieldDef[] = [
   { key: "openai.api_key", label: "API Key", help: "Stored encrypted. Never shown again once saved." },
 ];
 
-const EMAIL_FIELDS: FieldDef[] = [
+const EMAIL_DOMAIN_FIELDS: FieldDef[] = [
   { key: "email.platform_domain", label: "Mail domain", help: "The domain of the mailboxes Revansa provides.", placeholder: "mail.example.com" },
+];
+
+const EMAIL_SMTP_FIELDS: FieldDef[] = [
   { key: "email.platform_smtp_host", label: "SMTP host", help: "The server messages are sent through.", placeholder: "smtp.example.com" },
   { key: "email.platform_smtp_port", label: "SMTP port", help: "25, 465, 587 or 2525.", placeholder: "587" },
-  { key: "email.platform_smtp_security", label: "SMTP security", help: "starttls or ssl. A mailbox is never reached in the clear.", placeholder: "starttls" },
+  { key: "email.platform_smtp_security", label: "SMTP security", help: "starttls (usually port 587) or ssl (usually port 465). An unencrypted connection is not offered: a mailbox is never reached in the clear.", placeholder: "starttls" },
+  { key: "email.platform_smtp_username", label: "SMTP username", help: "The login used to check that the server accepts an authentication.", placeholder: "login@example.com" },
+  { key: "email.platform_smtp_password", label: "SMTP password", help: "Stored encrypted. Never shown again once saved." },
+];
+
+const EMAIL_IMAP_FIELDS: FieldDef[] = [
   { key: "email.platform_imap_host", label: "IMAP host", help: "The server replies are read from.", placeholder: "imap.example.com" },
   { key: "email.platform_imap_port", label: "IMAP port", help: "143 or 993.", placeholder: "993" },
-  { key: "email.platform_imap_security", label: "IMAP security", help: "ssl or starttls.", placeholder: "ssl" },
+  { key: "email.platform_imap_security", label: "IMAP security", help: "ssl (usually port 993) or starttls (usually port 143). Never unencrypted.", placeholder: "ssl" },
+  { key: "email.platform_imap_username", label: "IMAP username", help: "The login used to check that the server accepts an authentication.", placeholder: "login@example.com" },
+  { key: "email.platform_imap_password", label: "IMAP password", help: "Stored encrypted. Never shown again once saved." },
+];
+
+const GMAIL_FIELDS: FieldDef[] = [
+  { key: "gmail.oauth_client_id", label: "Google OAuth client id", help: "Stored encrypted. Never shown again once saved." },
+  { key: "gmail.oauth_client_secret", label: "Google OAuth client secret", help: "Stored encrypted. Never shown again once saved." },
+  { key: "gmail.oauth_state_key", label: "State signing key", help: "At least 16 random characters. Signs the return from Google. Stored encrypted." },
 ];
 
 const META_GLOBAL_FIELDS: FieldDef[] = [
@@ -75,6 +99,7 @@ export function AdminSettingsPage() {
       <OpenAISection canEdit={canEdit} />
       <MetaSection canEdit={canEdit} />
       <EmailSection canEdit={canEdit} />
+      <GmailSection canEdit={canEdit} />
       <MuseSparkSection />
     </div>
   );
@@ -324,22 +349,209 @@ function MetaSection({ canEdit }: { canEdit: boolean }) {
   );
 }
 
+// ---- Gmail (clients connecting their own mailbox) ---------------------------------------------
+
+function GmailSection({ canEdit }: { canEdit: boolean }) {
+  const store = useGlobalCredentials();
+  const [status, setStatus] = useState<GmailPlatformStatus | null>(null);
+  const credentialsSeen = store.credentials.map((c) => `${c.key}:${c.configured}`).join(",");
+  useEffect(() => {
+    adminGmailPlatformStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  }, [credentialsSeen]);
+  return (
+    <Glass level={1} className="admin-settings__card" aria-labelledby="settings-gmail">
+      <div className="admin-settings__head">
+        <h2 className="t-h2" id="settings-gmail">
+          Gmail (clients&apos; own mailbox)
+        </h2>
+        <span className="admin-settings__status">
+          <span className="c-3 t-body-sm">Configuration</span>
+          <Chip tint={status?.configured ? "success" : "neutral"}>
+            {status ? (status.configured ? "Configured, not verified by Google" : "Not configured") : "Unknown"}
+          </Chip>
+        </span>
+      </div>
+      <p className="c-2 t-body-sm">
+        The Google application that lets a client connect its own Gmail. The clients type no password: Google asks for their
+        permission on its own page. Stored is not verified: nothing is checked against Google until a client connects.
+      </p>
+      <CredentialGroup store={store} fields={GMAIL_FIELDS} canEdit={canEdit} />
+      {status && status.missing.length > 0 ? (
+        <p className="admin-alert admin-alert--info" role="status">
+          Still missing: {status.missing.join(", ")}.
+        </p>
+      ) : null}
+      {status?.redirect_uri ? (
+        <p className="c-3 t-body-sm">
+          Authorised redirect URI to enter in Google Cloud: <code>{status.redirect_uri}</code>
+        </p>
+      ) : (
+        <p className="c-3 t-body-sm">
+          Set the public base URL of the platform (SALES_AGENT_PUBLIC_BASE_URL, https) to get the redirect URI to enter in Google
+          Cloud.
+        </p>
+      )}
+      <p className="c-3 t-body-sm">
+        Reading and sending mail uses a restricted Google scope: until Google has verified the application, only the test users
+        you list in Google Cloud (at most 100) can connect.
+      </p>
+    </Glass>
+  );
+}
+
 // ---- Email ----------------------------------------------------------------------------------
+
+const EMAIL_STATE_LABELS: Record<EmailServiceStatus["state"], [string, Tint]> = {
+  missing_configuration: ["Configuration missing", "neutral"],
+  server_not_authenticated: ["Servers not authenticated", "attention"],
+  ready: ["Ready", "success"],
+};
+
+function NewClientsAccess({
+  status,
+  canEdit,
+  onChanged,
+}: {
+  status: EmailServiceStatus | null;
+  canEdit: boolean;
+  onChanged: (next: EmailServiceStatus) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!status) return null;
+  const on = status.new_clients_access === true;
+  const awaiting = status.clients_awaiting_mailbox ?? [];
+  const ready = status.state === "ready";
+  async function toggle() {
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await adminSetEmailForNewClients(!on));
+    } catch (err) {
+      setError(err instanceof AdminApiError ? err.message : "Could not change this.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="admin-llm-config">
+      <h3 className="admin-settings__subhead">Email for new clients</h3>
+      <p className="c-3 t-body-sm">
+        When this is on, every client created from now on can use Email as soon as its account exists. Clients that already
+        exist are not changed: give them Email on their own page. Revansa does not create mailboxes at the provider: each
+        client still needs a mailbox assigned below.
+      </p>
+      <span className="admin-settings__status">
+        <span className="c-3 t-body-sm">New clients</span>
+        <Chip tint={on ? "success" : "neutral"}>{on ? "Email on" : "Email off"}</Chip>
+        <Button
+          variant="secondary"
+          size="sm"
+          loading={busy}
+          disabled={!on && !ready}
+          disabledReason={
+            !canEdit ? "Only an owner can change integrations." : !on && !ready ? "Both logins must be accepted first." : undefined
+          }
+          onClick={toggle}
+        >
+          {on ? "Turn off for new clients" : "Turn on for new clients"}
+        </Button>
+      </span>
+      {error ? (
+        <p className="admin-alert admin-alert--danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {awaiting.length > 0 ? (
+        <p className="admin-alert admin-alert--info" role="status">
+          Waiting for a mailbox ({awaiting.length}): {awaiting.join(", ")}. Assign
+          one on each client&apos;s page.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const LOGIN_STATE_LABELS: Record<string, string> = {
+  not_configured: "not configured",
+  not_tested: "not tested",
+  authenticated: "authenticated",
+  failed: "login failed",
+};
 
 function EmailSection({ canEdit }: { canEdit: boolean }) {
   const store = useGlobalCredentials();
+  const [status, setStatus] = useState<EmailServiceStatus | null>(null);
+  const refreshStatus = () => {
+    adminEmailServiceStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  };
+  // After a save the logins are checked at once (no message is sent or read), so the state shown
+  // is the proof of what was just saved and not the mere presence of the fields. A removal or an
+  // incomplete configuration is answered by the server without connecting anywhere.
+  const [checking, setChecking] = useState(false);
+  const verifyAfterSave = async () => {
+    setChecking(true);
+    try {
+      await adminTestEmailSmtp().catch(() => undefined);
+      await adminTestEmailImap().catch(() => undefined);
+    } finally {
+      setChecking(false);
+      refreshStatus();
+    }
+  };
+  useEffect(refreshStatus, []);
+  const [stateLabel, tint] = status ? EMAIL_STATE_LABELS[status.state] : ["Unknown", "neutral" as const];
   return (
     <Glass level={1} className="admin-settings__card" aria-labelledby="settings-email">
       <div className="admin-settings__head">
         <h2 className="t-h2" id="settings-email">
           Email servers
         </h2>
+        <span className="admin-settings__status">
+          <span className="c-3 t-body-sm">Service status</span>
+          <Chip tint={tint}>{stateLabel}</Chip>
+        </span>
       </div>
       <p className="c-2 t-body-sm">
         The servers of the mailboxes Revansa provides. Mailboxes are assigned to clients one by one by an administrator; this
         page only describes the servers.
       </p>
-      <CredentialGroup store={store} fields={EMAIL_FIELDS} canEdit={canEdit} />
+      {checking ? (
+        <p className="c-3 t-body-sm" role="status">
+          Checking the logins…
+        </p>
+      ) : null}
+      {status ? (
+        <div role="status">
+          <p className="c-3 t-body-sm">
+            SMTP: {LOGIN_STATE_LABELS[status.smtp]}
+            {status.smtp_problem ? ` — ${status.smtp_problem}` : ""}
+          </p>
+          <p className="c-3 t-body-sm">
+            IMAP: {LOGIN_STATE_LABELS[status.imap]}
+            {status.imap_problem ? ` — ${status.imap_problem}` : ""}
+          </p>
+          {status.missing.length > 0 ? <p className="c-3 t-body-sm">Missing: {status.missing.join(", ")}</p> : null}
+        </div>
+      ) : null}
+      <NewClientsAccess status={status} canEdit={canEdit} onChanged={setStatus} />
+      <AdminEmailActivationRequests />
+      <CredentialGroup store={store} fields={EMAIL_DOMAIN_FIELDS} canEdit={canEdit} onChanged={verifyAfterSave} />
+      <h3 className="admin-settings__subhead">Sending (SMTP)</h3>
+      <CredentialGroup store={store} fields={EMAIL_SMTP_FIELDS} canEdit={canEdit} onChanged={verifyAfterSave} />
+      <TestButton label="Test SMTP login" run={adminTestEmailSmtp} verdict={["Login accepted. ", "Login failed. "]} onDone={refreshStatus} />
+      <h3 className="admin-settings__subhead">Receiving (IMAP)</h3>
+      <CredentialGroup store={store} fields={EMAIL_IMAP_FIELDS} canEdit={canEdit} onChanged={verifyAfterSave} />
+      <TestButton label="Test IMAP login" run={adminTestEmailImap} verdict={["Login accepted. ", "Login failed. "]} onDone={refreshStatus} />
+      <p className="c-3 t-body-sm">
+        A login test connects over an encrypted connection and logs in with the saved username and password. It sends no message
+        and reads or changes none. These logins only check that the servers accept an authentication: each client mailbox has
+        its own address and password, set on the client&apos;s page.
+      </p>
       <TestButton label="Test servers" run={adminTestEmailServers} />
       <p className="c-3 t-body-sm">
         The test opens an encrypted connection to each server and closes it. It does not log in and sends or reads no message,
@@ -566,7 +778,17 @@ function CredentialRow({
   );
 }
 
-function TestButton({ label, run }: { label: string; run: () => Promise<ConnectionTest> }) {
+function TestButton({
+  label,
+  run,
+  verdict = ["Connection OK. ", "Connection failed. "],
+  onDone,
+}: {
+  label: string;
+  run: () => Promise<ConnectionTest>;
+  verdict?: [string, string];
+  onDone?: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ConnectionTest | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -581,6 +803,7 @@ function TestButton({ label, run }: { label: string; run: () => Promise<Connecti
       setError(err instanceof AdminApiError ? err.message : "The test could not be run.");
     } finally {
       setBusy(false);
+      onDone?.();
     }
   }
 
@@ -599,7 +822,7 @@ function TestButton({ label, run }: { label: string; run: () => Promise<Connecti
       {result ? (
         <div role="status">
           <p className={result.ok ? "admin-alert admin-alert--success" : "admin-alert admin-alert--danger"}>
-            {result.ok ? "Connection OK. " : "Connection failed. "}
+            {result.ok ? verdict[0] : verdict[1]}
             {result.message}
           </p>
           {Object.entries(result.details).map(([name, value]) => (

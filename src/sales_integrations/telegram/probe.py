@@ -33,6 +33,12 @@ class BotCheck:
         if reply.result is not True:
             raise BotCheckError("service_error")
 
+    def delete_webhook(self) -> None:
+        """Tell Telegram to stop delivering this bot's messages to the platform."""
+        reply = self._ask(self._api.delete_webhook)
+        if reply.result is not True:
+            raise BotCheckError("service_error")
+
     def webhook_state(self, expected_url: str | None) -> str:
         """`ok`, `not_set`, `other_url` or `failing`."""
         reply = self._ask(self._api.webhook_info)

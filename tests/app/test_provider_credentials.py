@@ -67,6 +67,10 @@ PLATFORM_MAIL_KEYS = {
     "email.platform_imap_host",
     "email.platform_imap_port",
     "email.platform_imap_security",
+    "email.platform_smtp_username",
+    "email.platform_smtp_password",
+    "email.platform_imap_username",
+    "email.platform_imap_password",
 }
 # Declared by a descriptor, not yet storable through the Admin API (the catalog does not list them).
 NOT_YET_IN_CATALOG = {"meta.api_key", "meta.base_url"}

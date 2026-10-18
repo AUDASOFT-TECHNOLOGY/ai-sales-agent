@@ -14,14 +14,22 @@ import { Chip } from "../../ui/Chip";
 import { Button } from "../../ui/Button";
 import { FieldShell, TextInput } from "../../ui/Controls";
 import { useAdminAuth } from "../AdminAuthContext";
+import { AdminClientActivationCard } from "./AdminEmailActivation";
+import { AdminClientMailboxCard } from "./AdminClientMailboxCard";
+import { AdminClientTelegramCard } from "./AdminClientTelegramCard";
 import { AdminClientSendCapCard } from "./AdminClientSendCapCard";
 import {
   AdminApiError,
+  adminConnectClientTelegram,
+  adminDisconnectClientTelegram,
   adminGetClient,
   adminGetClientPlan,
   adminGetLLMSettings,
+  adminListClientCredentials,
   adminListPlans,
+  adminSaveClientCredential,
   adminSetClientPlan,
+  adminTestClientTelegram,
   adminUpdateClient,
   adminUpdateClientLLM,
   type ClientDetail,
@@ -146,6 +154,48 @@ function ClientDetailView({ clientId }: { clientId: string | undefined }) {
         />
       ) : null}
     </div>
+  );
+}
+
+/** Loads which Telegram pieces are stored (never their values) and mounts the bot card with its calls.
+ *  Only an owner may change a client's bot: the routes are owner-only on the server. */
+function ClientTelegramSection({ clientId, canEdit }: { clientId: string; canEdit: boolean }) {
+  const [stored, setStored] = useState<{ token: boolean; connected: boolean } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    adminListClientCredentials(clientId)
+      .then((list) => {
+        if (!alive) return;
+        const has = (key: string) => list.some((c) => c.key === key && c.configured);
+        setStored({ token: has("telegram.bot_token"), connected: has("telegram.webhook_secret") });
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [clientId]);
+  if (failed) {
+    return (
+      <p className="admin-alert admin-alert--danger" role="alert">
+        Could not load this client&apos;s Telegram status.
+      </p>
+    );
+  }
+  if (stored === null) return <p className="c-3 t-body-sm">Loading…</p>;
+  return (
+    <AdminClientTelegramCard
+      clientId={clientId}
+      canEdit={canEdit}
+      tokenConfigured={stored.token}
+      connected={stored.connected}
+      onSaveToken={(token) => adminSaveClientCredential(clientId, "telegram.bot_token", token)}
+      onConnect={() => adminConnectClientTelegram(clientId)}
+      onTest={() => adminTestClientTelegram(clientId)}
+      onDisconnect={() => adminDisconnectClientTelegram(clientId)}
+    />
   );
 }
 
@@ -293,6 +343,21 @@ function ClientSheet({
         <Glass level={1} className="admin-detail-card">
           <h3 className="t-label c-2">Daily email limit</h3>
           <AdminClientSendCapCard clientId={client.client_id} />
+        </Glass>
+
+        <Glass level={1} className="admin-detail-card">
+          <h3 className="t-label c-2">Email activation</h3>
+          <AdminClientActivationCard clientId={client.client_id} />
+        </Glass>
+
+        <Glass level={1} className="admin-detail-card">
+          <h3 className="t-label c-2">Email mailbox</h3>
+          <AdminClientMailboxCard clientId={client.client_id} />
+        </Glass>
+
+        <Glass level={1} className="admin-detail-card">
+          <h3 className="t-label c-2">Telegram bot</h3>
+          <ClientTelegramSection clientId={client.client_id} canEdit={admin !== null && CAN_EDIT_LLM_ROLES.has(admin.role)} />
         </Glass>
       </div>
     </>

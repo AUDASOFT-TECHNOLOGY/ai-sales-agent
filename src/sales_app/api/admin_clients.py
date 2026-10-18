@@ -24,6 +24,7 @@ or not started) is shown from its published settings and picks them up when it s
 import base64
 import binascii
 import contextlib
+import logging
 import re
 import shutil
 from collections.abc import Collection, Mapping
@@ -988,6 +989,27 @@ def _lane_hubspot_index(document: Mapping[str, Any]) -> int | None:
     )
 
 
+log = logging.getLogger(__name__)
+
+
+def _grant_new_client_channels(application: Application, client_id: str, actor: str) -> None:
+    """Give a client that has just been created the channels the Admin decided new clients get
+    (Email, once the service is switched on), as that client's own exception. Existing clients are
+    never touched. A failure here never undoes the creation: the Admin can grant the channel by hand."""
+    policy = application.channel_policy
+    if policy is None:
+        return
+    try:
+        known = [
+            d.key
+            for d in application.provider_registry.list(ProviderKind.CHANNEL)
+            if d.kind is ProviderKind.CHANNEL and d.runnable
+        ]
+        policy.grant_new_client(client_id, actor=f"admin:{actor}", known=known)
+    except Exception:  # noqa: BLE001 - creating the client matters more than this grant
+        log.warning("could not give the new client %s its channels", client_id)
+
+
 def create_admin_clients_router(application: Application) -> APIRouter:
     get_current_admin = make_current_admin_dependency(application.admin_auth)
     require_owner = require_role(get_current_admin, AdminRole.OWNER)
@@ -1256,6 +1278,7 @@ def create_admin_clients_router(application: Application) -> APIRouter:
         application.registry.add_disabled(client_id)
         if body.plan_id is not None:
             _assign_new_client(application, client_id, body.plan_id, admin.username)
+        _grant_new_client_channels(application, client_id, admin.username)
         return _summary_from_raw(client_id, raw)
 
     @router.put("/clients/{client_id}/llm", response_model=ClientLLMResponse)

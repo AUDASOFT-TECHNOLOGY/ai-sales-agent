@@ -175,6 +175,10 @@ class TestGlobalCredentials:
             "email.platform_imap_host",
             "email.platform_imap_port",
             "email.platform_imap_security",
+            "email.platform_smtp_username",
+            "email.platform_smtp_password",
+            "email.platform_imap_username",
+            "email.platform_imap_password",
         }
         assert all(c["configured"] is False and c["value"] is None for c in body)
         assert all(c["scope"] == "global" for c in body)

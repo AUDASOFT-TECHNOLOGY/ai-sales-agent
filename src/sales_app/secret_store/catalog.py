@@ -67,6 +67,8 @@ _MAIL_DOMAIN = re.compile(
 _SMTP_PORT = re.compile(r"^(25|465|587|2525)$")
 _IMAP_PORT = re.compile(r"^(143|993)$")
 _MAIL_SECURITY = re.compile(r"^(starttls|ssl)$")
+_MAIL_LOGIN = re.compile(r"^[^\s<>,;\"'()\[\]\\]{1,254}$")
+_LOGIN_RULE = "must be a login (an address or a name, without spaces)"
 _HOST_RULE = "must be a host name (letters, digits, dots and hyphens)"
 _SECURITY_RULE = "must be starttls or ssl"
 # The address of a mailbox Revansa assigns to a client (`email.platform_mailbox`). The same rules as
@@ -231,6 +233,27 @@ CATALOG: tuple[CredentialSpec, ...] = (
         pattern=_MAIL_SECURITY,
         rule=_SECURITY_RULE,
     ),
+    # The login the Admin gives to check that each server really accepts an authentication. It is a
+    # test account of the platform: no client ever receives it (a client's mailbox has its own
+    # address and its own password), and it is not part of the profile a mailbox needs.
+    CredentialSpec(
+        "email.platform_smtp_username",
+        ScopeKind.GLOBAL,
+        "Platform SMTP username",
+        sensitive=False,
+        pattern=_MAIL_LOGIN,
+        rule=_LOGIN_RULE,
+    ),
+    CredentialSpec("email.platform_smtp_password", ScopeKind.GLOBAL, "Platform SMTP password"),
+    CredentialSpec(
+        "email.platform_imap_username",
+        ScopeKind.GLOBAL,
+        "Platform IMAP username",
+        sensitive=False,
+        pattern=_MAIL_LOGIN,
+        rule=_LOGIN_RULE,
+    ),
+    CredentialSpec("email.platform_imap_password", ScopeKind.GLOBAL, "Platform IMAP password"),
     # ---- one client ---------------------------------------------------------------------
     CredentialSpec("whatsapp.access_token", ScopeKind.CLIENT, "WhatsApp access token"),
     CredentialSpec(

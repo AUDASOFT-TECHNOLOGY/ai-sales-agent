@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from sales_app.config import ClientConfig
 from sales_app.config.email_settings import (
     CUSTOM_MODE,
+    DEFAULT_SUBJECT,
     PLATFORM_MODE,
     EmailChannelSettings,
     GmailEmailSettings,
@@ -28,7 +29,7 @@ from sales_app.config.email_settings import (
     parse_email_settings,
 )
 from sales_app.config.secrets import EMAIL_PASSWORD, EMAIL_PLATFORM_MAILBOX
-from sales_app.email_platform import read_profile
+from sales_app.email_platform import PlatformMailProfile, read_profile
 from sales_integrations.mail import ImapSettings, SmtpSettings
 
 
@@ -114,6 +115,28 @@ def _platform(config: ClientConfig, settings: PlatformEmailSettings) -> MailboxA
     password = config.secrets.get_optional(EMAIL_PASSWORD)
     if not password:
         raise MailboxNotReadyError("the mailbox assigned to this account has no password")
+    # The name is the Sender Name the client confirmed (`from_name` of its own channel settings),
+    # distinct from its commercial name. Until one is confirmed, the commercial name
+    # (`display_name`) is used as the proposal it is. Both are made safe for a header.
+    return platform_access(
+        profile,
+        address,
+        password,
+        from_name=sender_name(settings.from_name) or sender_name(config.spec.display_name),
+        subject=settings.subject,
+    )
+
+
+def platform_access(
+    profile: PlatformMailProfile,
+    address: str,
+    password: str,
+    *,
+    from_name: str | None = None,
+    subject: str = DEFAULT_SUBJECT,
+) -> MailboxAccess:
+    """The platform's servers with one assigned mailbox's own login. The sender is always that
+    mailbox's address: nothing here lets a message leave under another identity."""
     return MailboxAccess(
         mode=PLATFORM_MODE,
         smtp=SmtpSettings(
@@ -123,8 +146,8 @@ def _platform(config: ClientConfig, settings: PlatformEmailSettings) -> MailboxA
             username=address,
             password=password,
             from_address=address,
-            from_name=settings.from_name,
-            subject=settings.subject,
+            from_name=from_name,
+            subject=subject,
         ),
         imap=ImapSettings(
             host=profile.imap_host,

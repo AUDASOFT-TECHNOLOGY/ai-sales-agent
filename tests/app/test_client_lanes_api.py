@@ -12,9 +12,9 @@ what they did.
 Nothing here reaches a CRM, a spreadsheet, a mailbox or a messaging service: the lanes are settings.
 """
 
+import json
 from copy import deepcopy
 
-import json
 import pytest
 from test_client_agent_api import AGENT, START, World, mark_source_tested
 
@@ -468,7 +468,17 @@ def test_the_settings_of_a_channel_still_in_use_stay_when_another_lane_changes(w
     )
     assert response.status_code == 200, response.text
     assert document_of(world)["channel"]["settings"]["smtp_host"] == "smtp.example.org"
-    assert alpha.get(CHANNEL).json()["email"]["smtp_host"] == "smtp.example.org"
+    shown = alpha.get(CHANNEL).json()["email"]
+    # Wording and mode only: the servers are never shown to the client.
+    # (`activation` and `sending` are statuses in plain words, not settings.)
+    assert set(shown) == {
+        "mode",
+        "from_name",
+        "sender_name_confirmed",
+        "subject",
+        "activation",
+        "sending",
+    }
 
 
 def test_the_settings_of_a_channel_no_lane_uses_any_more_are_dropped_with_it(world, alpha):
@@ -640,17 +650,22 @@ def test_the_historical_source_route_cannot_undo_lanes(world, alpha):
     assert document_of(world) == before
 
 
-def test_the_historical_channel_route_edits_the_mailbox_of_a_lane_channel_only(world, alpha):
+def test_the_historical_channel_route_words_the_mailbox_of_a_lane_channel_only(world, alpha):
     allow_email(world)
     assert new_lane(alpha, channel="email").status_code == 201
     before = document_of(world)
     response = alpha.put(
-        CHANNEL, json={"expected_version": version_of(alpha), "channel": "email", "email": MAIL}
+        CHANNEL,
+        json={
+            "expected_version": version_of(alpha),
+            "channel": "email",
+            "email": {"subject": "About your enquiry"},
+        },
     )
     assert response.status_code == 200, response.text
     after = document_of(world)
     assert after["lanes"] == before["lanes"] and after["sources"] == before["sources"]
-    assert after["channel"]["settings"]["smtp_host"] == "smtp.example.org"
+    assert after["channel"]["settings"] == {"mode": "platform", "subject": "About your enquiry"}
 
 
 def test_the_historical_routes_are_unchanged_for_a_client_without_lanes(world):

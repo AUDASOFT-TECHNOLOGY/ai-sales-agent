@@ -28,23 +28,33 @@ from test_client_source_api import (  # noqa: F401 - fixtures
     stored_token,
     world,
 )
+from test_email_channel_api import wire_legacy_mailbox
+
+from sales_app.secret_store import GLOBAL_SCOPE, client_scope
 
 ADMIN_SOURCE = "/admin/v1/clients/alpha/source"
 CHANNEL = "/client/v1/channel"
 MAPPING = {"NEW": "new", "BAD_TIMING": "paused", "UNQUALIFIED": "closed"}
 SETTINGS = {"status_property": "hs_lead_status", "status_mapping": MAPPING}
-MAIL = {
-    "from_address": "sales@example.org",
-    "username": "sales@example.org",
-    "smtp_host": "smtp.example.org",
-    "imap_host": "imap.example.org",
-}
+MAIL = {"from_name": "Naga Sales", "subject": "About your enquiry"}
+
+
+def wire_whatsapp(world, *client_ids):
+    """What the Admin stores for WhatsApp: a channel is ready only once every Meta credential is."""
+    credentials = world.application.credentials
+    credentials.save(GLOBAL_SCOPE, "whatsapp.app_secret", "app-secret-marker", actor="test")
+    credentials.save(GLOBAL_SCOPE, "whatsapp.verify_token", "verify-marker", actor="test")
+    for index, cid in enumerate(client_ids):
+        scope = client_scope(cid)
+        credentials.save(scope, "whatsapp.access_token", f"token-{cid}", actor="test")
+        credentials.save(scope, "whatsapp.phone_number_id", f"123456789{index:04d}", actor="test")
 
 
 @pytest.fixture
 def lanes_world(world):
     standard(world, "alpha", "x")
     standard(world, "beta", "y")
+    wire_whatsapp(world, "alpha", "beta")
     return world
 
 
@@ -340,24 +350,21 @@ def test_every_channel_of_the_lanes_is_judged_on_its_own(lanes_world, alpha):
     alpha.post(TEST)
     shown = checks(alpha)
     assert shown["whatsapp_number"]["ok"] is True  # the WhatsApp lanes are fine
-    assert (
-        shown["channel_ready"]["ok"] is False
-        and "email settings" in shown["channel_ready"]["message"]
-    )
+    assert shown["channel_ready"]["ok"] is False
+    assert "setting up this channel" in shown["channel_ready"]["message"]
     assert alpha.get(READINESS).json()["ready"] is False
 
     put = alpha.put(
         CHANNEL, json={"expected_version": version(alpha), "channel": "email", "email": MAIL}
     )
     assert put.status_code == 200, put.text
-    assert "password is missing" in checks(alpha)["channel_ready"]["message"]
-    assert (
-        alpha.put(f"{CHANNEL}/credentials", json={"password": "S3cret-mail-pass!"}).status_code
-        == 200
-    )
+    message = checks(alpha)["channel_ready"]["message"]
+    assert "setting up this channel" in message and "password" not in message.lower()
+    wire_legacy_mailbox(lanes_world)  # the platform wires the mailbox; the client types nothing
     alpha.post(TEST)
     assert checks(alpha)["channel_ready"]["ok"] is True
-    assert alpha.get(READINESS).json()["ready"] is True
+    unmet = {k: v["message"] for k, v in checks(alpha).items() if not v["ok"]}
+    assert alpha.get(READINESS).json()["ready"] is True, unmet
 
 
 def test_a_channel_the_admin_took_away_blocks_the_lane_client(lanes_world, alpha):
@@ -367,7 +374,7 @@ def test_a_channel_the_admin_took_away_blocks_the_lane_client(lanes_world, alpha
     shown = checks(alpha)
     assert (
         shown["channel_ready"]["ok"] is False
-        and "not authorized" in shown["channel_ready"]["message"]
+        and "no longer available" in shown["channel_ready"]["message"]
     )
 
 

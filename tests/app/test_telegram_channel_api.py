@@ -1,11 +1,13 @@
-"""`/client/v1/channel` for a Telegram bot: choosing it, the token, connecting it, testing it.
+"""`/client/v1/channel` for Telegram, and the Admin's connection of the bot.
 
-Covers: the channel is the Admin's to allow and offered only when allowed; the bot's token is
-written, never read (no response, error or audit event carries it) and never accepted under another
-name; connecting generates the webhook secret and tells Telegram where to deliver, and stores the
-secret only once Telegram agreed; another token drops the connection it belonged to; the connection
-test says what is wrong in fixed sentences; the readiness check keeps the agent from starting on a
-bot that is not connected; and a client sees only its own bot.
+Covers: the channel is the Admin's to allow and offered only when allowed; what the client may say
+(the sentences its bot uses) and what it may not (a token, a webhook, anything technical); that no
+Client route writes, removes, tests or connects a bot; that the Admin stores the bot's token and
+connects it -- generating the webhook secret, telling Telegram where to deliver, and storing the
+secret only once Telegram agreed; that another token drops the connection it belonged to; where the
+channel stands for the client (waiting for the platform, then ready) in words with nothing technical;
+the readiness check that keeps the agent from starting on a bot that is not connected; and a client
+sees only its own bot.
 
 Telegram is a double (`BotDouble`): nothing here proves a real bot accepts anything.
 """
@@ -15,21 +17,38 @@ import logging
 from dataclasses import asdict
 
 import pytest
-from test_admin_clients_api import PASSWORD  # noqa: F401  (the fixtures of the shared World)
+from test_admin_clients_api import PASSWORD
 from test_client_agent_api import AGENT, READINESS, START, World
 
 from sales_app.connection_tests import BotProbeFailure
 from sales_app.secret_store import InMemorySecretAudit, InMemorySecretStore, client_scope
 
 CHANNEL = "/client/v1/channel"
-CREDENTIALS = f"{CHANNEL}/credentials"
-TEST = f"{CHANNEL}/test"
-CONNECT = f"{CHANNEL}/connect"
 INVITATIONS = f"{CHANNEL}/invitations"
 GLOBAL = "/admin/v1/settings/channels"
 TOKEN = "123456789:AAH-secret-token-value-of-the-bot_xx"
 OTHER_TOKEN = "987654321:AAH-another-token-value-of-the-bot_yy"
 URL = "https://revansa.example/webhooks/telegram"
+TECHNICAL_WORDS = (
+    "password",
+    "token",
+    "smtp",
+    "imap",
+    "webhook",
+    "server",
+    "port",
+    "login",
+    "secret",
+)
+TECHNICAL_KEYS = {"bot_token", "token", "credential", "secret", "webhook", "connected", "problem"}
+
+
+def admin_token(cid="alpha"):
+    return f"/admin/v1/clients/{cid}/integrations/telegram.bot_token"
+
+
+def admin_connect(cid="alpha"):
+    return f"/admin/v1/clients/{cid}/integrations/telegram/connect"
 
 
 class BotDouble:
@@ -40,6 +59,8 @@ class BotDouble:
         self.registered: list[tuple[str, str]] = []  # (url, secret) as Telegram was told
         self.bot_failure: str | None = None
         self.register_failure: str | None = None
+        self.deleted = 0
+        self.delete_failure: str | None = None
         self.state: str | None = None  # what the webhook looks like, when not simply "as told"
         self.username = "naga_bot"
 
@@ -58,6 +79,12 @@ class BotDouble:
                     raise BotProbeFailure(double.register_failure)
                 double.registered.append((url, secret))
 
+            def delete_webhook(self):
+                if double.delete_failure:
+                    raise BotProbeFailure(double.delete_failure)
+                double.deleted += 1
+                double.registered.clear()
+
             def webhook_state(self, expected_url):
                 if double.state:
                     return double.state
@@ -71,10 +98,7 @@ class BotDouble:
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
-    from sales_app.api import client_channel
-
-    monkeypatch.setattr(client_channel, "TEST_MIN_INTERVAL_SECONDS", 0.0)
+def world(tmp_path):
     audit = InMemorySecretAudit()
     w = World(tmp_path, secret_store=InMemorySecretStore(), secret_audit=audit)
     w.audit, w.bot = audit, BotDouble()
@@ -114,8 +138,10 @@ def choose(client, channel="telegram", telegram=None, expected="current"):
     return client.put(CHANNEL, json=body)
 
 
-def save_token(client, value=TOKEN):
-    return client.put(CREDENTIALS, json={"bot_token": value})
+def give_token(admin, value=TOKEN, cid="alpha"):
+    """What the Admin does: the bot's token is a credential of the client's scope that only the
+    platform writes."""
+    return admin.put(admin_token(cid), json={"value": value})
 
 
 def stored(world, key, cid="alpha"):
@@ -125,6 +151,20 @@ def stored(world, key, cid="alpha"):
 def ready(client):
     checks = {c["id"]: c for c in client.get(READINESS).json()["checks"]}
     return checks["channel_ready"]
+
+
+def _keys(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from _keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _keys(item)
+
+
+def _is_plain(text):
+    return not any(word in text.lower() for word in TECHNICAL_WORDS)
 
 
 @pytest.fixture
@@ -137,13 +177,29 @@ def on_telegram(world, alpha, admin):
 # ---- authentication and the Admin's authority -------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("method", "url"),
-    [("post", CONNECT), ("get", INVITATIONS), ("post", TEST), ("put", CREDENTIALS)],
-)
-def test_every_telegram_route_needs_a_client_session(world, method, url):
-    response = getattr(world.anonymous(), method)(url, **({"json": {}} if method == "put" else {}))
+@pytest.mark.parametrize("method", ["get", "put"])
+def test_the_client_routes_need_a_client_session(world, method):
+    response = getattr(world.anonymous(), method)(
+        INVITATIONS if method == "get" else CHANNEL, **({"json": {}} if method == "put" else {})
+    )
     assert response.status_code == 401
+
+
+def test_a_client_cannot_use_the_admin_routes_that_store_or_connect_a_bot(alpha):
+    assert alpha.put(admin_token(), json={"value": TOKEN}).status_code == 401
+    assert alpha.post(admin_connect()).status_code == 401
+
+
+def test_only_an_owner_may_connect_a_bot(world):
+    from test_email_channel_api import _admin
+
+    from sales_app.admin_auth import AdminRole
+
+    world.users.create(_admin("eve", AdminRole.EDITOR))
+    editor = world.anonymous()
+    editor.post("/admin/v1/auth/login", json={"username": "eve", "password": PASSWORD})
+    assert editor.post(admin_connect()).status_code == 403
+    assert editor.put(admin_token(), json={"value": TOKEN}).status_code == 403
 
 
 class TestTheAdminAllowsTheChannel:
@@ -166,32 +222,26 @@ class TestTheAdminAllowsTheChannel:
     def test_taking_it_away_makes_the_client_not_ready_and_refuses_its_routes(
         self, on_telegram, alpha, admin
     ):
-        save_token(alpha)
+        give_token(admin)
         admin.put("/admin/v1/clients/alpha/channels", json={"removed": ["telegram"]})
-        assert alpha.get(CHANNEL).json()["authorized"] is False
-        assert "not authorized" in ready(alpha)["message"]
-        assert alpha.post(CONNECT).status_code == 403
-        assert alpha.post(TEST).status_code == 403
+        body = alpha.get(CHANNEL).json()
+        assert body["authorized"] is False and body["status"] == "action_required"
+        assert "no longer available" in ready(alpha)["message"]
         assert alpha.get(INVITATIONS).status_code == 403
-        assert save_token(alpha).status_code == 403
 
 
 # ---- choosing it --------------------------------------------------------------------------------
 
 
 class TestChoosing:
-    def test_a_fresh_choice_shows_the_defaults_and_what_is_missing(self, on_telegram):
+    def test_a_fresh_choice_shows_the_defaults_and_waits_for_the_platform(self, on_telegram):
         body = on_telegram.get(CHANNEL).json()
         assert body["channel"] == "telegram" and body["authorized"] is True
-        assert body["telegram"]["connected"] is False
         assert "WhatsApp" not in body["telegram"]["contact_prompt"]
-        assert body["credential"] == {
-            "label": "Telegram bot token",
-            "configured": False,
-            "updated_at": None,
-        }
-        assert "token" in body["problem"].lower()
+        assert body["status"] == "waiting_platform"
+        assert _is_plain(body["status_message"])
         assert body["email"] is None
+        assert not (set(_keys(body)) & TECHNICAL_KEYS)
 
     def test_the_sentences_the_bot_uses_can_be_the_clients_own(self, on_telegram):
         words = {
@@ -227,8 +277,20 @@ class TestChoosing:
         response = choose(on_telegram, telegram={"not_found_text": "secret\x00words"})
         assert "secret" not in response.text and "not_found_text" in response.text
 
-    def test_a_token_cannot_be_smuggled_in_with_the_settings(self, on_telegram):
-        response = choose(on_telegram, telegram={"bot_token": TOKEN})
+    @pytest.mark.parametrize("name", ["bot_token", "webhook_url", "webhook_secret", "token"])
+    def test_a_technical_setting_cannot_be_smuggled_in_with_the_sentences(
+        self, on_telegram, world, name
+    ):
+        before = world.config_store.history("alpha")
+        response = choose(on_telegram, telegram={name: TOKEN})
+        assert response.status_code == 422 and TOKEN not in response.text
+        assert world.config_store.history("alpha") == before
+
+    def test_a_token_beside_the_channel_is_refused_and_not_echoed(self, on_telegram):
+        version = on_telegram.get(CHANNEL).json()["version"]
+        response = on_telegram.put(
+            CHANNEL, json={"expected_version": version, "channel": "telegram", "bot_token": TOKEN}
+        )
         assert response.status_code == 422 and TOKEN not in response.text
 
     def test_telegram_settings_belong_to_telegram(self, alpha, admin):
@@ -249,64 +311,82 @@ class TestChoosing:
         allow_telegram(admin)
         choose(alpha)
         choose(beta)
-        save_token(alpha)
-        assert beta.get(CHANNEL).json()["credential"]["configured"] is False
+        give_token(admin)
+        assert beta.get(CHANNEL).json()["status"] == "waiting_platform"
         assert stored(world, "telegram.bot_token", "beta") is None
 
 
-# ---- the token ---------------------------------------------------------------------------------
+# ---- nothing technical is the client's ---------------------------------------------------------
 
 
-class TestTheToken:
-    def test_it_is_stored_and_never_returned(self, world, on_telegram):
-        response = save_token(on_telegram)
-        assert response.status_code == 200 and response.json()["configured"] is True
-        assert TOKEN not in response.text
+class TestNoTechnicalConfiguration:
+    @pytest.mark.parametrize(
+        ("method", "url"),
+        [
+            ("put", f"{CHANNEL}/credentials"),
+            ("delete", f"{CHANNEL}/credentials"),
+            ("post", f"{CHANNEL}/connect"),
+            ("post", f"{CHANNEL}/test"),
+        ],
+    )
+    def test_a_client_has_no_route_to_store_connect_or_test_a_bot(
+        self, world, on_telegram, method, url
+    ):
+        body = {"json": {"bot_token": TOKEN}} if method == "put" else {}
+        response = getattr(on_telegram, method)(url, **body)
+        assert response.status_code in (404, 405) and TOKEN not in response.text
+        assert stored(world, "telegram.bot_token") is None
+        assert world.bot.registered == [] and world.bot.tokens == []
+
+    def test_a_response_carries_no_token_secret_or_technical_field(
+        self, world, on_telegram, admin, caplog
+    ):
+        caplog.set_level(logging.DEBUG)
+        give_token(admin)
+        admin.post(admin_connect())
+        response = on_telegram.get(CHANNEL)
+        secret = stored(world, "telegram.webhook_secret")
+        assert TOKEN not in response.text and secret not in response.text
+        assert TOKEN not in caplog.text and secret not in caplog.text
+        assert not (set(_keys(response.json())) & TECHNICAL_KEYS)
+
+    def test_the_invitations_carry_no_token_or_secret(self, world, on_telegram, admin):
+        give_token(admin)
+        admin.post(admin_connect())
+        response = on_telegram.get(INVITATIONS)
+        secret = stored(world, "telegram.webhook_secret")
+        assert TOKEN not in response.text and secret not in response.text
+
+
+# ---- the Admin stores and connects the bot -----------------------------------------------------
+
+
+class TestTheAdminStoresTheToken:
+    def test_it_is_stored_and_never_returned(self, world, on_telegram, admin):
+        response = give_token(admin)
+        assert response.status_code == 200 and TOKEN not in response.text
         assert TOKEN not in on_telegram.get(CHANNEL).text
         assert stored(world, "telegram.bot_token") == TOKEN
 
-    def test_it_is_in_no_audit_event_and_no_log(self, world, on_telegram, caplog):
+    def test_it_is_in_no_audit_event_and_no_log(self, world, on_telegram, admin, caplog):
         with caplog.at_level(logging.DEBUG):
-            save_token(on_telegram)
-            on_telegram.post(CONNECT)
+            give_token(admin)
+            admin.post(admin_connect())
         events = json.dumps([asdict(e) | {"at": ""} for e in world.audit.recent()], default=str)
         assert TOKEN not in events and "telegram.bot_token" in events
         assert TOKEN not in caplog.text
 
-    def test_a_token_that_is_not_one_is_refused_without_being_repeated(self, on_telegram):
-        response = save_token(on_telegram, "not-a-token")
+    def test_a_token_that_is_not_one_is_refused_without_being_repeated(self, on_telegram, admin):
+        response = give_token(admin, "not-a-token")
         assert response.status_code == 422 and "not-a-token" not in response.text
-        assert "BotFather" in response.text
-
-    def test_only_the_expected_field_is_accepted(self, on_telegram):
-        for body in ({"password": TOKEN}, {"bot_token": TOKEN, "extra": 1}, {}, {"bot_token": 1}):
-            response = on_telegram.put(CREDENTIALS, json=body)
-            assert response.status_code == 422 and TOKEN not in response.text
-
-    def test_a_client_on_whatsapp_has_no_token_to_give(self, alpha):
-        assert save_token(alpha).status_code == 409
-
-    def test_a_client_on_telegram_cannot_write_a_mailbox_password(self, on_telegram):
-        assert (
-            on_telegram.put(CREDENTIALS, json={"password": "S3cret-mail-pass!"}).status_code == 422
-        )
-
-    def test_it_can_be_removed(self, world, on_telegram):
-        save_token(on_telegram)
-        response = on_telegram.delete(CREDENTIALS)
-        assert response.status_code == 200 and response.json()["configured"] is False
-        assert stored(world, "telegram.bot_token") is None
-
-
-# ---- connecting the bot -----------------------------------------------------------------------
 
 
 class TestConnecting:
     def test_connecting_tells_telegram_where_to_deliver_with_a_secret_only_we_hold(
-        self, world, on_telegram
+        self, world, on_telegram, admin
     ):
-        save_token(on_telegram)
-        response = on_telegram.post(CONNECT)
+        give_token(admin)
+        response = admin.post(admin_connect())
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["ok"] is True and body["details"] == {"bot": "ok", "webhook": "ok"}
@@ -316,87 +396,57 @@ class TestConnecting:
         assert secret not in response.text and TOKEN not in response.text
         assert world.bot.tokens[-1] == TOKEN
 
-    def test_afterwards_the_client_is_connected_and_ready(self, world, on_telegram):
-        save_token(on_telegram)
+    def test_afterwards_the_client_is_ready(self, world, on_telegram, admin):
+        give_token(admin)
         assert ready(on_telegram)["ok"] is False
-        on_telegram.post(CONNECT)
+        admin.post(admin_connect())
         body = on_telegram.get(CHANNEL).json()
-        assert body["telegram"]["connected"] is True and body["problem"] is None
+        assert body["status"] == "ready" and body["status_message"] is None
         assert ready(on_telegram)["ok"] is True
 
     def test_connecting_again_keeps_the_secret_and_so_the_links_already_sent(
-        self, world, on_telegram
+        self, world, on_telegram, admin
     ):
-        save_token(on_telegram)
-        on_telegram.post(CONNECT)
-        on_telegram.post(CONNECT)
+        give_token(admin)
+        admin.post(admin_connect())
+        admin.post(admin_connect())
         assert len({secret for _, secret in world.bot.registered}) == 1
         assert len(world.bot.registered) == 2
 
     def test_the_secret_is_different_for_each_client(self, world, on_telegram, beta, admin):
         allow_telegram(admin)
         choose(beta)
-        save_token(on_telegram)
-        save_token(beta, OTHER_TOKEN)
-        on_telegram.post(CONNECT)
-        beta.post(CONNECT)
+        give_token(admin)
+        give_token(admin, OTHER_TOKEN, "beta")
+        admin.post(admin_connect())
+        admin.post(admin_connect("beta"))
         assert stored(world, "telegram.webhook_secret", "alpha") != stored(
             world, "telegram.webhook_secret", "beta"
         )
 
-    def test_another_bot_is_not_the_one_that_was_connected(self, world, on_telegram):
-        save_token(on_telegram)
-        on_telegram.post(CONNECT)
-        save_token(on_telegram, OTHER_TOKEN)
-        assert stored(world, "telegram.webhook_secret") is None
-        assert on_telegram.get(CHANNEL).json()["telegram"]["connected"] is False
-        assert "connect" in ready(on_telegram)["message"].lower()
-
-    def test_a_mistyped_token_never_disconnects_the_bot_that_works(self, world, on_telegram):
-        save_token(on_telegram)
-        on_telegram.post(CONNECT)
-        secret = stored(world, "telegram.webhook_secret")
-        assert save_token(on_telegram, "oops").status_code == 422
-        assert stored(world, "telegram.webhook_secret") == secret
-        assert on_telegram.get(CHANNEL).json()["telegram"]["connected"] is True
-
-    def test_saving_the_same_token_again_keeps_the_connection(self, world, on_telegram):
-        save_token(on_telegram)
-        on_telegram.post(CONNECT)
-        secret = stored(world, "telegram.webhook_secret")
-        assert save_token(on_telegram, f"  {TOKEN}  ").status_code == 200
-        assert stored(world, "telegram.webhook_secret") == secret
-
-    def test_removing_the_token_disconnects(self, world, on_telegram):
-        save_token(on_telegram)
-        on_telegram.post(CONNECT)
-        on_telegram.delete(CREDENTIALS)
-        assert stored(world, "telegram.webhook_secret") is None
-
-    def test_there_is_nothing_to_connect_without_a_token(self, on_telegram, world):
-        response = on_telegram.post(CONNECT)
+    def test_there_is_nothing_to_connect_without_a_token(self, on_telegram, world, admin):
+        response = admin.post(admin_connect())
         assert response.status_code == 409 and world.bot.registered == []
 
-    def test_a_client_on_another_channel_has_nothing_to_connect(self, alpha):
-        assert alpha.post(CONNECT).status_code == 409
-
-    def test_a_deployment_without_a_public_address_cannot_connect_a_bot(self, world, on_telegram):
+    def test_a_deployment_without_a_public_address_cannot_connect_a_bot(
+        self, world, on_telegram, admin
+    ):
         world.application.settings.public_base_url = None
-        save_token(on_telegram)
-        response = on_telegram.post(CONNECT)
-        assert response.status_code == 409 and "administrator" in response.json()["detail"]
+        give_token(admin)
+        response = admin.post(admin_connect())
+        assert response.status_code == 409 and "public https address" in response.json()["detail"]
         assert world.bot.registered == []
 
     @pytest.mark.parametrize("address", ["http://revansa.example", "revansa.example", "https://"])
-    def test_telegram_only_delivers_to_https(self, world, on_telegram, address):
+    def test_telegram_only_delivers_to_https(self, world, on_telegram, admin, address):
         world.application.settings.public_base_url = address
-        save_token(on_telegram)
-        assert on_telegram.post(CONNECT).status_code == 409
+        give_token(admin)
+        assert admin.post(admin_connect()).status_code == 409
 
-    def test_a_public_address_with_a_path_is_kept(self, world, on_telegram):
+    def test_a_public_address_with_a_path_is_kept(self, world, on_telegram, admin):
         world.application.settings.public_base_url = "https://example.org/revansa/"
-        save_token(on_telegram)
-        on_telegram.post(CONNECT)
+        give_token(admin)
+        admin.post(admin_connect())
         assert world.bot.registered[0][0] == "https://example.org/revansa/webhooks/telegram"
 
     @pytest.mark.parametrize(
@@ -409,81 +459,99 @@ class TestConnecting:
         ],
     )
     def test_a_bot_telegram_will_not_talk_about_is_told_in_a_fixed_sentence(
-        self, world, on_telegram, kind, words
+        self, world, on_telegram, admin, kind, words
     ):
-        save_token(on_telegram)
+        give_token(admin)
         world.bot.bot_failure = kind
-        response = on_telegram.post(CONNECT)
+        response = admin.post(admin_connect())
         assert response.status_code == 200 and response.json()["ok"] is False
         assert words in response.json()["message"] and TOKEN not in response.text
         assert stored(world, "telegram.webhook_secret") is None
-        assert on_telegram.get(CHANNEL).json()["telegram"]["connected"] is False
+        assert on_telegram.get(CHANNEL).json()["status"] == "waiting_platform"
 
-    def test_an_address_telegram_refuses_leaves_the_bot_not_connected(self, world, on_telegram):
-        save_token(on_telegram)
+    def test_an_address_telegram_refuses_leaves_the_bot_not_connected(
+        self, world, on_telegram, admin
+    ):
+        give_token(admin)
         world.bot.register_failure = "rejected"
-        response = on_telegram.post(CONNECT)
+        response = admin.post(admin_connect())
         assert response.json()["ok"] is False and "address" in response.json()["message"]
         assert stored(world, "telegram.webhook_secret") is None
 
-    def test_a_connect_made_too_soon_after_another_waits(self, world, on_telegram, monkeypatch):
-        from sales_app.api import client_channel
-
-        monkeypatch.setattr(client_channel, "TEST_MIN_INTERVAL_SECONDS", 60.0)
-        save_token(on_telegram)
-        on_telegram.post(CONNECT)
-        assert on_telegram.post(CONNECT).status_code == 429
+    def test_a_client_that_does_not_exist_is_not_found(self, admin):
+        assert admin.post(admin_connect("nobody")).status_code == 404
 
 
-# ---- the test ----------------------------------------------------------------------------------
+def admin_test(cid="alpha"):
+    return f"/admin/v1/clients/{cid}/integrations/telegram/test"
 
 
-class TestTheTest:
-    def test_without_a_token_it_says_so(self, on_telegram):
-        body = on_telegram.post(TEST).json()
-        assert body["ok"] is False and "not set yet" in body["message"]
+def admin_disconnect(cid="alpha"):
+    return f"/admin/v1/clients/{cid}/integrations/telegram/disconnect"
 
-    def test_a_working_connected_bot(self, world, on_telegram):
-        save_token(on_telegram)
-        on_telegram.post(CONNECT)
-        body = on_telegram.post(TEST).json()
-        assert body["ok"] is True and body["details"] == {"bot": "ok", "webhook": "ok"}
-        assert body["channel"] == "telegram" and body["checked_at"]
 
-    def test_a_bot_that_was_never_connected_says_to_connect_it(self, on_telegram):
-        save_token(on_telegram)
-        body = on_telegram.post(TEST).json()
+class TestTestingAndDisconnecting:
+    def test_the_test_asks_telegram_for_real_and_says_so(self, world, on_telegram, admin):
+        give_token(admin)
+        admin.post(admin_connect())
+        response = admin.post(admin_test())
+        body = response.json()
+        assert response.status_code == 200 and body["ok"] is True
+        assert body["details"]["check"] == "real_telegram_api"
+        assert TOKEN not in response.text and len(world.bot.registered) == 1  # changed nothing
+
+    def test_the_test_of_a_bot_not_connected_yet_says_so(self, world, on_telegram, admin):
+        give_token(admin)
+        body = admin.post(admin_test()).json()
         assert body["ok"] is False and body["details"]["webhook"] == "not_set"
-        assert "connect the bot" in body["message"]
 
-    @pytest.mark.parametrize(
-        ("state", "words"),
-        [("other_url", "somewhere else"), ("failing", "cannot deliver")],
-    )
-    def test_a_webhook_that_is_not_as_it_should_be(self, world, on_telegram, state, words):
-        save_token(on_telegram)
-        world.bot.state = state
-        body = on_telegram.post(TEST).json()
-        assert body["ok"] is False and words in body["message"]
+    def test_the_test_without_a_token_is_a_failure_not_a_simulation(self, on_telegram, admin):
+        body = admin.post(admin_test()).json()
+        assert body["ok"] is False and "token is not set" in body["message"]
 
-    def test_a_refused_token(self, world, on_telegram):
-        save_token(on_telegram)
+    def test_the_test_reports_a_refused_token_in_a_fixed_sentence(self, world, on_telegram, admin):
+        give_token(admin)
         world.bot.bot_failure = "auth"
-        body = on_telegram.post(TEST).json()
-        assert body["ok"] is False and body["details"] == {"bot": "auth"}
-        assert TOKEN not in json.dumps(body)
+        response = admin.post(admin_test())
+        assert "refused this bot token" in response.json()["message"] and TOKEN not in response.text
 
-    def test_a_deployment_with_no_public_address_says_it_cannot_receive(self, world, on_telegram):
-        save_token(on_telegram)
-        world.application.settings.public_base_url = None
-        body = on_telegram.post(TEST).json()
-        assert body["ok"] is False and "public address" in body["message"]
-        assert body["details"]["bot"] == "ok" and body["details"]["webhook"] == "unchecked"
+    def test_disconnecting_stops_telegram_and_puts_the_client_back_to_waiting(
+        self, world, on_telegram, admin
+    ):
+        give_token(admin)
+        admin.post(admin_connect())
+        response = admin.post(admin_disconnect())
+        assert response.status_code == 200 and response.json()["ok"] is True
+        assert world.bot.deleted == 1 and stored(world, "telegram.webhook_secret") is None
+        assert stored(world, "telegram.bot_token") == TOKEN
+        assert on_telegram.get(CHANNEL).json()["status"] == "waiting_platform"
 
-    def test_testing_sends_nothing_to_anyone(self, world, on_telegram):
-        save_token(on_telegram)
-        on_telegram.post(TEST)
-        assert world.bot.registered == []  # a test never changes where Telegram delivers
+    def test_a_disconnection_telegram_did_not_confirm_keeps_the_connection(
+        self, world, on_telegram, admin
+    ):
+        give_token(admin)
+        admin.post(admin_connect())
+        world.bot.delete_failure = "unreachable"
+        body = admin.post(admin_disconnect()).json()
+        assert body["ok"] is False and "still connected" in body["message"]
+        assert stored(world, "telegram.webhook_secret") is not None
+
+    def test_a_token_telegram_no_longer_knows_can_still_be_disconnected(
+        self, world, on_telegram, admin
+    ):
+        give_token(admin)
+        admin.post(admin_connect())
+        world.bot.delete_failure = "auth"
+        assert admin.post(admin_disconnect()).json()["ok"] is True
+        assert stored(world, "telegram.webhook_secret") is None
+
+    def test_only_an_owner_and_never_a_client_may_test_or_disconnect(self, world, alpha):
+        assert alpha.post(admin_test()).status_code == 401
+        assert alpha.post(admin_disconnect()).status_code == 401
+
+    def test_an_unknown_client_is_not_found(self, admin):
+        assert admin.post(admin_test("nobody")).status_code == 404
+        assert admin.post(admin_disconnect("nobody")).status_code == 404
 
 
 # ---- readiness ---------------------------------------------------------------------------------
@@ -494,18 +562,18 @@ class TestReadiness:
         checks = {c["id"]: c for c in on_telegram.get(READINESS).json()["checks"]}
         assert "whatsapp_number" not in checks and checks["channel_ready"]["ok"] is False
 
-    def test_the_bot_is_what_is_missing_then_the_connection(self, on_telegram):
-        assert "token" in ready(on_telegram)["message"].lower()
-        save_token(on_telegram)
-        assert "connect" in ready(on_telegram)["message"].lower()
-        on_telegram.post(CONNECT)
+    def test_what_is_missing_is_the_platforms_and_said_without_anything_technical(
+        self, on_telegram, admin
+    ):
+        message = ready(on_telegram)["message"]
+        assert _is_plain(message) and "nothing for you to do" in message.lower()
+        give_token(admin)
+        assert ready(on_telegram)["message"] == message  # still the platform's to finish
+        admin.post(admin_connect())
         assert ready(on_telegram)["ok"] is True
 
-    def test_what_is_missing_is_something_the_client_can_do_itself(self, on_telegram):
-        assert "administrator" not in ready(on_telegram)["message"].lower()
-
-    def test_the_agent_cannot_start_on_a_bot_that_is_not_connected(self, on_telegram):
-        save_token(on_telegram)
+    def test_the_agent_cannot_start_on_a_bot_that_is_not_connected(self, on_telegram, admin):
+        give_token(admin)
         response = on_telegram.post(START)
         assert response.status_code == 409
         assert "channel_ready" in {r["id"] for r in response.json()["detail"]["reasons"]}

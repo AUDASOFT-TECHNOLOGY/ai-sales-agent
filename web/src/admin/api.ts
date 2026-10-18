@@ -48,10 +48,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export function detailText(detail: unknown): string | null {
   if (typeof detail === "string") return detail;
   if (detail && typeof detail === "object") {
-    const { message, client_ids: clientIds } = detail as { message?: unknown; client_ids?: unknown };
+    const {
+      message,
+      client_ids: clientIds,
+      problems,
+    } = detail as { message?: unknown; client_ids?: unknown; problems?: unknown };
     if (typeof message === "string") {
       const clients = Array.isArray(clientIds) ? clientIds.filter((id): id is string => typeof id === "string") : [];
-      return clients.length > 0 ? `${message} (clients: ${clients.join(", ")})` : message;
+      // `problems`: fixed sentences that say what failed (e.g. which login of a mailbox).
+      const why = Array.isArray(problems) ? problems.filter((p): p is string => typeof p === "string") : [];
+      const withWhy = why.length > 0 ? `${message}: ${why.join(" ")}` : message;
+      return clients.length > 0 ? `${withWhy} (clients: ${clients.join(", ")})` : withWhy;
     }
   }
   return null;
@@ -369,6 +376,26 @@ export function adminRemoveClientCredential(clientId: string, key: string): Prom
   return request<Credential>(`${clientPath(clientId, key)}?confirm=true`, { method: "DELETE" });
 }
 
+// A client's Telegram bot (owner only). Connect and disconnect tell Telegram where to deliver; test is a
+// real, read-only question to Telegram. None of them sends a message to a prospect.
+export function adminConnectClientTelegram(clientId: string): Promise<ConnectionTest> {
+  return request<ConnectionTest>(`/clients/${encodeURIComponent(clientId)}/integrations/telegram/connect`, {
+    method: "POST",
+  });
+}
+
+export function adminTestClientTelegram(clientId: string): Promise<ConnectionTest> {
+  return request<ConnectionTest>(`/clients/${encodeURIComponent(clientId)}/integrations/telegram/test`, {
+    method: "POST",
+  });
+}
+
+export function adminDisconnectClientTelegram(clientId: string): Promise<ConnectionTest> {
+  return request<ConnectionTest>(`/clients/${encodeURIComponent(clientId)}/integrations/telegram/disconnect`, {
+    method: "POST",
+  });
+}
+
 export function adminTestOpenAI(): Promise<ConnectionTest> {
   return request<ConnectionTest>("/settings/integrations/openai/test", { method: "POST" });
 }
@@ -376,6 +403,133 @@ export function adminTestOpenAI(): Promise<ConnectionTest> {
 // Reaches the platform mail servers over an encrypted connection and closes it: no login, no message.
 export function adminTestEmailServers(): Promise<ConnectionTest> {
   return request<ConnectionTest>("/settings/integrations/email/test", { method: "POST" });
+}
+
+// Logs in to one server with the stored username and password: no message is sent, none is read.
+export function adminTestEmailSmtp(): Promise<ConnectionTest> {
+  return request<ConnectionTest>("/settings/integrations/email/test-smtp", { method: "POST" });
+}
+
+export function adminTestEmailImap(): Promise<ConnectionTest> {
+  return request<ConnectionTest>("/settings/integrations/email/test-imap", { method: "POST" });
+}
+
+// Where the platform's mail servers stand. `state` is "ready" only when both logins were accepted
+// with the settings as they are now.
+export interface EmailServiceStatus {
+  state: "missing_configuration" | "server_not_authenticated" | "ready";
+  smtp: "not_configured" | "not_tested" | "authenticated" | "failed";
+  imap: "not_configured" | "not_tested" | "authenticated" | "failed";
+  missing: string[];
+  smtp_problem: string | null; // why SMTP is not authenticated, as a fixed sentence
+  imap_problem: string | null;
+  /** Clients created from now on are given Email access. Existing clients are never changed. */
+  new_clients_access: boolean;
+  /** Clients that may use Email and have no mailbox assigned yet (an administrator assigns it). */
+  clients_awaiting_mailbox: string[];
+}
+
+// The platform's Google application for the Gmail mailbox mode. Config-only: "configured" is not
+// "verified" (Google accepts the application only after a real consent, and verifies it for others).
+export interface GmailPlatformStatus {
+  configured: boolean;
+  missing: string[];
+  redirect_uri: string | null; // to copy into the Google Cloud OAuth client; not a secret
+  verified: boolean;
+  note: string;
+}
+
+export function adminGmailPlatformStatus(): Promise<GmailPlatformStatus> {
+  return request<GmailPlatformStatus>("/settings/integrations/gmail/status");
+}
+
+export function adminEmailServiceStatus(): Promise<EmailServiceStatus> {
+  return request<EmailServiceStatus>("/settings/integrations/email/status");
+}
+
+// Turn Email access on (or off) for the clients created from now on. Needs a "ready" service.
+export function adminSetEmailForNewClients(enabled: boolean): Promise<EmailServiceStatus> {
+  return request<EmailServiceStatus>("/settings/integrations/email/new-clients", {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+// One client's assigned mailbox. No address, no password: only where it stands.
+export interface EmailMailboxStatus {
+  state: "missing_configuration" | "mailbox_not_assigned" | "password_missing" | "not_authenticated" | "ready";
+  smtp: "not_tested" | "authenticated" | "failed" | null;
+  imap: "not_tested" | "authenticated" | "failed" | null;
+  problem: string | null;
+  smtp_problem: string | null;
+  imap_problem: string | null;
+}
+
+const clientEmail = (clientId: string, tail: string) =>
+  `/clients/${encodeURIComponent(clientId)}/integrations/email/${tail}`;
+
+export function adminClientMailboxStatus(clientId: string): Promise<EmailMailboxStatus> {
+  return request<EmailMailboxStatus>(clientEmail(clientId, "status"));
+}
+
+export function adminTestClientMailbox(clientId: string): Promise<ConnectionTest> {
+  return request<ConnectionTest>(clientEmail(clientId, "test"), { method: "POST" });
+}
+
+// A client's request to have its e-mail activated, which the Admin answers by hand. `sender_name` is
+// the name the client confirmed (not an address); `mailbox` says where the mailbox stands. No
+// address and no password ever comes back.
+export type EmailActivationStatus = "pending" | "in_progress" | "rejected" | "active";
+
+export interface EmailActivation {
+  client_id: string;
+  client_name: string | null;
+  sender_name: string | null;
+  status: EmailActivationStatus;
+  requested_at: string;
+  updated_at: string;
+  updated_by: string;
+  reason: string | null;
+  email_allowed: boolean;
+  mailbox: EmailMailboxStatus["state"];
+}
+
+const activationPath = (clientId: string, tail = "") =>
+  `/clients/${encodeURIComponent(clientId)}/email-activation${tail}`;
+
+/** The requests that wait for the Admin (`open`, the default) or every request (`all`). */
+export function adminListEmailActivations(scope: "open" | "all" = "open"): Promise<EmailActivation[]> {
+  return request<EmailActivation[]>(`/email-activations?status=${scope}`);
+}
+
+export function adminGetEmailActivation(clientId: string): Promise<EmailActivation | null> {
+  return request<EmailActivation | null>(activationPath(clientId));
+}
+
+export function adminStartEmailActivation(clientId: string): Promise<EmailActivation> {
+  return request<EmailActivation>(activationPath(clientId, "/start"), { method: "POST" });
+}
+
+export function adminRejectEmailActivation(clientId: string, reason: string): Promise<EmailActivation> {
+  return request<EmailActivation>(activationPath(clientId, "/reject"), {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function adminDeactivateEmailActivation(clientId: string, reason: string): Promise<EmailActivation> {
+  return request<EmailActivation>(activationPath(clientId, "/deactivate"), {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+/** Both logins are tried first; a failure answers an error that says which one and stores nothing. */
+export function adminActivateEmail(clientId: string, address: string, password: string): Promise<EmailActivation> {
+  return request<EmailActivation>(activationPath(clientId, "/activate"), {
+    method: "POST",
+    body: JSON.stringify({ address, password }),
+  });
 }
 
 export function adminTestClientWhatsApp(clientId: string): Promise<ConnectionTest> {

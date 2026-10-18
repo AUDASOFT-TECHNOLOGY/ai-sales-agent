@@ -31,24 +31,21 @@ client may choose any.
 
 ## What the client does (Naga)
 
+The client never configures Telegram: no bot, no token, no webhook. It only chooses the channel,
+words the bot's first messages, and sends its prospects their invitation links.
+
 1. **Choose Telegram** — `PUT /client/v1/channel`, body `{expected_version, channel: "telegram"}`;
    optionally `telegram: {contact_prompt, contact_button, not_found_text}` (the words the bot uses
    before it knows who it is talking to, in the client's customers' language). Offered only if the
-   Admin allowed it.
-2. **Create the bot** with `@BotFather` and give its token — `PUT /client/v1/channel/credentials`,
-   body exactly `{"bot_token": "..."}`. Write-only: no response, error, audit event or log carries it.
-3. **Connect it** — `POST /client/v1/channel/connect`. The platform generates the webhook secret,
-   tells Telegram to deliver this bot's messages to `<public address>/webhooks/telegram` with that
-   secret, and stores the secret (write-only) only once Telegram agreed. Safe to repeat: the secret,
-   and the links already sent, stay. A new token drops the connection (another bot is not the one
-   that was connected) and invalidates the links of the old one.
-4. **Test** — `POST /client/v1/channel/test`: asks Telegram who the bot is and where it delivers.
-   Sends nothing to anyone. `ok: true` means "the token works and Telegram delivers to this
-   deployment", at that moment, and nothing more.
-5. **Start the agent** — the readiness check `channel_ready` asks for the token, then the connection.
+   Admin allowed it. The body accepts nothing technical (a token or a webhook is a 422).
+2. **See where it stands** — `GET /client/v1/channel` answers `status`: `ready`, `waiting_platform`
+   (Revansa is still setting the bot up; nothing for the client to do) or `action_required`, with a
+   sentence that mentions nothing technical. The readiness check `channel_ready` says the same.
+3. **Start the agent** once the channel is `ready`.
 
-Then it sends the invitation links. Everything else is the usual journey (Sheets or HubSpot as the
-source, the approval mode, the daily cap, the follow-up cadence the Brain sets).
+Then it sends the invitation links (`GET /client/v1/channel/invitations`, available once the platform
+has connected the bot). Everything else is the usual journey (Sheets or HubSpot as the source, the
+approval mode, the daily cap, the follow-up cadence the Brain sets).
 
 ## What the Admin does
 
@@ -56,10 +53,28 @@ source, the approval mode, the daily cap, the follow-up cadence the Brain sets).
   It is judged **every time a client's configuration is resolved**: a channel taken away afterwards
   stops the client (no sending, no processing; Telegram is still answered `200` so it does not retry
   forever, and the message is dropped, as for a client missing a credential).
+- Creates the bot with `@BotFather` and stores its token for the client:
+  `PUT /admin/v1/clients/{id}/integrations/telegram.bot_token` (write-only: no response, error, audit
+  event or log carries it).
+- **Connects** it: `POST /admin/v1/clients/{id}/integrations/telegram/connect`. The platform generates
+  the webhook secret, tells Telegram to deliver this bot's messages to `<public address>/webhooks/
+  telegram` with that secret, and stores the secret (write-only) only once Telegram agreed. Safe to
+  repeat: the secret, and the links already sent, stay. **After replacing a token, connect again**:
+  another bot is not the one that was connected, and the links signed under the old secret keep
+  working only for the old one.
+- **Tests** it: `POST /admin/v1/clients/{id}/integrations/telegram/test`. A real, read-only call to
+  Telegram (`getMe`, `getWebhookInfo`); sends nothing, changes nothing. `details.check` is always
+  `real_telegram_api`: no simulated answer is ever returned by this route.
+- **Disconnects** it: `POST /admin/v1/clients/{id}/integrations/telegram/disconnect`. Telegram is told
+  to stop delivering (`deleteWebhook`, pending updates kept) and the webhook secret is forgotten, so
+  the client returns to `waiting_platform`. The secret is kept if Telegram could not be reached
+  ("still connected"); a token Telegram no longer knows is disconnected locally. The bot token stays
+  until the Admin removes it.
 - Sets **`SALES_AGENT_PUBLIC_BASE_URL`** (for example `https://revansa.example`) — the https address
-  Telegram can reach. Without it a bot can be saved and tested but not connected (409, "contact your
-  administrator"). Telegram only delivers to https on port 443, 80, 88 or 8443.
-- Does *not* hold any Telegram credential: unlike WhatsApp/Meta, there is no platform-level app.
+  Telegram can reach. Without it connecting is refused (409). Telegram only delivers to https on port
+  443, 80, 88 or 8443.
+- Does *not* hold any platform-level Telegram app (unlike WhatsApp/Meta): each client's bot is its own,
+  but it is created and wired by the platform, never by the client.
 
 ## Security
 
@@ -127,10 +142,12 @@ The chat id is the one contact detail Revansa *learns* rather than being given, 
 - **No templates.** A WhatsApp template draft has nothing to say on Telegram and is refused.
 - **No reply threading.** Replies are not sent as Telegram "replies" to a given message.
 - **Interface scope.** The Client console has a channel page
-  (`web/src/client/ClientChannelPage.tsx`): choose Telegram, edit the bot's sentences, save the token
-  (write-only), **Connect**, **Test**, and see the waiting prospects with their invitation links. The
-  agent is started from the agent page (`ClientAgentPage.tsx`), which lists what is still missing. It
-  covers the Client API above and nothing more; it has not been validated against a real bot.
+  (`web/src/client/ClientChannelPage.tsx`): choose Telegram, edit the bot's sentences, see the
+  channel's status, and see the waiting prospects with their invitation links. It has no technical
+  field and no Connect or Test button. The agent is started from the agent page
+  (`ClientAgentPage.tsx`), which lists what is still missing. There is no Admin screen yet for storing
+  the token and connecting the bot: both are Admin API routes only. It has not been validated against
+  a real bot.
 - **Webhook only.** Telegram refuses a bot webhook and polling at once: a bot connected here cannot
   also be read by another program with `getUpdates`.
 - **A bot's token can be moved to another deployment only by connecting it again there** (it takes
@@ -149,8 +166,9 @@ the real scheduler, restart, isolation, the Admin's authority, failures).
 **None of it proves that a real bot, Telegram or a real person's app behaves like the doubles.** To do
 by hand with a real bot, a public https address and a Telegram account you own:
 
-1. Create a bot with BotFather; set `SALES_AGENT_PUBLIC_BASE_URL`; as the client, save the token and
-   `POST /client/v1/channel/connect`; `POST /client/v1/channel/test` must say `ok`.
+1. Create a bot with BotFather; set `SALES_AGENT_PUBLIC_BASE_URL`; as the Admin, store the token and
+   `POST /admin/v1/clients/{id}/integrations/telegram/connect` (it must say `ok`); the client's
+   `GET /client/v1/channel` must then say `ready`.
 2. Add a Sheets prospect whose phone is the one of your Telegram account; start the agent: nothing is
    sent (it waits). `GET /client/v1/channel/invitations` must list it with a link.
 3. Open the link in Telegram and press Start: the row must get its `telegram_chat_id`, and a reply must

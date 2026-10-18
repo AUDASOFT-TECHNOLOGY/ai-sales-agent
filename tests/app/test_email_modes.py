@@ -51,12 +51,14 @@ from sales_app.config.email_settings import (
     platform_mailbox_key,
 )
 from sales_app.config.secrets import EMAIL_PLATFORM_PROFILE_KEYS
+from sales_app.email_platform import AuthLedger
 from sales_app.mailbox_access import (
     MailboxNotReadyError,
     imap_settings,
     resolve_mailbox,
     smtp_settings,
 )
+from sales_app.mailbox_proof import verify_client_mailbox
 from sales_app.secret_store import (
     GLOBAL_SCOPE,
     CredentialService,
@@ -597,7 +599,7 @@ class TestTheResolver:
         smtp, imap = access.smtp, access.imap
         assert (smtp.host, smtp.port, smtp.security) == ("smtp.platform.example", 465, "ssl")
         assert (smtp.username, smtp.password, smtp.from_address) == (ADDRESS, PASSWORD, ADDRESS)
-        assert smtp.from_name == "Alpha Sales" and smtp.subject
+        assert smtp.from_name == "Alpha Sales" and smtp.subject  # the confirmed Sender Name
         assert (imap.host, imap.port, imap.security) == ("imap.platform.example", 993, "ssl")
         assert (imap.username, imap.password, imap.mailbox) == (ADDRESS, PASSWORD, "INBOX")
         assert imap.own_addresses == (ADDRESS,)
@@ -683,25 +685,48 @@ def fake_application(store):
             effective=lambda client_id: frozenset({"whatsapp", "email"})
         ),
         credentials=CredentialService(store, InMemorySecretAudit(), now=lambda: NOW),
+        mail_auth=AuthLedger(),
     )
+
+
+class AcceptingProbe:
+    """A mailbox whose two logins are accepted."""
+
+    def __init__(self, smtp, imap):
+        pass
+
+    def check_smtp(self):
+        pass
+
+    def check_imap(self):
+        pass
+
+
+SETTING_UP = "Revansa is setting up this channel for you"
 
 
 class TestWhatTheClientIsTold:
     DOCUMENT: ClassVar[dict] = {"channel": {"provider": "email", "settings": PLATFORM}}
 
-    def problem(self, store):
-        return channel_problem(fake_application(store), "alpha", "email", self.DOCUMENT)
+    def problem(self, store, application=None):
+        return channel_problem(
+            application or fake_application(store), "alpha", "email", self.DOCUMENT
+        )
 
     def test_each_missing_piece_is_the_administrators_to_fix(self):
         store = new_store(profile=False)
-        assert "No mailbox has been assigned" in self.problem(store)
+        assert SETTING_UP in self.problem(store)  # no mailbox assigned
         assign(store, "alpha", password=None)
-        assert "not ready yet" in self.problem(store)
+        assert SETTING_UP in self.problem(store)  # its password is not stored
         assign(store, "alpha")
-        assert "servers are not set up" in self.problem(store)
+        assert SETTING_UP in self.problem(store)  # the platform's servers are not set up
         for key, value in PROFILE.items():
             store.set(GLOBAL_SCOPE, key, value, by="root")
-        assert self.problem(store) is None
+        app = fake_application(store)
+        # Everything is stored, but nothing has been logged in to: not ready.
+        assert SETTING_UP in self.problem(store, app)
+        verify_client_mailbox(app, "alpha", AcceptingProbe)
+        assert self.problem(store, app) is None
 
     def test_a_client_is_never_asked_for_anything_technical(self):
         store = new_store(profile=False)
@@ -715,11 +740,10 @@ class TestWhatTheClientIsTold:
         document = {"channel": {"provider": "email", "settings": MAIL}}
         store = new_store()
         message = channel_problem(fake_application(store), "alpha", "email", document)
-        assert message == "Your email password is missing. Add it in your channel settings."
+        assert SETTING_UP in message  # its password is the platform's to store, not the client's
+        assert "password" not in message.lower()
         incomplete = {"channel": {"provider": "email", "settings": {"smtp_host": "x.example.org"}}}
-        assert "settings are incomplete" in channel_problem(
-            fake_application(store), "alpha", "email", incomplete
-        )
+        assert SETTING_UP in channel_problem(fake_application(store), "alpha", "email", incomplete)
 
 
 # ---- the client API offers no new way in --------------------------------------------------------
@@ -745,9 +769,17 @@ class TestTheClientApiOffersNoNewWayIn:
         assert body["channel"] == "email" and body["authorized"] is True
         assert body["email"] is not None
         shown = {k: v for k, v in body["email"].items() if v is not None}
-        assert shown == {"from_name": "Alpha Sales"}  # nothing technical is stored or shown
-        assert "mode" not in body["email"]
-        assert "No mailbox has been assigned" in body["problem"]
+        # The daily sending limit is the one other thing said: a state and a sentence, no setting.
+        sending = shown.pop("sending")
+        assert sending["state"] in {"ok", "not_set", "reached", "unavailable"}
+        assert set(sending) == {"state", "message", "daily_limit", "sent_today"}
+        # The wording and whose mailbox it is: nothing technical is stored or shown.
+        assert shown == {
+            "mode": "platform",
+            "from_name": "Alpha Sales",
+            "sender_name_confirmed": True,
+        }
+        assert body["status"] == "waiting_platform" and "setting up" in body["status_message"]
 
     def test_a_client_cannot_turn_its_platform_mailbox_into_a_historical_one(
         self, world, alpha, admin

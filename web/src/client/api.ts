@@ -122,50 +122,68 @@ export function clientUpdateProfile(changes: ProfileChanges): Promise<ClientProf
 }
 
 /* ── Channel (see src/sales_app/api/client_channel.py) ──
- * No response carries a password or a token: only whether one is stored. The secrets travel in the
- * one PUT body that writes them and are never kept by this module. */
+ * Nothing technical is the client's: no server, password, token or webhook is read or written here.
+ * The platform connects the channel; the client only chooses it and words its messages. */
 
 export interface ChannelOption {
   key: string;
   label: string;
 }
 
+/** How the client's e-mails are written. Nothing technical: the mailbox itself is the platform's.
+ *  `mode` says whose mailbox it is: "platform" (provided by Revansa; the Sender Name is confirmed by
+ *  the client) or "custom" (the historical mailbox; the field is the client's own, as before). */
+/** The client's request to have its e-mail activated by the Admin. `reason` is the Admin's, shown
+ *  when the request was rejected. Nothing here names a mailbox. */
+export type EmailActivationStatus = "pending" | "in_progress" | "rejected" | "active";
+
+export interface EmailActivation {
+  status: EmailActivationStatus;
+  requested_at: string;
+  updated_at: string;
+  reason: string | null;
+}
+
 export interface EmailSettings {
-  from_address: string | null;
+  mode: "platform" | "custom" | "gmail";
   from_name: string | null;
-  username: string | null;
-  smtp_host: string | null;
-  smtp_port: number | null;
-  smtp_security: string | null;
-  imap_host: string | null;
-  imap_port: number | null;
-  imap_security: string | null;
-  mailbox: string | null;
+  /** Platform mode: the client has confirmed `from_name` (saving it is the confirmation). */
+  sender_name_confirmed: boolean;
   subject: string | null;
+  /** Platform mode: null until the client has asked for the activation. */
+  activation?: EmailActivation | null;
+  /** Whether emails can leave today against the daily limit Revansa sets (nothing technical). */
+  sending?: EmailSending | null;
+}
+
+export interface EmailSending {
+  state: "ok" | "not_set" | "reached" | "unavailable";
+  message: string | null;
+  daily_limit: number | null;
+  sent_today: number | null;
 }
 
 export interface TelegramSettings {
   contact_prompt: string;
   contact_button: string;
   not_found_text: string;
-  connected: boolean;
 }
 
-export interface CredentialStatus {
-  label: string;
-  configured: boolean;
-  updated_at: string | null;
-}
+/** Where a channel stands: the platform finishes setting it up, or the client has something to choose. */
+export type ChannelStatusName = "ready" | "waiting_platform" | "action_required";
 
 export interface ChannelState {
   version: number | null;
   channel: string;
   authorized: boolean;
   options: ChannelOption[];
+  status: ChannelStatusName;
+  /** A sentence with nothing technical in it, when the channel is not ready. */
+  status_message: string | null;
   email: EmailSettings | null;
   telegram: TelegramSettings | null;
-  credential: CredentialStatus | null;
-  problem: string | null;
+  /** The client's business name, offered as a starting Sender Name. A proposal, not a confirmation. */
+  sender_name_proposal: string | null;
   updated_at: string | null;
   updated_by: "client" | "administrator" | null;
 }
@@ -173,17 +191,9 @@ export interface ChannelState {
 export interface ChannelUpdate {
   expected_version: number | null;
   channel: string;
-  email?: Partial<Record<keyof EmailSettings, string | number>>;
+  /** `use_gmail`: true to use the client's own Gmail, false to go back to a Revansa mailbox. */
+  email?: { from_name?: string; subject?: string; use_gmail?: boolean };
   telegram?: Partial<Record<"contact_prompt" | "contact_button" | "not_found_text", string>>;
-}
-
-/** The outcome of a real call to the sending/receiving service (never a simulation). */
-export interface ChannelTestResult {
-  channel: string;
-  ok: boolean;
-  message: string;
-  details: Record<string, string>;
-  checked_at: string;
 }
 
 export interface TelegramInvitations {
@@ -201,21 +211,36 @@ export function clientSaveChannel(update: ChannelUpdate): Promise<ChannelState> 
   return request<ChannelState>("/channel", { method: "PUT", body: JSON.stringify(update) });
 }
 
-/** Write-only: the answer says whether a secret is stored, never what it is. */
-export function clientSaveCredential(field: "password" | "bot_token", value: string): Promise<CredentialStatus> {
-  return request<CredentialStatus>("/channel/credentials", { method: "PUT", body: JSON.stringify({ [field]: value }) });
+/** Ask for the e-mail to be activated (the Sender Name must be confirmed first). Answers the channel. */
+export function clientRequestEmailActivation(): Promise<ChannelState> {
+  return request<ChannelState>("/channel/email-activation", { method: "POST" });
 }
 
-export function clientRemoveCredential(): Promise<CredentialStatus> {
-  return request<CredentialStatus>("/channel/credentials", { method: "DELETE" });
+export type GmailStateName = "not_connected" | "connected" | "reauth_required" | "unavailable";
+
+/** Where the client's Gmail connection stands. `address` is the client's own Gmail, shown to it only. */
+export interface GmailStatus {
+  state: GmailStateName;
+  address: string | null;
+  send_cap_configured: boolean;
+  /** Connected AND the daily sending limit is set: the only state in which mail leaves. */
+  send_ready: boolean;
+  message: string;
+  mailbox_sync: "not_started" | "ok" | "failing";
+  last_sync_at: string | null;
 }
 
-export function clientTestChannel(): Promise<ChannelTestResult> {
-  return request<ChannelTestResult>("/channel/test", { method: "POST" });
+export function clientGmailStatus(): Promise<GmailStatus> {
+  return request<GmailStatus>("/channel/google");
 }
 
-export function clientConnectTelegram(): Promise<ChannelTestResult> {
-  return request<ChannelTestResult>("/channel/connect", { method: "POST" });
+/** The Google consent URL: the browser is sent there; the client types nothing. */
+export function clientGmailStart(): Promise<{ authorize_url: string }> {
+  return request<{ authorize_url: string }>("/channel/google/start", { method: "POST" });
+}
+
+export function clientGmailDisconnect(): Promise<GmailStatus> {
+  return request<GmailStatus>("/channel/google/disconnect", { method: "POST" });
 }
 
 export function clientTelegramInvitations(): Promise<TelegramInvitations> {
