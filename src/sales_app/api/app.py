@@ -31,8 +31,10 @@ from sales_app.api.client_approvals import create_client_approvals_router
 from sales_app.api.client_channel import create_client_channel_router
 from sales_app.api.client_gmail import create_application_gmail_router
 from sales_app.api.client_lanes import create_client_lanes_router
+from sales_app.api.client_payments import create_client_payments_router
 from sales_app.api.client_prospects import create_client_prospects_router
 from sales_app.api.client_reporting import create_client_reporting_router
+from sales_app.api.client_resources import create_client_resources_router
 from sales_app.api.client_source import (
     SheetsProbeFactory,
     create_client_source_router,
@@ -120,6 +122,8 @@ def create_app(
     app.include_router(create_client_router(application))
     app.include_router(create_client_agent_router(application))
     app.include_router(create_client_approvals_router(application))
+    app.include_router(create_client_payments_router(application))
+    app.include_router(create_client_resources_router(application))
     app.include_router(create_client_prospects_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))
     app.include_router(create_client_channel_router(application, bot_probe))

@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from sales_brain_kit.consultative.context import CommercialContext, build_context
 from sales_brain_kit.consultative.decision import build_decision, terminal_decision
 from sales_brain_kit.consultative.errors import BrainOutputError
+from sales_brain_kit.consultative.knowledge import KnowledgeSource, retrieve_knowledge
 from sales_brain_kit.consultative.output import parse_output
 from sales_brain_kit.consultative.prompt import build_llm_request
 from sales_brain_kit.consultative.validation import validate_output
@@ -58,6 +59,12 @@ class ConsultativeSalesBrain:
         self._max_attempts = max_attempts
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
+        self._knowledge: KnowledgeSource | None = None
+
+    def attach_knowledge(self, source: KnowledgeSource | None) -> None:
+        """Lets the Brain consult the client's own documents (see `knowledge.py`). Optional: without
+        a source, or if it fails, the Brain answers from its settings alone."""
+        self._knowledge = source
 
     @property
     def settings(self) -> ConsultativeSalesSettings:
@@ -71,7 +78,10 @@ class ConsultativeSalesBrain:
 
     def _ask(self, context: CommercialContext) -> BrainDecision:
         llm_request = build_llm_request(
-            context, temperature=self._temperature, max_output_tokens=self._max_output_tokens
+            context,
+            temperature=self._temperature,
+            max_output_tokens=self._max_output_tokens,
+            knowledge=retrieve_knowledge(context, self._knowledge),
         )
         problems: tuple[str, ...] = ()
         for _ in range(self._max_attempts):

@@ -823,9 +823,17 @@ def test_a_confirmation_never_comes_from_the_system_the_prospect_or_a_brain():
     assert CONFIRMING_SOURCES == {FactSource.HUMAN, FactSource.CLIENT_DATA}
 
 
-def test_no_adapter_and_no_app_code_confirms_payments_yet():
-    """There is no CRM or Admin in the MVP: the service is reached by nothing in the application."""
+def test_only_the_clients_payments_route_confirms_a_payment():
+    """A payment is confirmed by a person the application has authenticated, and by nothing else: the
+    one place in the application that builds a confirmation is the Client API's payments route (the
+    logged-in client checking its own account). No adapter and no Brain kit ever does, and neither does
+    any other part of the application."""
+    door = SRC / "sales_app" / "api" / "client_payments.py"
     for package in ("sales_integrations", "sales_app", "sales_brain_kit"):
         for py in (SRC / package).rglob("*.py"):
             names = _names_of(py)
-            assert not names & {"PaymentConfirmationService", "PaymentConfirmation"}, py.name
+            named = names & {"PaymentConfirmationService", "PaymentConfirmation"}
+            if py == door:
+                assert "PaymentConfirmationService" not in names  # it goes through the desk
+                continue
+            assert not named, py.name

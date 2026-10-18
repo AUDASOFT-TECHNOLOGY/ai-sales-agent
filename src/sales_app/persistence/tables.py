@@ -18,6 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     Numeric,
     String,
@@ -492,4 +493,53 @@ daily_reports = Table(
         name="ck_daily_reports_status",
     ),
     Index("ix_daily_reports_status", "client_id", "status"),
+)
+
+# The documents and links a client attached to one of its products (`sales_app.resources`). A file's
+# bytes are kept here, in the client's own rows: every statement filters on the client, so a resource
+# can only be reached through the client that owns it. `status` is what could really be read from it,
+# never a promise (ready / stored_only / failed).
+product_resources = Table(
+    "product_resources",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("product_id", String(64), nullable=False),
+    Column("kind", String(8), nullable=False),
+    Column("category", String(16), nullable=False),
+    Column("title", String(200), nullable=False),
+    Column("url", Text),
+    Column("filename", String(200)),
+    Column("mime_type", String(100)),
+    Column("size_bytes", Integer),
+    Column("sha256", String(64)),
+    Column("status", String(16), nullable=False),
+    Column("status_detail", String(32)),
+    Column("text_chars", Integer, nullable=False),
+    Column("content", LargeBinary),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("created_by", String(255), nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+    CheckConstraint("kind IN ('link','file')", name="ck_product_resources_kind"),
+    CheckConstraint(
+        "status IN ('ready','stored_only','failed')", name="ck_product_resources_status"
+    ),
+    Index("ix_product_resources_product", "client_id", "product_id"),
+)
+
+# The searchable passages of a ready resource, in order. Text only.
+product_resource_chunks = Table(
+    "product_resource_chunks",
+    metadata,
+    Column(
+        "resource_id",
+        String(64),
+        ForeignKey("product_resources.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("position", Integer, primary_key=True),
+    Column("client_id", String(64), nullable=False),
+    Column("product_id", String(64), nullable=False),
+    Column("body", Text, nullable=False),
+    Index("ix_product_resource_chunks_product", "client_id", "product_id"),
 )

@@ -37,10 +37,13 @@ from sales_app.persistence.llm_usage_rows import SqlLLMUsageStore
 from sales_app.persistence.mail_cursor_rows import SqlMailCursorStore
 from sales_app.persistence.operational_rows import SqlOperationalRows
 from sales_app.persistence.plan_rows import SqlPlanStore
+from sales_app.persistence.resource_rows import SqlResourceStore
 from sales_app.persistence.send_cap_rows import SqlSendCapStore, SqlSendCounter
 from sales_app.plans import PlanStore, current_daily_quota
 from sales_app.registry import ClientRegistry
 from sales_app.report_wiring import build_report_service
+from sales_app.resources.knowledge import KnowledgeIndex
+from sales_app.resources.service import ResourceService
 from sales_app.runtime_manager import RuntimeManager
 from sales_app.scheduler import Scheduler
 from sales_app.secret_store import (
@@ -133,6 +136,10 @@ class Application:
     # The Gmail mailbox mode: the platform's Google application (resolved at each use), the clients'
     # grants in the secret store and the channel/inbox of a client in Gmail mode.
     gmail: GmailMailService | None = None
+    # The documents and links clients attach to their products and the search over their text; None
+    # without a database (the Client API says so). See `sales_app.resources`.
+    product_resources: ResourceService | None = None
+    knowledge: KnowledgeIndex | None = None
 
     def agent_may_work(self, client_id: str) -> bool:
         """`_may_work`, failing closed: if either switch cannot be read, the answer is no."""
@@ -303,6 +310,7 @@ def _assemble(
     gmail = gmail_service or GmailMailService(
         secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
     )
+    product_resources, knowledge = _resources(account_stores, clock)
     builders = builders or default_builders(
         settings,
         verify_token=lambda: secrets.get(GLOBAL_SCOPE, WHATSAPP_VERIFY_TOKEN),
@@ -312,9 +320,12 @@ def _assemble(
         ),
         writeback=_writeback_support(settings, account_stores),
         llm_usage=_llm_usage_stores(account_stores),
+        knowledge=knowledge.for_client if knowledge is not None else None,
         send_guards=send_limits.guard if send_limits is not None else None,
         gmail=gmail,
     )
+    if builders.knowledge is None and knowledge is not None:
+        builders = replace(builders, knowledge=knowledge.for_client)
     if builders.send_guards is None and send_limits is not None:
         # Builders given by the caller still obey the deployment's cap (their metered channels).
         builders = replace(builders, send_guards=send_limits.guard)
@@ -409,7 +420,20 @@ def _assemble(
         invoices=_invoice_store(account_stores),
         payment_provider=_payment_provider_resolver(secrets),
         daily_reports=daily_reports,
+        product_resources=product_resources,
+        knowledge=knowledge,
     )
+
+
+def _resources(
+    account_stores: AccountStores | None, clock: Clock
+) -> tuple[ResourceService | None, KnowledgeIndex | None]:
+    """The product documents of a deployment with a database (None without one)."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None, None
+    store = SqlResourceStore(engine)
+    return ResourceService(store, clock=clock.now), KnowledgeIndex(store)
 
 
 def _operational_stores(

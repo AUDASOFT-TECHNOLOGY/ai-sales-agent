@@ -111,6 +111,25 @@ def _text(value: str | None, name: str, *, allow_bar: bool = True) -> None:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class PaymentCase:
+    """Where one prospect's payment stands, for the person who has to check it (read-only view).
+
+    `progress` is derived from the recorded facts: a claim or a receipt is only what the prospect said
+    or sent, and `PAID` exists only once a person confirmed it (then the terms they entered follow).
+    """
+
+    prospect_id: ProspectId
+    prospect_name: str | None
+    progress: PaymentProgress
+    signalled_at: datetime | None  # when the prospect said they paid or sent a receipt
+    confirmed_at: datetime | None = None
+    confirmed_by: str | None = None
+    amount: str | None = None
+    currency: str | None = None
+    reference: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ConfirmingActor:
     """The person who verified the payment, as the CRM or Admin that authenticated them vouches.
 

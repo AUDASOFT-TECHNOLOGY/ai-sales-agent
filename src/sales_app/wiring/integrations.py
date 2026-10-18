@@ -86,6 +86,10 @@ class IntegrationBuilders:
     # One client's LLM usage register, or None when the deployment has no database: calls are then
     # simply not recorded.
     llm_usage: Callable[[str], LLMUsageStore] | None = None
+    # One client's reference documents (what its Brain may consult to answer from the documents the
+    # client attached to its products), or None when the deployment keeps none. See
+    # `sales_app.resources`.
+    knowledge: Callable[[str], Any] | None = None
     # One client's cap guard for a channel kind (`guard(client_id, channel)`), or None when the
     # deployment has no database: a `metered` channel then refuses every message.
     send_guards: Callable[[str, str], DailySendGuard] | None = None
@@ -171,6 +175,7 @@ def default_builders(
     consent: Callable[[str], ConsentWriter] | None = None,
     writeback: WritebackSupport | None = None,
     llm_usage: Callable[[str], LLMUsageStore] | None = None,
+    knowledge: Callable[[str], Any] | None = None,
     send_guards: Callable[[str, str], DailySendGuard] | None = None,
     gmail: Any = None,
 ) -> IntegrationBuilders:
@@ -224,5 +229,6 @@ def default_builders(
         consent=consent,
         writeback=writeback,
         llm_usage=llm_usage,
+        knowledge=knowledge,
         send_guards=send_guards,
     )

@@ -519,6 +519,18 @@ class Engine:
             self._emit_for(ev.ACTION_REJECTED, action, actor=actor)
             self._flush(RunCollector())
 
+    # ==== Work that needs the Engine's collaborators and its single writer ===================
+
+    def exclusive[T](
+        self,
+        work: Callable[[SalesRepository, FactsReader | None, FactsWriter | None, Clock], T],
+    ) -> T:
+        """Runs `work` with this client's repository, facts and clock while holding the Engine's lock,
+        so that whatever it records has the same single writer as the Engine's own work. For surfaces
+        that act for an authenticated person, never for a Brain."""
+        with self._lock:
+            return work(self._repo, self._facts, self._facts_writer, self._clock)
+
     def _proposed(self, action_id: ActionId) -> SalesAction:
         """The action as it is stored now, only if it still awaits a decision."""
         for action in self._repo.list_actions({ActionStatus.PROPOSED}):

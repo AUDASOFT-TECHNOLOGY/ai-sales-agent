@@ -309,6 +309,18 @@ def _build_brain(section: BrainSection, llm: LLMProvider, brains: BrainRegistry 
     return load_brain(section.factory, llm, section.settings)
 
 
+def _attach_knowledge(brain: Brain, builders: IntegrationBuilders, client_id: str) -> None:
+    """Lets a Brain that can use reference documents consult this client's own. Never fatal: a Brain
+    without that ability, or a deployment without documents, is built exactly as before."""
+    attach = getattr(brain, "attach_knowledge", None)
+    if builders.knowledge is None or not callable(attach):
+        return
+    try:
+        attach(builders.knowledge(client_id))
+    except Exception as error:  # noqa: BLE001 - documents are optional
+        log.warning("%s: reference documents not attached: %s", client_id, error.__class__.__name__)
+
+
 def _record_usage(
     config: ClientConfig, builders: IntegrationBuilders, llm: LLMProvider
 ) -> LLMProvider:
@@ -522,6 +534,7 @@ def build_runtime(
     )
     llm = _record_usage(config, builders, llm)
     brain = _stage(client_id, "brain", lambda: _build_brain(spec.brain, llm, brains))
+    _attach_knowledge(brain, builders, client_id)
     channel: MessagingChannel | None = None
     if router is None:
         channel_key = channel_provider_key(config)

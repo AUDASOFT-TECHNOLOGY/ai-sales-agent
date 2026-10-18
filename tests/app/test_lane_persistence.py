@@ -95,7 +95,7 @@ def test_no_migration_was_needed():
 
     # The lane lives in the existing JSON documents: lanes added no revision of their own. The head
     # is 0011, the send cap, which has nothing to do with lanes.
-    assert head_revision() == "0013"
+    assert head_revision() == "0014"
 
 
 # ---- a lane is kept across a restart ---------------------------------------------------------------
