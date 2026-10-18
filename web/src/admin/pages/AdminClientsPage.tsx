@@ -225,8 +225,8 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
         logo,
         login: login.trim(),
         temporary_password: password,
-        llm_provider: provider,
-        llm_model: model.trim(),
+        // The model is optional: the account opens without it and the agent waits for it.
+        ...(provider && model.trim() ? { llm_provider: provider, llm_model: model.trim() } : {}),
         status,
         whatsapp_number: whatsappNumber.trim(),
         ...(planId ? { plan_id: planId } : {}),
@@ -238,7 +238,7 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
     }
   }
 
-  const ready = name.trim() && login.trim() && password && provider && model.trim() && whatsappNumber.trim();
+  const ready = name.trim() && login.trim() && password && whatsappNumber.trim();
 
   return (
     <Modal
@@ -361,9 +361,9 @@ function ModelSelect({ models, value, onChange }: { models: string[]; value: str
   const id = useId();
   const empty = models.length === 0;
   return (
-    <FieldShell id={id} label="Modèle LLM" helper={empty ? "No active LLM model is configured in Settings." : undefined}>
-      <select id={id} className="input well" value={value} disabled={empty} onChange={(e) => onChange(e.target.value)}>
-        {empty ? <option value="">No model available</option> : null}
+    <FieldShell id={id} label="Modèle LLM" helper={empty ? "No active LLM model is configured in Settings. You can assign one later: the account works without it." : "Optionnel : le compte fonctionne sans modèle, l'agent démarrera une fois le modèle affecté."}>
+      <select id={id} className="input well" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{empty ? "No model available" : "Aucun modèle pour l'instant"}</option>
         {models.map((m) => (
           <option key={m} value={m}>
             {m}

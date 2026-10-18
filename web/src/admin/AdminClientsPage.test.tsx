@@ -182,7 +182,9 @@ describe("AdminClientsPage", () => {
     await user.click(screen.getByRole("button", { name: "+ Ajouter un client" }));
     const select = await within(await screen.findByRole("dialog")).findByLabelText("Modèle LLM");
     expect(select.tagName).toBe("SELECT");
-    expect(select).toBeDisabled();
+    // the model is optional: the account is created without it
+    expect(select).not.toBeDisabled();
+    expect(Array.from(select.querySelectorAll("option")).map((o) => o.textContent)).toEqual(["No model available"]);
   });
 
   it("creates a client and adds it to the table", async () => {

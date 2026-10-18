@@ -193,8 +193,9 @@ export interface CreateClientRequest {
   logo: string | null;
   login: string;
   temporary_password: string;
-  llm_provider: string;
-  llm_model: string;
+  /** Both or neither: the model is assigned when the Admin has one to give. */
+  llm_provider?: string;
+  llm_model?: string;
   status: "active" | "inactive";
   whatsapp_number: string;
   /** Optional: the (active) plan the client starts on. */
