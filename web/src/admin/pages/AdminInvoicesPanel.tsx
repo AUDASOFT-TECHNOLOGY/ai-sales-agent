@@ -1,8 +1,9 @@
 /** Billing > Invoices: the monthly invoices (GET /admin/v1/billing/invoices -- real data, no fixtures).
  *  Filter by client, period and status. An owner generates a finished month (invoices already issued
- *  are never rebuilt) and declares a pending invoice PAID or FOR FREE, once. An invoice shows the plan
- *  terms it was built from, which a later change to the plan does not alter. Nothing here collects or
- *  checks a payment. */
+ *  are never rebuilt) and declares an unpaid invoice PAID or FOR FREE, once. A payment can also be
+ *  confirmed electronically (signed webhook, see docs/billing-payments.md): the invoice then shows the
+ *  origin and transaction, and "Mark PAID" is no longer offered (the server refuses it with a 409).
+ *  FAILED and Overdue come from the server. An invoice shows the plan terms it was built from. */
 
 import { useEffect, useId, useState } from "react";
 import { Glass } from "../../ui/Glass";
@@ -22,13 +23,27 @@ import {
   type Invoice,
   type InvoiceFilters,
   type InvoiceStatus,
+  type PaymentOrigin,
 } from "../api";
 
 // Mirrors require_owner on POST /billing/invoices/generate and PUT /billing/invoices/:id/status.
 const CAN_EDIT_INVOICES_ROLES = new Set(["owner"]);
 
-const STATUS_LABEL: Record<InvoiceStatus, string> = { PENDING: "Pending", PAID: "Paid", FOR_FREE: "For free" };
-const STATUS_TINT = { PENDING: "attention", PAID: "success", FOR_FREE: "neutral" } as const;
+const STATUS_LABEL: Record<InvoiceStatus, string> = { PENDING: "Pending", PAID: "Paid", FOR_FREE: "For free", FAILED: "Failed" };
+const STATUS_TINT = { PENDING: "attention", PAID: "success", FOR_FREE: "neutral", FAILED: "danger" } as const;
+const ORIGIN_LABEL: Record<PaymentOrigin, string> = { manual: "Manual", electronic: "Electronic" };
+
+/** Unpaid invoices can be settled by hand; one paid electronically cannot (the server says 409). */
+const canSettle = (i: Invoice) => i.status === "PENDING" || i.status === "FAILED";
+
+function StatusChips({ invoice }: { invoice: Invoice }) {
+  return (
+    <>
+      <Chip tint={STATUS_TINT[invoice.status]}>{STATUS_LABEL[invoice.status]}</Chip>
+      {invoice.overdue ? <Chip tint="danger">Overdue</Chip> : null}
+    </>
+  );
+}
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -223,6 +238,7 @@ export function AdminInvoicesPanel() {
                   Amount
                 </th>
                 <th scope="col">Status</th>
+                <th scope="col">Payment</th>
                 <th scope="col">
                   <span className="sr-only">Actions</span>
                 </th>
@@ -240,13 +256,14 @@ export function AdminInvoicesPanel() {
                     {i.amount} {i.currency}
                   </td>
                   <td>
-                    <Chip tint={STATUS_TINT[i.status]}>{STATUS_LABEL[i.status]}</Chip>
+                    <StatusChips invoice={i} />
                   </td>
+                  <td className="c-2">{i.payment_origin ? ORIGIN_LABEL[i.payment_origin] : "—"}</td>
                   <td className="admin-table__action">
                     <Button variant="ghost" size="sm" onClick={() => setViewing(i)} aria-label={`Details of ${i.number}`}>
                       Details
                     </Button>
-                    {canEdit && i.status === "PENDING" ? (
+                    {canEdit && canSettle(i) ? (
                       <>
                         <Button
                           variant="ghost"
@@ -296,7 +313,7 @@ function InvoiceModal({ invoice, clientName, onClose }: { invoice: Invoice; clie
       }
     >
       <p className="c-2">
-        {clientName} · {invoice.period} · <Chip tint={STATUS_TINT[invoice.status]}>{STATUS_LABEL[invoice.status]}</Chip>
+        {clientName} · {invoice.period} · <StatusChips invoice={invoice} />
       </p>
       <table className="admin-table">
         <thead>
@@ -344,9 +361,21 @@ function InvoiceModal({ invoice, clientName, onClose }: { invoice: Invoice; clie
       <p className="c-3 t-body-sm">
         Issued {new Date(invoice.created_at).toLocaleDateString()} by {invoice.created_by}.
         {invoice.status_changed_at && invoice.status_changed_by
-          ? ` Marked ${STATUS_LABEL[invoice.status].toUpperCase()} on ${new Date(invoice.status_changed_at).toLocaleDateString()} by ${invoice.status_changed_by}.`
+          ? ` ${STATUS_LABEL[invoice.status]} on ${new Date(invoice.status_changed_at).toLocaleDateString()} by ${invoice.status_changed_by}.`
           : ""}
       </p>
+      {invoice.payment_origin ? (
+        <p className="c-3 t-body-sm">
+          Payment origin: {ORIGIN_LABEL[invoice.payment_origin]}
+          {invoice.payment_origin === "electronic" && invoice.payment_transaction_id
+            ? ` (transaction ${invoice.payment_transaction_id}, event ${invoice.payment_event_id ?? "?"})`
+            : ""}
+          .
+        </p>
+      ) : null}
+      {invoice.due_at && (invoice.status === "PENDING" || invoice.status === "FAILED") ? (
+        <p className="c-3 t-body-sm">Due {new Date(invoice.due_at).toLocaleDateString()}.</p>
+      ) : null}
     </Modal>
   );
 }

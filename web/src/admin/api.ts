@@ -520,7 +520,9 @@ export function adminRemoveSendCap(clientId: string): Promise<SendCap> {
 // so it never changes when a plan does. PAID / FOR_FREE are the Admin's declaration (once, owner
 // only): no payment is collected or checked.
 
-export type InvoiceStatus = "PENDING" | "PAID" | "FOR_FREE";
+export type InvoiceStatus = "PENDING" | "PAID" | "FOR_FREE" | "FAILED";
+/** How an invoice was paid: declared by an Admin, or confirmed by a verified payment notification. */
+export type PaymentOrigin = "manual" | "electronic";
 
 export interface InvoiceLine {
   plan_id: string;
@@ -547,6 +549,12 @@ export interface Invoice {
   created_by: string;
   status_changed_at: string | null;
   status_changed_by: string | null;
+  payment_origin?: PaymentOrigin | null;
+  payment_transaction_id?: string | null;
+  payment_event_id?: string | null;
+  /** Computed by the server: unpaid (PENDING/FAILED) 15 days after the end of its month. */
+  due_at?: string;
+  overdue?: boolean;
 }
 
 export interface InvoiceFilters {

@@ -94,8 +94,8 @@ def test_no_migration_was_needed():
     from sales_app.persistence.schema import head_revision
 
     # The lane lives in the existing JSON documents: lanes added no revision of their own. The head
-    # is 0011, the send cap, which has nothing to do with lanes.
-    assert head_revision() == "0011"
+    # is 0012, payments, which has nothing to do with lanes.
+    assert head_revision() == "0012"
 
 
 # ---- a lane is kept across a restart ---------------------------------------------------------------

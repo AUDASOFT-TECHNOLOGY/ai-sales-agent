@@ -23,6 +23,8 @@ from sales_app.inbox import PositionStore
 from sales_app.llm_pricing import LLMPricingStore
 from sales_app.llm_usage import LLMUsageStore
 from sales_app.parsers import ParserTable, build_parsers
+from sales_app.payment_confirmation import PAYMENT_WEBHOOK_SECRET
+from sales_app.payment_provider import PaymentProvider, SignedWebhookProvider
 from sales_app.persistence import AccountStores, build_account_stores
 from sales_app.persistence.invoice_rows import SqlInvoiceStore
 from sales_app.persistence.llm_pricing_rows import SqlLLMPricingStore
@@ -104,6 +106,10 @@ class Application:
     plans: PlanStore | None = None
     # The monthly invoices; None without a database (the Admin API says so).
     invoices: InvoiceStore | None = None
+    # Resolves the payment provider that confirms invoice payments, or None when none is configured
+    # (the payment webhook then answers 409). Read on every call: a secret set by the Admin applies
+    # at once. See `sales_app.payment_provider`.
+    payment_provider: Callable[[], PaymentProvider | None] | None = None
     # The Admin's daily e-mail cap of each client and the effective limit (cap and plan) every e-mail
     # path obeys; None without a database (e-mails are then refused; the Admin API says so). See
     # `sales_app.send_cap`.
@@ -362,6 +368,7 @@ def _assemble(
         send_caps=send_caps,
         send_limits=send_limits,
         invoices=_invoice_store(account_stores),
+        payment_provider=_payment_provider_resolver(secrets),
     )
 
 
@@ -379,6 +386,14 @@ def _operational_stores(
 def _invoice_store(account_stores: AccountStores | None) -> InvoiceStore | None:
     engine = account_stores.engine if account_stores is not None else None
     return SqlInvoiceStore(engine) if engine is not None else None
+
+
+def _payment_provider_resolver(secrets: SecretStore) -> Callable[[], PaymentProvider | None]:
+    def resolve() -> PaymentProvider | None:
+        secret = secrets.get(GLOBAL_SCOPE, PAYMENT_WEBHOOK_SECRET)
+        return SignedWebhookProvider(secret) if secret else None
+
+    return resolve
 
 
 def _plan_store(account_stores: AccountStores | None) -> PlanStore | None:

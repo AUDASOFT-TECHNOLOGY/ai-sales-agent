@@ -55,6 +55,8 @@ MODEL_LIST_KEYS = {"openai.model_sol", "openai.model_lune", "openai.models"}
 # The platform mail server profile (Admin → Settings → Email): global, non-secret settings of
 # Revansa's own mail servers. Stored like credentials, but no provider declares them: the email
 # provider's credentials are the client's own (`email.password`).
+# The payment webhook's signing secret: a platform credential no provider declares.
+PLATFORM_PAYMENT_KEYS = {"payments.webhook_secret"}
 PLATFORM_MAIL_KEYS = {
     "email.platform_domain",
     "email.platform_smtp_host",
@@ -218,7 +220,7 @@ class TestEquivalenceWithTheCredentialCatalog:
 
     def test_the_catalog_lists_exactly_the_stored_declarations_plus_model_lists(self):
         derived = {spec.key for spec in legacy_specs(REGISTRY)}
-        catalog_only = MODEL_LIST_KEYS | PLATFORM_MAIL_KEYS
+        catalog_only = MODEL_LIST_KEYS | PLATFORM_MAIL_KEYS | PLATFORM_PAYMENT_KEYS
         assert derived - NOT_YET_IN_CATALOG == set(CATALOG_BY_KEY) - catalog_only
         assert set(CATALOG_BY_KEY) - derived == catalog_only
         assert derived & NOT_YET_IN_CATALOG == NOT_YET_IN_CATALOG

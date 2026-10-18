@@ -14,9 +14,20 @@ currency, credits, quota, days, amount). Editing or deactivating a plan afterwar
 already invoiced, and generating a period again never touches an invoice that exists (one invoice
 per client and period, enforced by the database).
 
-**Statuses.** A new invoice is `PENDING`. The Admin declares it `PAID` or `FOR_FREE`, once, with who
-and when. Revansa does not collect or verify any payment: `PAID` is the Admin's statement, and no
-payment gateway is involved. Only a month that has ended can be invoiced.
+**When billing starts.** A client is billed from the day its plan was assigned (`PlanAssignment.
+started_at`, set by `plans.assign`): the days before that cost nothing, so the first invoice is
+prorated from the assignment day. Generating a month is idempotent: the Admin endpoint can be called
+any number of times for the same month, an existing invoice is never rebuilt or duplicated (store
+refusal + database unique key on client and period).
+
+**Statuses.** A new invoice is `PENDING`. It becomes `PAID` either by the Admin's declaration
+(origin `manual`, with who and when) or by a verified payment confirmation (origin `electronic`, with
+the provider's transaction id and event id; see `sales_app.payment_confirmation`). `FOR_FREE` is
+always a manual decision. A failed electronic payment makes it `FAILED`, which can still be paid
+later (electronically or manually). `PAID` and `FOR_FREE` are final; an invoice paid electronically
+can no longer be marked manually. *Overdue* is not a stored status: it is computed (`is_overdue`) for
+an invoice still `PENDING` or `FAILED` `DUE_DAYS` after the end of its month, so it never goes stale.
+Only a month that has ended can be invoiced.
 """
 
 import re
@@ -28,8 +39,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from typing import Protocol
 
+from sales_app.payment_provider import PaymentEvent, PaymentStatus
 from sales_app.plans import PlanAssignment
 
+_REFERENCE = re.compile(r"^INV-(\d{4}-(?:0[1-9]|1[0-2]))-(.+)$")
 _PERIOD = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
 _CENT = Decimal("0.01")
 
@@ -38,6 +51,15 @@ class InvoiceStatus(StrEnum):
     PENDING = "PENDING"
     PAID = "PAID"
     FOR_FREE = "FOR_FREE"
+    FAILED = "FAILED"  # an electronic payment was reported failed; can still be paid
+
+
+class PaymentOrigin(StrEnum):
+    MANUAL = "manual"  # the Admin declared it
+    ELECTRONIC = "electronic"  # a verified payment confirmation from the provider
+
+
+DUE_DAYS = 15  # an unpaid invoice is overdue this many days after the end of its month
 
 
 class InvalidPeriodError(ValueError):
@@ -101,10 +123,86 @@ class Invoice:
     created_by: str
     status_changed_at: datetime | None = None
     status_changed_by: str | None = None
+    payment_origin: PaymentOrigin | None = None
+    payment_transaction_id: str | None = None
+    payment_event_id: str | None = None
 
     @property
     def number(self) -> str:
         return f"INV-{self.period}-{self.client_id}"
+
+    @property
+    def due_at(self) -> datetime:
+        return parse_period(self.period)[1] + timedelta(days=DUE_DAYS)
+
+    def is_overdue(self, now: datetime) -> bool:
+        return self.status in (InvoiceStatus.PENDING, InvoiceStatus.FAILED) and now >= self.due_at
+
+
+def parse_reference(reference: str) -> tuple[str, str] | None:
+    """(client_id, period) of an invoice number `INV-<period>-<client_id>`; None if it is not one."""
+    match = _REFERENCE.match(reference)
+    return (match.group(2), match.group(1)) if match else None
+
+
+class PaymentOutcome(StrEnum):
+    APPLIED = "applied"  # the invoice is now PAID (electronic)
+    FAILURE_RECORDED = "failure_recorded"  # the invoice is FAILED
+    DUPLICATE = "duplicate"  # the event or the transaction was already processed: nothing changed
+    UNKNOWN_INVOICE = "unknown_invoice"
+    AMOUNT_MISMATCH = "amount_mismatch"
+    CURRENCY_MISMATCH = "currency_mismatch"
+    ALREADY_SETTLED = "already_settled"  # paid (by hand or not) or free already: left as it was
+    TRANSACTION_REUSED = "transaction_reused"  # that transaction paid another invoice
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentResult:
+    outcome: PaymentOutcome
+    invoice: Invoice | None
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentRecord:
+    """One traced decision about an invoice's payment: a webhook event (any outcome) or a manual
+    settlement (`source` "manual", `event_id` "manual:<invoice id>")."""
+
+    event_id: str
+    source: str  # "webhook" | "manual"
+    invoice_id: int | None
+    client_id: str | None
+    invoice_reference: str | None
+    amount: Decimal | None
+    currency: str | None
+    transaction_id: str | None
+    event_status: str  # succeeded | failed | PAID | FOR_FREE
+    outcome: str
+    actor: str
+    received_at: datetime
+
+
+def decide(
+    invoice: Invoice | None, event: PaymentEvent, transaction_owner: int | None
+) -> PaymentOutcome:
+    """What a verified event does to the invoice it names. `transaction_owner` is the id of the
+    invoice that this transaction already paid, if any."""
+    if invoice is None:
+        return PaymentOutcome.UNKNOWN_INVOICE
+    if event.status is PaymentStatus.FAILED:
+        if invoice.status in (InvoiceStatus.PENDING, InvoiceStatus.FAILED):
+            return PaymentOutcome.FAILURE_RECORDED
+        return PaymentOutcome.ALREADY_SETTLED
+    if transaction_owner is not None:
+        if transaction_owner == invoice.invoice_id:
+            return PaymentOutcome.DUPLICATE
+        return PaymentOutcome.TRANSACTION_REUSED
+    if invoice.status not in (InvoiceStatus.PENDING, InvoiceStatus.FAILED):
+        return PaymentOutcome.ALREADY_SETTLED
+    if event.currency != invoice.currency:
+        return PaymentOutcome.CURRENCY_MISMATCH
+    if event.amount != invoice.amount:
+        return PaymentOutcome.AMOUNT_MISMATCH
+    return PaymentOutcome.APPLIED
 
 
 def _day_owner(day_end: datetime, assignments: Iterable[PlanAssignment]) -> PlanAssignment | None:
@@ -205,14 +303,28 @@ class InvoiceStore(Protocol):
     def get(self, invoice_id: int) -> Invoice | None: ...
 
     def settle(self, invoice_id: int, status: InvoiceStatus, *, at: datetime, by: str) -> Invoice:
-        """PENDING becomes PAID or FOR_FREE, once. `InvoiceNotFoundError`; `InvoiceStatusError` if
-        it is not pending any more (or `status` is PENDING)."""
+        """Manual settlement: PENDING (or FAILED) becomes PAID or FOR_FREE, once, origin `manual`,
+        and the decision is traced. `InvoiceNotFoundError`; `InvoiceStatusError` if it is settled
+        already (a payment confirmed electronically included) or `status` is not PAID/FOR_FREE."""
+        ...
+
+    def process_payment(self, event: PaymentEvent, *, at: datetime, by: str) -> PaymentResult:
+        """Applies one verified payment event atomically and idempotently (see
+        `sales_app.payment_confirmation`). Every distinct event is traced, rejected ones included."""
+        ...
+
+    def payment_events(self, invoice_id: int | None = None) -> list[PaymentRecord]:
+        """The traced events (newest first), of one invoice or all."""
         ...
 
 
 def check_settle(invoice: Invoice, status: InvoiceStatus) -> None:
-    if status is InvoiceStatus.PENDING or invoice.status is not InvoiceStatus.PENDING:
-        raise InvoiceStatusError("only a pending invoice can be marked PAID or FOR_FREE")
+    if status not in (InvoiceStatus.PAID, InvoiceStatus.FOR_FREE):
+        raise InvoiceStatusError("an invoice can only be marked PAID or FOR_FREE")
+    if invoice.status is InvoiceStatus.PAID and invoice.payment_origin is PaymentOrigin.ELECTRONIC:
+        raise InvoiceStatusError("this invoice was paid electronically and cannot be changed")
+    if invoice.status not in (InvoiceStatus.PENDING, InvoiceStatus.FAILED):
+        raise InvoiceStatusError("only an unpaid invoice can be marked PAID or FOR_FREE")
 
 
 class InMemoryInvoiceStore:
@@ -220,6 +332,7 @@ class InMemoryInvoiceStore:
 
     def __init__(self) -> None:
         self._invoices: dict[int, Invoice] = {}
+        self._records: list[PaymentRecord] = []
         self._lock = threading.Lock()
 
     def create(self, invoice: Invoice) -> Invoice | None:
@@ -248,9 +361,112 @@ class InMemoryInvoiceStore:
             if invoice is None:
                 raise InvoiceNotFoundError(invoice_id)
             check_settle(invoice, status)
-            settled = replace(invoice, status=status, status_changed_at=at, status_changed_by=by)
+            settled = replace(
+                invoice,
+                status=status,
+                status_changed_at=at,
+                status_changed_by=by,
+                payment_origin=PaymentOrigin.MANUAL,
+            )
             self._invoices[invoice_id] = settled
+            self._records.append(manual_record(settled, status, at=at, by=by))
             return settled
+
+    def process_payment(self, event: PaymentEvent, *, at: datetime, by: str) -> PaymentResult:
+        with self._lock:
+            known = next((r for r in self._records if r.event_id == event.event_id), None)
+            if known is not None:
+                return PaymentResult(
+                    PaymentOutcome.DUPLICATE, self._invoices.get(known.invoice_id or 0)
+                )
+            invoice = None
+            parsed = parse_reference(event.invoice_reference)
+            if parsed is not None:
+                invoice = next(
+                    (i for i in self._invoices.values() if (i.client_id, i.period) == parsed),
+                    None,
+                )
+            owner = next(
+                (
+                    i.invoice_id
+                    for i in self._invoices.values()
+                    if i.payment_transaction_id == event.transaction_id
+                ),
+                None,
+            )
+            outcome = decide(invoice, event, owner)
+            if outcome is PaymentOutcome.APPLIED:
+                assert invoice is not None
+                invoice = replace(
+                    invoice,
+                    status=InvoiceStatus.PAID,
+                    status_changed_at=at,
+                    status_changed_by=by,
+                    payment_origin=PaymentOrigin.ELECTRONIC,
+                    payment_transaction_id=event.transaction_id,
+                    payment_event_id=event.event_id,
+                )
+                self._invoices[invoice.invoice_id] = invoice
+            elif outcome is PaymentOutcome.FAILURE_RECORDED:
+                assert invoice is not None
+                if invoice.status is InvoiceStatus.PENDING:
+                    invoice = replace(
+                        invoice,
+                        status=InvoiceStatus.FAILED,
+                        status_changed_at=at,
+                        status_changed_by=by,
+                    )
+                    self._invoices[invoice.invoice_id] = invoice
+            self._records.append(webhook_record(event, invoice, outcome, at=at, by=by))
+            return PaymentResult(outcome, invoice)
+
+    def payment_events(self, invoice_id: int | None = None) -> list[PaymentRecord]:
+        with self._lock:
+            found = [r for r in self._records if invoice_id in (None, r.invoice_id)]
+        return list(reversed(found))
+
+
+def manual_record(
+    invoice: Invoice, status: InvoiceStatus, *, at: datetime, by: str
+) -> PaymentRecord:
+    return PaymentRecord(
+        event_id=f"manual:{invoice.invoice_id}",
+        source="manual",
+        invoice_id=invoice.invoice_id,
+        client_id=invoice.client_id,
+        invoice_reference=invoice.number,
+        amount=invoice.amount,
+        currency=invoice.currency,
+        transaction_id=None,
+        event_status=status.value,
+        outcome="applied",
+        actor=by,
+        received_at=at,
+    )
+
+
+def webhook_record(
+    event: PaymentEvent,
+    invoice: Invoice | None,
+    outcome: PaymentOutcome,
+    *,
+    at: datetime,
+    by: str,
+) -> PaymentRecord:
+    return PaymentRecord(
+        event_id=event.event_id,
+        source="webhook",
+        invoice_id=invoice.invoice_id if invoice else None,
+        client_id=invoice.client_id if invoice else None,
+        invoice_reference=event.invoice_reference,
+        amount=event.amount,
+        currency=event.currency,
+        transaction_id=event.transaction_id,
+        event_status=event.status.value,
+        outcome=outcome.value,
+        actor=by,
+        received_at=at,
+    )
 
 
 def _neg(period: str) -> tuple[int, ...]:

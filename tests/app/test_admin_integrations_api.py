@@ -164,6 +164,7 @@ class TestGlobalCredentials:
             "whatsapp.verify_token",
             "whatsapp.app_secret",
             "whatsapp.api_version",
+            "payments.webhook_secret",
             "email.platform_domain",
             "email.platform_smtp_host",
             "email.platform_smtp_port",

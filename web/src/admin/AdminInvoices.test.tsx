@@ -25,6 +25,11 @@ interface TestInvoice {
   created_by: string;
   status_changed_at: string | null;
   status_changed_by: string | null;
+  payment_origin?: string | null;
+  payment_transaction_id?: string | null;
+  payment_event_id?: string | null;
+  overdue?: boolean;
+  due_at?: string;
 }
 
 function invoice(over: Partial<TestInvoice> = {}): TestInvoice {
@@ -211,6 +216,32 @@ describe("Billing: invoices", () => {
     const row = (await screen.findByRole("rowheader", { name: "INV-2026-04-alpha" })).closest("tr") as HTMLElement;
     await waitFor(() => expect(within(row).getByText("For free")).toBeInTheDocument());
     expect(JSON.parse(String(calls(fetchMock, "/status", "PUT")[0][1]?.body))).toEqual({ status: "FOR_FREE" });
+  });
+
+  it("shows the payment origin and does not offer 'Mark PAID' for an invoice paid electronically", async () => {
+    stubFetch({
+      invoices: [
+        invoice({ status: "PAID", payment_origin: "electronic", payment_transaction_id: "txn_1", payment_event_id: "evt_1" }),
+        invoice({ invoice_id: 2, client_id: "beta", number: "INV-2026-04-beta", status: "PAID", payment_origin: "manual" }),
+      ],
+    });
+    const user = await renderInvoices();
+    const row = (await screen.findByRole("rowheader", { name: "INV-2026-04-alpha" })).closest("tr") as HTMLElement;
+    expect(within(row).getByText("Electronic")).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /Mark/ })).toBeNull();
+    const manual = screen.getByRole("rowheader", { name: "INV-2026-04-beta" }).closest("tr") as HTMLElement;
+    expect(within(manual).getByText("Manual")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Details of INV-2026-04-alpha" }));
+    expect(await screen.findByText(/transaction txn_1, event evt_1/)).toBeInTheDocument();
+  });
+
+  it("shows Failed and Overdue, and still lets an owner settle a failed invoice by hand", async () => {
+    stubFetch({ invoices: [invoice({ status: "FAILED", overdue: true, due_at: "2026-05-16T00:00:00Z" })] });
+    await renderInvoices();
+    const row = (await screen.findByRole("rowheader", { name: "INV-2026-04-alpha" })).closest("tr") as HTMLElement;
+    expect(within(row).getByText("Failed")).toBeInTheDocument();
+    expect(within(row).getByText("Overdue")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Mark INV-2026-04-alpha paid" })).toBeInTheDocument();
   });
 
   it("shows the server's refusal when an invoice cannot be settled", async () => {

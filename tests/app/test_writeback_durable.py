@@ -206,7 +206,7 @@ class TestMigration:
         after = set(inspect(engine).get_table_names())
         assert after - before == {"op_writeback_ledger"}
         upgrade_database(engine)
-        assert head_revision() == current_revision(engine) == "0011"
+        assert head_revision() == current_revision(engine) == "0012"
         assert set(inspect(engine).get_table_names()) - {"alembic_version"} == set(metadata.tables)
 
     def test_the_upgrade_keeps_what_was_there(self):

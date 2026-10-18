@@ -360,8 +360,35 @@ invoices = Table(
     Column("created_by", String(255), nullable=False),
     Column("status_changed_at", UtcDateTime),
     Column("status_changed_by", String(255)),
+    # How it was paid: "manual" (the Admin's declaration) or "electronic" (a verified payment
+    # confirmation, with the provider's transaction and event ids). NULL while unpaid / free.
+    Column("payment_origin", String(16)),
+    Column("payment_transaction_id", String(128)),
+    Column("payment_event_id", String(128)),
     UniqueConstraint("client_id", "period", name="uq_invoices_client_period"),
     Index("ix_invoices_period", "period", "client_id"),
+    Index("uq_invoices_transaction", "payment_transaction_id", unique=True),
+)
+
+# Every payment decision, traced: one row per distinct webhook event (applied or rejected; a replayed
+# event_id is refused by the primary key and changes nothing) and one per manual settlement
+# (`event_id` "manual:<invoice id>"). The table is the audit of how invoices got paid.
+payment_events = Table(
+    "payment_events",
+    metadata,
+    Column("event_id", String(128), primary_key=True),
+    Column("source", String(16), nullable=False),
+    Column("invoice_id", Integer, ForeignKey("invoices.invoice_id")),
+    Column("client_id", String(64)),
+    Column("invoice_reference", String(100)),
+    Column("amount", Numeric(18, 2)),
+    Column("currency", String(3)),
+    Column("transaction_id", String(128)),
+    Column("event_status", String(16), nullable=False),
+    Column("outcome", String(32), nullable=False),
+    Column("actor", String(255), nullable=False),
+    Column("received_at", UtcDateTime, nullable=False),
+    Index("ix_payment_events_invoice", "invoice_id"),
 )
 
 invoice_lines = Table(

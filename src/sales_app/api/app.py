@@ -39,6 +39,7 @@ from sales_app.api.client_source import (
     create_client_source_router,
     default_sheets_probe,
 )
+from sales_app.api.payments import create_payments_router
 from sales_app.bootstrap import Application
 from sales_app.connection_tests import HttpClientFactory, default_http_client
 from sales_app.email_platform import PlatformMailProbe, PlatformMailProbeFactory
@@ -94,6 +95,7 @@ def create_app(
     app.include_router(create_admin_plans_router(application))
     app.include_router(create_admin_send_cap_router(application))
     app.include_router(create_admin_billing_router(application))
+    app.include_router(create_payments_router(application))
     app.include_router(create_admin_channels_router(application))
     app.include_router(
         create_admin_integrations_router(application, connection_http, platform_mail_probe)

@@ -4,7 +4,9 @@ Any admin reads the invoices of the clients they can reach (a client outside the
 appear, and its invoice is a 404). Only an owner generates invoices or settles them. Generating a
 month builds, for every client that was on a plan that month, one invoice from the terms recorded in
 its plan assignments; an invoice that already exists is never rebuilt. Marking an invoice PAID or
-FOR_FREE is the Admin's declaration, once: nothing here collects or checks a payment.
+FOR_FREE is the Admin's declaration, once (origin `manual`, traced); an invoice already paid by a
+verified electronic confirmation (`POST /api/payments/webhook`, see `sales_app.payment_confirmation`)
+refuses it with a 409. `overdue` is computed: unpaid (PENDING/FAILED) `DUE_DAYS` after its month.
 
 Amounts travel as decimal strings, never floats.
 """
@@ -25,6 +27,7 @@ from sales_app.billing import (
     InvoiceStatus,
     InvoiceStatusError,
     MixedCurrenciesError,
+    PaymentRecord,
     build_invoice,
     ensure_closed,
     parse_period,
@@ -58,6 +61,30 @@ class InvoiceResponse(BaseModel):
     created_by: str
     status_changed_at: datetime | None
     status_changed_by: str | None
+    payment_origin: str | None  # "manual" | "electronic" | None while unpaid / free
+    payment_transaction_id: str | None
+    payment_event_id: str | None
+    due_at: datetime
+    overdue: bool
+
+
+class PaymentEventResponse(BaseModel):
+    event_id: str
+    source: str
+    invoice_id: int | None
+    client_id: str | None
+    invoice_reference: str | None
+    amount: str | None
+    currency: str | None
+    transaction_id: str | None
+    event_status: str
+    outcome: str
+    actor: str
+    received_at: datetime
+
+
+class PaymentEventsResponse(BaseModel):
+    events: list[PaymentEventResponse]
 
 
 class InvoicesResponse(BaseModel):
@@ -84,7 +111,7 @@ class SettleBody(BaseModel):
     status: InvoiceStatus  # PAID or FOR_FREE
 
 
-def _response(invoice: Invoice) -> InvoiceResponse:
+def _response(invoice: Invoice, now: datetime) -> InvoiceResponse:
     return InvoiceResponse(
         invoice_id=invoice.invoice_id,
         number=invoice.number,
@@ -111,6 +138,28 @@ def _response(invoice: Invoice) -> InvoiceResponse:
         created_by=invoice.created_by,
         status_changed_at=invoice.status_changed_at,
         status_changed_by=invoice.status_changed_by,
+        payment_origin=invoice.payment_origin.value if invoice.payment_origin else None,
+        payment_transaction_id=invoice.payment_transaction_id,
+        payment_event_id=invoice.payment_event_id,
+        due_at=invoice.due_at,
+        overdue=invoice.is_overdue(now),
+    )
+
+
+def _event_response(record: PaymentRecord) -> PaymentEventResponse:
+    return PaymentEventResponse(
+        event_id=record.event_id,
+        source=record.source,
+        invoice_id=record.invoice_id,
+        client_id=record.client_id,
+        invoice_reference=record.invoice_reference,
+        amount=format(record.amount, "f") if record.amount is not None else None,
+        currency=record.currency,
+        transaction_id=record.transaction_id,
+        event_status=record.event_status,
+        outcome=record.outcome,
+        actor=record.actor,
+        received_at=record.received_at,
     )
 
 
@@ -159,7 +208,9 @@ def create_admin_billing_router(application: Application) -> APIRouter:
         except StoreUnavailableError as error:
             raise HTTPException(503, str(error)) from None
         return InvoicesResponse(
-            invoices=[_response(i) for i in found if admin.can_reach(i.client_id)]
+            invoices=[
+                _response(i, application.clock.now()) for i in found if admin.can_reach(i.client_id)
+            ]
         )
 
     @router.get("/invoices/{invoice_id}", response_model=InvoiceResponse)
@@ -173,7 +224,26 @@ def create_admin_billing_router(application: Application) -> APIRouter:
             raise HTTPException(503, str(error)) from None
         if invoice is None or not admin.can_reach(invoice.client_id):
             raise HTTPException(404, "no such invoice")  # not even a hint that it exists
-        return _response(invoice)
+        return _response(invoice, application.clock.now())
+
+    @router.get("/payment-events", response_model=PaymentEventsResponse)
+    def payment_events(
+        invoice_id: int | None = None, admin: AdminUser = Depends(get_current_admin)
+    ) -> PaymentEventsResponse:
+        """Every traced payment decision (webhook events, rejected ones included, and manual
+        settlements), newest first, for the clients this admin can reach. Events whose invoice is
+        unknown belong to no client and are shown to owners only."""
+        store = invoices()
+        try:
+            found = store.payment_events(invoice_id)
+        except StoreUnavailableError as error:
+            raise HTTPException(503, str(error)) from None
+        visible = [
+            r
+            for r in found
+            if (admin.can_reach(r.client_id) if r.client_id else admin.role is AdminRole.OWNER)
+        ]
+        return PaymentEventsResponse(events=[_event_response(r) for r in visible])
 
     @router.post("/invoices/generate", response_model=GenerateResponse)
     async def generate(
@@ -214,7 +284,7 @@ def create_admin_billing_router(application: Application) -> APIRouter:
                 if kept is None:
                     existing += 1
                 else:
-                    created.append(_response(kept))
+                    created.append(_response(kept, now))
             return GenerateResponse(
                 period=body.period, created=created, already_invoiced=existing, skipped=skipped
             )
@@ -241,6 +311,6 @@ def create_admin_billing_router(application: Application) -> APIRouter:
             raise HTTPException(409, str(error)) from None
         except StoreUnavailableError as error:
             raise HTTPException(503, str(error)) from None
-        return _response(settled)
+        return _response(settled, application.clock.now())
 
     return router

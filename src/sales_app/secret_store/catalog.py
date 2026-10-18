@@ -141,6 +141,15 @@ CATALOG: tuple[CredentialSpec, ...] = (
         pattern=re.compile(r"^v\d{1,3}\.\d{1,3}$"),
         rule="must look like v21.0",
     ),
+    # The shared secret that signs payment confirmations (`sales_app.payment_provider`). Setting it
+    # is what turns the payment webhook on; it is never returned.
+    CredentialSpec(
+        "payments.webhook_secret",
+        ScopeKind.GLOBAL,
+        "Payment webhook signing secret",
+        pattern=re.compile(r"^[\x21-\x7e]{16,256}$"),
+        rule="must be 16 to 256 printable characters without spaces",
+    ),
     # The servers of the mailboxes Revansa provides (OVH today). Only the servers: which mailbox a
     # client gets, and its password, are the client's own (`email.password`, client scope).
     CredentialSpec(
