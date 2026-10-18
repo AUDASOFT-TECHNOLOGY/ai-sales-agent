@@ -14,6 +14,7 @@ import { ClientApprovalsPage } from "./client/ClientApprovalsPage";
 import { ClientAuthProvider } from "./client/ClientAuthContext";
 import { ClientChannelPage } from "./client/ClientChannelPage";
 import { ClientLanesPage } from "./client/ClientLanesPage";
+import { ClientReportingPage } from "./client/ClientReportingPage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
 import { ClientProfilePage } from "./client/ClientProfilePage";
 import { ClientRoute } from "./client/ClientRoute";
@@ -96,6 +97,7 @@ export function App() {
               <Route path="approvals" element={<ClientApprovalsPage />} />
               <Route path="channel" element={<ClientChannelPage />} />
               <Route path="lanes" element={<ClientLanesPage />} />
+              <Route path="reporting" element={<ClientReportingPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
             </Route>

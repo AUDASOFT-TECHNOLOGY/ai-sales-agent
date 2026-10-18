@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { motion } from "motion/react";
-import { ChevronsLeft, ChevronsRight, ClipboardCheck, History, LogOut, MessageSquare, Rocket, Search, SlidersHorizontal, Send, UserRound, Users, Radar, Workflow } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, ClipboardCheck, FileText, History, LogOut, MessageSquare, Rocket, Search, SlidersHorizontal, Send, UserRound, Users, Radar, Workflow } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { useClientAgentStatus, type ClientAgentStatus } from "../client/useClientAgentStatus";
@@ -28,6 +28,7 @@ const NAV: Array<{ to: string; key: MessageKey; icon: typeof Rocket; group?: "ru
   { to: "/settings", key: "nav.settings", icon: SlidersHorizontal, group: "shape" },
   { to: "/channel", key: "nav.channel", icon: Send, group: "shape" },
   { to: "/lanes", key: "nav.lanes", icon: Workflow, group: "shape" },
+  { to: "/reporting", key: "nav.reporting", icon: FileText, group: "run" },
 ];
 
 const TITLE: Record<string, MessageKey> = {
@@ -42,6 +43,7 @@ const TITLE: Record<string, MessageKey> = {
   "/approvals": "approvals.title",
   "/channel": "channel.title",
   "/lanes": "lanes.title",
+  "/reporting": "reporting.title",
 };
 
 function Aurora() {

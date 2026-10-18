@@ -141,6 +141,10 @@ class ScheduleState:
     last_sync_at: datetime | None = None
     sync_blocked_until: datetime | None = None
     sync_failures: int = 0
+    # The daily report has its own rhythm and backoff too (it never delays the jobs that send).
+    last_report_at: datetime | None = None
+    report_blocked_until: datetime | None = None
+    report_failures: int = 0
     blocked_until: datetime | None = None  # backoff after a failed job
     _busy: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)

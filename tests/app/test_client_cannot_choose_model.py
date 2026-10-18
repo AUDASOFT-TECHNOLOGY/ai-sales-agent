@@ -28,6 +28,12 @@ MODEL_WORDS = re.compile(r"llm|model|provider|engine|brain", re.IGNORECASE)
 # Every route of the Client API. A new one makes the first test fail on purpose: whoever adds it
 # must check, here, that it carries no model.
 CLIENT_ROUTES = {
+    ("GET", "/client/v1/reporting"),
+    ("GET", "/client/v1/reports"),
+    ("GET", "/client/v1/reports/{day}"),
+    ("POST", "/client/v1/reports/generate"),
+    ("POST", "/client/v1/reports/{day}/resend"),
+    ("PUT", "/client/v1/reporting/settings"),
     ("GET", "/client/v1/approvals"),
     ("POST", "/client/v1/approvals/{action_id}/approve"),
     ("POST", "/client/v1/approvals/{action_id}/reject"),

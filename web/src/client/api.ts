@@ -494,3 +494,100 @@ export interface ClientSummary {
 export function clientSummary(): Promise<ClientSummary> {
   return request<ClientSummary>("/summary");
 }
+
+/* ── Daily reporting (client_reporting.py) ── */
+
+export type ReportStatus = "pending" | "sending" | "sent" | "failed" | "undeliverable";
+
+export interface ReportSettings {
+  enabled: boolean;
+  channel: string;
+  recipient: string;
+  /** HH:MM wall-clock time in `timezone`. */
+  send_time: string;
+  /** An explicit IANA name; never assumed from the browser. */
+  timezone: string;
+  language: string;
+  updated_at: string;
+}
+
+export interface ReportChannelOption {
+  key: string;
+  available: boolean;
+  /** `not_supported` (WhatsApp) or `not_authorized` (the platform has not opened it). */
+  reason: string | null;
+}
+
+export interface ReportSummary {
+  day: string;
+  status: ReportStatus;
+  channel: string | null;
+  recipient_hint: string | null;
+  generated_at: string;
+  sent_at: string | null;
+  attempts: number;
+  next_attempt_at: string | null;
+  error_code: string | null;
+  problem: string | null;
+  period_start: string;
+  period_end: string;
+  timezone: string;
+  messages_sent: number;
+  replies_received: number;
+}
+
+export interface ReportDetail extends ReportSummary {
+  language: string;
+  figures: {
+    prospects: { total: number; by_status: Record<string, number> };
+    activity: {
+      messages_sent: number;
+      prospects_contacted: number;
+      new_contacts: number;
+      follow_ups_sent: number;
+      answers_sent: number;
+      replies_received: number;
+      prospects_replied: number;
+    };
+    follow_ups: { scheduled: number; due_next_24h: number };
+    purchase_intents: { tracked: boolean };
+    appointments: { tracked: boolean };
+    conversions: { tracked: boolean };
+    quota: { status: string; cap?: number; used?: number; remaining?: number; day_utc: string } | null;
+    actions_required: Array<{ code: string; count?: number }>;
+  };
+  text: string;
+}
+
+export interface ReportingState {
+  settings: ReportSettings | null;
+  channels: ReportChannelOption[];
+  languages: string[];
+  latest: ReportSummary | null;
+}
+
+export type ReportSettingsBody = Omit<ReportSettings, "updated_at">;
+
+export function clientReporting(): Promise<ReportingState> {
+  return request<ReportingState>("/reporting");
+}
+
+export function clientSaveReporting(body: ReportSettingsBody): Promise<ReportSettings> {
+  return request<ReportSettings>("/reporting/settings", { method: "PUT", body: JSON.stringify(body) });
+}
+
+export function clientReports(limit = 30): Promise<{ reports: ReportSummary[] }> {
+  return request<{ reports: ReportSummary[] }>(`/reports?limit=${limit}`);
+}
+
+export function clientReport(day: string): Promise<ReportDetail> {
+  return request<ReportDetail>(`/reports/${encodeURIComponent(day)}`);
+}
+
+export function clientGenerateReport(): Promise<ReportDetail> {
+  return request<ReportDetail>("/reports/generate", { method: "POST" });
+}
+
+export function clientResendReport(day: string): Promise<ReportDetail> {
+  return request<ReportDetail>(`/reports/${encodeURIComponent(day)}/resend`, { method: "POST" });
+}

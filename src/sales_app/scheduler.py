@@ -32,6 +32,9 @@ INBOX_EVERY_MINUTES = 2  # how often a mailbox is read; not tied to the outbound
 SYNC_EVERY_MINUTES = 10  # how often results are written back into the sources
 SYNC_BACKOFF_BASE_SECONDS = 60
 SYNC_BACKOFF_MAX_SECONDS = 1800
+REPORT_EVERY_MINUTES = 5  # how often the daily report is looked at; the report has its own day
+REPORT_BACKOFF_BASE_SECONDS = 60
+REPORT_BACKOFF_MAX_SECONDS = 1800
 
 
 class Job(StrEnum):
@@ -41,6 +44,7 @@ class Job(StrEnum):
     RECOVER = "recover"  # process stored replies that were never handled
     INBOX = "inbox"  # fetch the replies of a channel that does not call us (a mailbox)
     SYNC = "sync"  # write results back into the sources that are allowed to receive them
+    REPORT = "report"  # make the client's daily report if missing and send what is due
 
 
 class InboxSupport(Protocol):
@@ -49,6 +53,15 @@ class InboxSupport(Protocol):
     def polls_inbox(self, config: ClientConfig) -> bool: ...
 
     def open_inbox(self, config: ClientConfig) -> InboxPoller: ...
+
+
+class ReportSupport(Protocol):
+    """The daily report (`sales_app.daily_report.DailyReportService`): when it is due, and how to
+    make and send it. It reads through the Engine of the lease, so it sees this client only."""
+
+    def due(self, client_id: str, now: datetime) -> bool: ...
+
+    def run_scheduled(self, client_id: str, reader, health, now: datetime): ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +84,8 @@ class Scheduler:
         inbox_every_minutes: int = INBOX_EVERY_MINUTES,
         sync_every_minutes: int = SYNC_EVERY_MINUTES,
         mail_cursors: Callable[[str], PositionStore] | None = None,
+        reports: ReportSupport | None = None,
+        report_every_minutes: int = REPORT_EVERY_MINUTES,
     ) -> None:
         self._registry = registry
         self._clock = clock
@@ -79,6 +94,8 @@ class Scheduler:
         self._mail_cursors = mail_cursors  # one client's positions; None: no database
         self._inbox_every = inbox_every_minutes
         self._sync_every = sync_every_minutes
+        self._reports = reports  # None: no daily report (no database)
+        self._report_every = report_every_minutes
         self._executor = executor
         self._owns_executor = executor is None
 
@@ -92,7 +109,28 @@ class Scheduler:
         jobs = self._due_work(runtime, now)
         if self._sync_due(runtime, now):
             jobs = [*jobs, Job.SYNC]
+        if self._report_due(runtime, now):
+            jobs = [*jobs, Job.REPORT]
         return jobs
+
+    def _report_due(self, runtime: ClientRuntime, now: datetime) -> bool:
+        """On its own clock, like the write-back: due whatever the outbound window. The report time
+        itself is the client's own setting, read by the service (never the outbound schedule)."""
+        if self._reports is None or runtime.suspended:
+            return False
+        state = runtime.state
+        if state.report_blocked_until is not None and now < state.report_blocked_until:
+            return False
+        if not _elapsed(state.last_report_at, now, self._report_every):
+            return False
+        state.last_report_at = now  # looked at: the database is not asked again before the period
+        try:
+            return self._reports.due(runtime.client_id, now)
+        except Exception as error:  # noqa: BLE001 - an unreadable store: not due, try next time
+            client_logger(__name__, runtime.client_id).warning(
+                "daily report check failed (%s)", type(error).__name__
+            )
+            return False
 
     def _sync_due(self, runtime: ClientRuntime, now: datetime) -> bool:
         if runtime.writeback is None or runtime.suspended:
@@ -205,7 +243,7 @@ class Scheduler:
             for job in jobs:
                 result = self._execute(runtime, job, now)
                 results.append(result)
-                if not result.ok and job not in (Job.INBOX, Job.SYNC):
+                if not result.ok and job not in (Job.INBOX, Job.SYNC, Job.REPORT):
                     break  # a failing client waits for its backoff before anything else
         finally:
             runtime.state.end()
@@ -229,6 +267,8 @@ class Scheduler:
                     reports = [self._poll(runtime, engine)]
                 elif job is Job.SYNC:
                     return self._sync(runtime, now)
+                elif job is Job.REPORT:
+                    return self._report(runtime, engine, now)
                 else:
                     reports = [engine.recover_pending_replies()]
         except ClientNotReadyError as error:
@@ -236,7 +276,7 @@ class Scheduler:
             logger.warning("job %s skipped: %s", job.value, error)
             return JobResult(runtime.client_id, job, ok=False, errors=(str(error),))
         except Exception as error:
-            if job is Job.SYNC:  # the type only: the message of what failed may carry a value
+            if job in (Job.SYNC, Job.REPORT):  # the type only: the message may carry a value
                 logger.error("job %s failed (%s)", job.value, type(error).__name__)
             else:
                 logger.exception("job %s failed", job.value)
@@ -246,6 +286,9 @@ class Scheduler:
                 self._block_sync(runtime, now)
                 runtime.health.record_writeback_failure(now)
                 return JobResult(runtime.client_id, job, ok=False, errors=("write-back failed",))
+            elif job is Job.REPORT:  # its own backoff; it never paints the client as down
+                self._block_report(runtime, now)
+                return JobResult(runtime.client_id, job, ok=False, errors=("report failed",))
             else:
                 self._block(runtime, now)
             runtime.health.record_failure(job.value, now, f"{type(error).__name__}: {error}")
@@ -276,6 +319,32 @@ class Scheduler:
         return JobResult(
             runtime.client_id, Job.SYNC, ok=not summary.all_failed, errors=summary.errors
         )
+
+    def _report(self, runtime: ClientRuntime, engine, now: datetime) -> JobResult:
+        """One daily-report run, inside the lease: the Engine is the read-only source of the
+        figures. What comes back is fixed codes (`report <day>: <code>`), never a value."""
+        reports = self._reports
+        if reports is None:
+            return JobResult(runtime.client_id, Job.REPORT, ok=True)
+        run = reports.run_scheduled(runtime.client_id, engine, runtime.health.snapshot(), now)
+        state = runtime.state
+        state.last_report_at = now
+        # A delivery that failed has its own retry time stored with the report; the job only
+        # waits a little before looking again.
+        state.report_blocked_until = None
+        state.report_failures = 0
+        return JobResult(runtime.client_id, Job.REPORT, ok=run.ok, errors=run.errors)
+
+    @staticmethod
+    def _block_report(runtime: ClientRuntime, now: datetime) -> None:
+        state = runtime.state
+        state.last_report_at = now
+        state.report_failures += 1
+        delay = min(
+            REPORT_BACKOFF_BASE_SECONDS * 2 ** (state.report_failures - 1),
+            REPORT_BACKOFF_MAX_SECONDS,
+        )
+        state.report_blocked_until = now + timedelta(seconds=delay)
 
     @staticmethod
     def _block_sync(runtime: ClientRuntime, now: datetime) -> None:

@@ -16,8 +16,10 @@ from sales_app.channel_policy import ChannelPolicyService
 from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore
 from sales_app.config import build_llm_registry, clamp_mode, load_client_configs
+from sales_app.config.channel_access import DEFAULT_ALLOWED
 from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
 from sales_app.config_store import ConfigStore
+from sales_app.daily_report import DailyReportService
 from sales_app.errors import ConfigurationError
 from sales_app.inbox import PositionStore
 from sales_app.llm_pricing import LLMPricingStore
@@ -35,6 +37,7 @@ from sales_app.persistence.plan_rows import SqlPlanStore
 from sales_app.persistence.send_cap_rows import SqlSendCapStore, SqlSendCounter
 from sales_app.plans import PlanStore, current_daily_quota
 from sales_app.registry import ClientRegistry
+from sales_app.report_wiring import build_report_service
 from sales_app.runtime_manager import RuntimeManager
 from sales_app.scheduler import Scheduler
 from sales_app.secret_store import (
@@ -110,6 +113,9 @@ class Application:
     # (the payment webhook then answers 409). Read on every call: a secret set by the Admin applies
     # at once. See `sales_app.payment_provider`.
     payment_provider: Callable[[], PaymentProvider | None] | None = None
+    # The client's daily report (settings, reports kept per day, delivery); None without a database
+    # (the Client API says so). See `sales_app.daily_report`.
+    daily_reports: DailyReportService | None = None
     # The Admin's daily e-mail cap of each client and the effective limit (cap and plan) every e-mail
     # path obeys; None without a database (e-mails are then refused; the Admin API says so). See
     # `sales_app.send_cap`.
@@ -337,6 +343,16 @@ def _assemble(
     channel_policy = ChannelPolicyService(secrets, audit, now=clock.now)
     channel_policy.set_on_change(manager.notify_change)
 
+    daily_reports = build_report_service(
+        account_stores.engine if account_stores is not None else None,
+        registry,
+        builders,
+        lambda client_id: (
+            channel_policy.effective(client_id) if channel_policy else DEFAULT_ALLOWED
+        ),
+        clock,
+        limits=send_limits,
+    )
     return Application(
         settings=settings,
         registry=registry,
@@ -351,6 +367,7 @@ def _assemble(
             may_run=lambda client_id: _may_work(agent_state, settings.clients_dir, client_id),
             inbox=builders,
             mail_cursors=_mail_cursor_stores(account_stores),
+            reports=daily_reports,
         ),
         parsers=parsers,
         clock=clock,
@@ -369,6 +386,7 @@ def _assemble(
         send_limits=send_limits,
         invoices=_invoice_store(account_stores),
         payment_provider=_payment_provider_resolver(secrets),
+        daily_reports=daily_reports,
     )
 
 

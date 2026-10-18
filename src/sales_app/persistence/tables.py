@@ -446,3 +446,50 @@ op_send_counter = Table(
     Column("updated_at", UtcDateTime, nullable=False),
     CheckConstraint("used >= 0", name="ck_op_send_counter_used"),
 )
+
+
+# How a client wants its daily report: where, to whom, at what time of day and in which explicit
+# IANA time zone. No row: no scheduled report. The recipient is the client's own address.
+client_report_settings = Table(
+    "client_report_settings",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("enabled", Boolean, nullable=False),
+    Column("channel", String(16), nullable=False),
+    Column("recipient", String(320), nullable=False),
+    Column("send_time", String(5), nullable=False),  # HH:MM wall clock in `timezone`
+    Column("timezone", String(64), nullable=False),
+    Column("language", String(8), nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+    Column("updated_by", String(255), nullable=False),
+)
+
+# One report per client and day, whatever happened to its delivery (the primary key is the unique
+# constraint). `figures` is what the report says, `text` what was sent; `status` is the honest state
+# of the delivery. Errors are short codes, never what a server answered.
+daily_reports = Table(
+    "daily_reports",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("report_day", Date, primary_key=True),
+    Column("window_start", UtcDateTime, nullable=False),
+    Column("window_end", UtcDateTime, nullable=False),
+    Column("timezone", String(64), nullable=False),
+    Column("generated_at", UtcDateTime, nullable=False),
+    Column("language", String(8), nullable=False),
+    Column("figures", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    Column("body", Text, nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("attempts", Integer, nullable=False),
+    Column("next_attempt_at", UtcDateTime),
+    Column("error_code", String(64)),
+    Column("channel", String(16)),
+    Column("recipient_hint", String(320)),
+    Column("sent_at", UtcDateTime),
+    Column("updated_at", UtcDateTime, nullable=False),
+    CheckConstraint(
+        "status IN ('pending','sending','sent','failed','undeliverable')",
+        name="ck_daily_reports_status",
+    ),
+    Index("ix_daily_reports_status", "client_id", "status"),
+)
