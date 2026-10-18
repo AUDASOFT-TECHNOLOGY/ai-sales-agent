@@ -1,5 +1,5 @@
 /** English catalog: the source of truth for i18n keys. Interface strings live here, not in components. */
-export const en = {
+export const enBase = {
   "brand.name": "REVANSA",
   "brand.tagline": "Turn conversations into revenue.",
 
@@ -1182,5 +1182,10 @@ export const en = {
   "reporting.action.sync_failing": "Results could not be written back to your source.",
   "reporting.action.inbox_failing": "Your mailbox could not be read.",
 } as const;
+
+import { enClient } from "./client.en";
+
+/** The base catalog plus the Client space copy (`client.en.ts`). */
+export const en = { ...enBase, ...enClient } as const;
 
 export type MessageKey = keyof typeof en;

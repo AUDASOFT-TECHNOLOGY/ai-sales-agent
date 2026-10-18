@@ -16,6 +16,7 @@ import "./styles/screens.css";
 import "./styles/calm.css";
 import "./styles/admin.css";
 import "./styles/client.css";
+import "./styles/client-theme.css";
 import { App } from "./App";
 
 createRoot(document.getElementById("root")!).render(

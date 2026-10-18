@@ -3,7 +3,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { I18nProvider } from "../i18n";
-import { StoreProvider } from "../mock/store";
 import { AppShell } from "../shell/AppShell";
 import { ClientAuthProvider } from "./ClientAuthContext";
 import { ClientLoginPage } from "./ClientLoginPage";
@@ -80,9 +79,7 @@ function renderApp(path: string) {
             <Route
               element={
                 <ClientRoute>
-                  <StoreProvider>
-                    <Outlet />
-                  </StoreProvider>
+                  <Outlet />
                 </ClientRoute>
               }
             >
@@ -384,8 +381,8 @@ describe("Client logout", () => {
     const user = userEvent.setup();
     renderApp("/");
     await screen.findByRole("heading", { name: "Home page" });
-    await user.click(screen.getByRole("button", { name: "Menu" }));
-    await user.click(await screen.findByRole("button", { name: "Logout" }));
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    await user.click(await screen.findByRole("button", { name: "Sign out" }));
     expect(await screen.findByLabelText("Login")).toBeInTheDocument();
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/auth/logout"))).toBe(true));
     expect(screen.queryByRole("heading", { name: "Home page" })).not.toBeInTheDocument();
@@ -401,8 +398,8 @@ describe("Client logout", () => {
       if (String(input).endsWith("/auth/logout")) throw new TypeError("offline");
       return base(input, init);
     });
-    await user.click(screen.getByRole("button", { name: "Menu" }));
-    await user.click(await screen.findByRole("button", { name: "Logout" }));
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    await user.click(await screen.findByRole("button", { name: "Sign out" }));
     expect(await screen.findByLabelText("Login")).toBeInTheDocument();
   });
 
@@ -411,8 +408,8 @@ describe("Client logout", () => {
     const user = userEvent.setup();
     renderApp("/");
     await screen.findByRole("heading", { name: "Home page" });
-    await user.click(screen.getByRole("button", { name: "Menu" }));
-    await user.click(await screen.findByRole("link", { name: "Profile" }));
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    await user.click(await screen.findByRole("link", { name: "My account" }));
     expect(await screen.findByRole("heading", { name: "Change password" })).toBeInTheDocument();
   });
 });

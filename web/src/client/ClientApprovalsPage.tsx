@@ -33,7 +33,7 @@ function failureOf(err: unknown, where: Where): MessageKey {
   return "auth.error.server";
 }
 
-export function ClientApprovalsPage() {
+export function ClientApprovalsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { t, d } = useI18n();
   const { logout } = useClientAuth();
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
@@ -97,14 +97,14 @@ export function ClientApprovalsPage() {
   const working = busy !== null || refreshing;
 
   return (
-    <div className="page page--focus">
-      <div className="page-head">
-        <h2 className="t-h1">{t("approvals.title")}</h2>
+    <div className={embedded ? "rv-page" : "page page--focus"}>
+      <div className="page-head" style={embedded ? { justifyContent: "flex-end" } : undefined}>
+        {embedded ? null : <h2 className="t-h1">{t("approvals.title")}</h2>}
         <Button leading={<RefreshCw size={16} aria-hidden />} onClick={() => void refresh()} loading={refreshing} disabled={busy !== null}>
           {t("approvals.refresh")}
         </Button>
       </div>
-      <p className="c-2">{t("approvals.intro")}</p>
+      {embedded ? null : <p className="c-2">{t("approvals.intro")}</p>}
 
       {failure ? (
         <p className="admin-alert admin-alert--danger" role="alert">

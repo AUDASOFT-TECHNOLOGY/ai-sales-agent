@@ -75,7 +75,7 @@ function withoutEmpty<T extends Record<string, string>>(form: T): Partial<T> {
   return Object.fromEntries(Object.entries(form).filter(([, v]) => v.trim() !== "")) as Partial<T>;
 }
 
-export function ClientChannelPage() {
+export function ClientChannelPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { t, locale } = useI18n();
   const [state, setState] = useState<ChannelState | null>(null);
   const [loadFailure, setLoadFailure] = useState<Failure | null>(null);
@@ -135,10 +135,10 @@ export function ClientChannelPage() {
 
   if (loadFailure) {
     return (
-      <div className="page page--focus">
-        <div className="page-head">
+      <div className={embedded ? "rv-page" : "page page--focus"}>
+        {embedded ? null : <div className="page-head">
           <h2 className="t-h1">{t("channel.title")}</h2>
-        </div>
+        </div>}
         <p className="admin-alert admin-alert--danger" role="alert">
           {t(loadFailure.key)}
         </p>
@@ -150,7 +150,7 @@ export function ClientChannelPage() {
   }
   if (!state) {
     return (
-      <div className="page page--focus">
+      <div className={embedded ? "rv-page" : "page page--focus"}>
         <p className="c-3" role="status">
           {t("channel.loading")}
         </p>
@@ -245,10 +245,10 @@ export function ClientChannelPage() {
   );
 
   return (
-    <div className="page page--focus">
-      <div className="page-head">
+    <div className={embedded ? "rv-page" : "page page--focus"}>
+      {embedded ? null : <div className="page-head">
         <h2 className="t-h1">{t("channel.title")}</h2>
-      </div>
+      </div>}
 
       <div className="stack stack--lg">
         <Glass level={1} className="client-card">

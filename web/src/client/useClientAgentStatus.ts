@@ -1,13 +1,13 @@
 import { useCallback } from "react";
 import type { MessageKey } from "../i18n";
-import type { AgentStateKey } from "../mock/types";
+import type { AgentStateKey } from "../agent/agentState";
 import { clientAgent, type AgentState } from "./api";
 import { useFetched } from "./useFetched";
 
 export interface ClientAgentStatus {
   /** What the Pulse draws. Only states the server can really report are produced. */
   pulse: AgentStateKey;
-  label: MessageKey;
+  statusKey: MessageKey;
   /** The server's answer, once there is one. */
   agent?: AgentState;
   loading: boolean;
@@ -20,10 +20,10 @@ export function useClientAgentStatus(): ClientAgentStatus {
   const load = useCallback(() => clientAgent(), []);
   const { loading, value, failed } = useFetched(load);
   if (value) {
-    if (value.active) return { pulse: "working", label: "agent.page.active", agent: value, loading, failed };
-    if (value.state === "paused") return { pulse: "paused", label: "agent.page.paused", agent: value, loading, failed };
-    if (value.state === "running") return { pulse: "idle", label: "agent.page.waiting", agent: value, loading, failed };
-    return { pulse: "not_live", label: "agent.page.notStarted", agent: value, loading, failed };
+    if (value.active) return { pulse: "working", statusKey: "rv.agent.active", agent: value, loading, failed };
+    if (value.state === "paused") return { pulse: "paused", statusKey: "rv.agent.paused", agent: value, loading, failed };
+    if (value.state === "running") return { pulse: "idle", statusKey: "rv.agent.waiting", agent: value, loading, failed };
+    return { pulse: "not_live", statusKey: "rv.agent.notStarted", agent: value, loading, failed };
   }
-  return { pulse: "not_live", label: failed ? "agent.status.unavailable" : "agent.status.loading", loading, failed };
+  return { pulse: "not_live", statusKey: failed ? "rv.agent.unavailable" : "rv.agent.loading", loading, failed };
 }

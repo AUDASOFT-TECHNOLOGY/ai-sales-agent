@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useI18n, type MessageKey } from "../i18n";
-import type { AgentStateKey } from "../mock/types";
+import type { AgentStateKey } from "./agentState";
 
 interface PulseProps {
   state: AgentStateKey;

@@ -9,25 +9,29 @@ import { AdminClientDetailPage } from "./admin/pages/AdminClientDetailPage";
 import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
 import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
 import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
-import { ClientAgentPage } from "./client/ClientAgentPage";
 import { ClientApprovalsPage } from "./client/ClientApprovalsPage";
 import { ClientAuthProvider } from "./client/ClientAuthContext";
-import { ClientChannelPage } from "./client/ClientChannelPage";
-import { ClientLanesPage } from "./client/ClientLanesPage";
-import { ClientReportingPage } from "./client/ClientReportingPage";
+import { ClientHomePage } from "./client/ClientHomePage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
 import { ClientProfilePage } from "./client/ClientProfilePage";
+import { ClientReportingPage } from "./client/ClientReportingPage";
 import { ClientRoute } from "./client/ClientRoute";
-import { ClientSettingsPage } from "./client/ClientSettingsPage";
+import { ClientTheme } from "./client/ClientTheme";
+import { ChannelsPage } from "./client/connections/ChannelsPage";
+import { ConnectionsLayout } from "./client/connections/ConnectionsLayout";
+import { SourcesPage } from "./client/connections/SourcesPage";
+import { BusinessPage } from "./client/offer/BusinessPage";
+import { OfferLayout } from "./client/offer/OfferLayout";
+import { PaymentsPage } from "./client/offer/PaymentsPage";
+import { ProductEditor } from "./client/offer/ProductEditor";
+import { ProductsPage } from "./client/offer/ProductsPage";
+import { ReviewLayout } from "./client/review/ReviewLayout";
+import { ReviewPaymentsPage } from "./client/review/ReviewPaymentsPage";
 import { I18nProvider } from "./i18n";
-import { StoreProvider } from "./mock/store";
 import { AppShell } from "./shell/AppShell";
 
-// Screens are split per route so the shell stays under the initial JavaScript budget (doc C7).
-const Dashboard = lazy(() => import("./screens/Dashboard").then((m) => ({ default: m.Dashboard })));
+// Screens that read the most data are split per route so the shell stays under the initial JavaScript budget.
 const Conversations = lazy(() => import("./screens/Conversations").then((m) => ({ default: m.Conversations })));
-const History = lazy(() => import("./screens/History").then((m) => ({ default: m.History })));
-const Notifications = lazy(() => import("./screens/Notifications").then((m) => ({ default: m.Notifications })));
 const Prospects = lazy(() => import("./screens/Prospects").then((m) => ({ default: m.Prospects })));
 
 export function App() {
@@ -35,7 +39,7 @@ export function App() {
     <I18nProvider>
       <HashRouter>
         <Routes>
-          {/* Admin: its own session (AdminAuthContext), never the client console's mock store. */}
+          {/* Admin: its own session (AdminAuthContext), separate from the Client's. */}
           <Route
             element={
               <AdminAuthProvider>
@@ -61,12 +65,13 @@ export function App() {
             </Route>
           </Route>
 
-          {/* Client: its own session (ClientAuthContext), separate from the Admin's. Everything but
-              /login sits behind ClientRoute. */}
+          {/* Client: its own session and its own light theme. Everything but /login sits behind ClientRoute. */}
           <Route
             element={
               <ClientAuthProvider>
-                <Outlet />
+                <ClientTheme>
+                  <Outlet />
+                </ClientTheme>
               </ClientAuthProvider>
             }
           >
@@ -74,32 +79,55 @@ export function App() {
             <Route
               element={
                 <ClientRoute>
-                  <StoreProvider>
-                    <Outlet />
-                  </StoreProvider>
+                  <Outlet />
                 </ClientRoute>
               }
             >
-            <Route element={<AppShell />}>
-              <Route index element={<Navigate to="/agent" replace />} />
-              <Route path="setup" element={<Navigate to="/agent" replace />} />
-              <Route path="agent" element={<ClientAgentPage />} />
-              <Route path="settings" element={<ClientSettingsPage />} />
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="prospects" element={<Prospects />} />
-              <Route path="conversations" element={<Conversations />} />
-              <Route path="conversations/:id" element={<Conversations />} />
-              <Route path="configure/*" element={<Navigate to="/settings" replace />} />
-              <Route path="results" element={<Navigate to="/dashboard" replace />} />
-              <Route path="history" element={<History />} />
-              <Route path="notifications" element={<Notifications />} />
-              <Route path="profile" element={<ClientProfilePage />} />
-              <Route path="approvals" element={<ClientApprovalsPage />} />
-              <Route path="channel" element={<ClientChannelPage />} />
-              <Route path="lanes" element={<ClientLanesPage />} />
-              <Route path="reporting" element={<ClientReportingPage />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Route>
+              <Route element={<AppShell />}>
+                <Route index element={<Navigate to="/home" replace />} />
+                <Route path="home" element={<ClientHomePage />} />
+                <Route path="prospects" element={<Prospects />} />
+                <Route path="conversations" element={<Conversations />} />
+                <Route path="conversations/:id" element={<Conversations />} />
+
+                <Route path="review" element={<ReviewLayout />}>
+                  <Route index element={<ClientApprovalsPage embedded />} />
+                  <Route path="payments" element={<ReviewPaymentsPage />} />
+                </Route>
+
+                <Route path="offer" element={<OfferLayout />}>
+                  <Route index element={<Navigate to="products" replace />} />
+                  <Route path="products" element={<ProductsPage />} />
+                  <Route path="products/new" element={<ProductEditor />} />
+                  <Route path="products/:id" element={<ProductEditor />} />
+                  <Route path="payments" element={<PaymentsPage />} />
+                  <Route path="business" element={<BusinessPage />} />
+                </Route>
+
+                <Route path="connections" element={<ConnectionsLayout />}>
+                  <Route index element={<Navigate to="sources" replace />} />
+                  <Route path="sources" element={<SourcesPage />} />
+                  <Route path="channels" element={<ChannelsPage />} />
+                </Route>
+
+                <Route path="reports" element={<ClientReportingPage />} />
+                <Route path="profile" element={<ClientProfilePage />} />
+
+                {/* Addresses of the previous menu keep working. */}
+                <Route path="agent" element={<Navigate to="/home" replace />} />
+                <Route path="setup" element={<Navigate to="/home" replace />} />
+                <Route path="dashboard" element={<Navigate to="/home" replace />} />
+                <Route path="results" element={<Navigate to="/home" replace />} />
+                <Route path="history" element={<Navigate to="/home" replace />} />
+                <Route path="notifications" element={<Navigate to="/home" replace />} />
+                <Route path="approvals" element={<Navigate to="/review" replace />} />
+                <Route path="settings" element={<Navigate to="/offer/business" replace />} />
+                <Route path="configure/*" element={<Navigate to="/offer/business" replace />} />
+                <Route path="channel" element={<Navigate to="/connections/channels" replace />} />
+                <Route path="lanes" element={<Navigate to="/connections/sources" replace />} />
+                <Route path="reporting" element={<Navigate to="/reports" replace />} />
+                <Route path="*" element={<Navigate to="/home" replace />} />
+              </Route>
             </Route>
           </Route>
         </Routes>

@@ -366,11 +366,31 @@ export interface SourceTest {
   lanes: Array<{ lane: string; ok: boolean; message: string }> | null;
 }
 
+export interface SourceOption {
+  key: string;
+  label: string;
+  /** False: it can be set up and tested, but the agent cannot run on it yet. */
+  runnable: boolean;
+}
+
 export interface SourceState {
   version: number | null;
+  /** The chosen source's key. */
+  source: string;
+  runnable: boolean;
+  options: SourceOption[];
+  google_sheets: { spreadsheet_id: string; prospects_tab: string; share_with: string | null } | null;
   /** Null: nothing to connect. Otherwise whether the platform has connected the CRM account. */
   access: "ready" | "waiting_platform" | null;
   last_test: { ok: boolean; checked_at: string; current: boolean } | null;
+  updated_at: string | null;
+  updated_by: "client" | "administrator" | null;
+}
+
+export interface SourceUpdate {
+  expected_version: number | null;
+  source: string;
+  google_sheets?: SheetsChanges;
 }
 
 export function clientReadiness(): Promise<Readiness> {
@@ -383,6 +403,10 @@ export function clientTestSources(): Promise<SourceTest> {
 
 export function clientSourceState(): Promise<SourceState> {
   return request<SourceState>("/source");
+}
+
+export function clientSaveSource(body: SourceUpdate): Promise<SourceState> {
+  return request<SourceState>("/source", { method: "PUT", body: JSON.stringify(body) });
 }
 
 /* ── Business settings and the agent's switch (client_agent.py) ──
@@ -607,4 +631,123 @@ export function clientGenerateReport(): Promise<ReportDetail> {
 
 export function clientResendReport(day: string): Promise<ReportDetail> {
   return request<ReportDetail>(`/reports/${encodeURIComponent(day)}/resend`, { method: "POST" });
+}
+
+/* ── Product resources (see src/sales_app/api/client_resources.py) ──
+ * Documents and links that back a product up. A resource is stored per client and per product; the
+ * agent can use one only if `status` is "ready" (text was really extracted from it). Anything else
+ * is kept for the client but is not read by the agent, and says why. */
+
+export type ResourceCategory = "web" | "pdf" | "spreadsheet" | "document" | "image" | "video" | "testimonial" | "other";
+export type ResourceStatus = "ready" | "stored_only" | "failed";
+
+export interface ProductResource {
+  id: string;
+  product_id: string;
+  kind: "link" | "file";
+  category: ResourceCategory;
+  title: string;
+  url: string | null;
+  filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  status: ResourceStatus;
+  /** Why the agent cannot use it (or could not read it), as a fixed code. */
+  status_detail: string | null;
+  /** How much text the agent can search in it. */
+  text_chars: number;
+  created_at: string;
+}
+
+export interface ResourceLimits {
+  max_file_bytes: number;
+  max_per_product: number;
+  accepted_extensions: string[];
+}
+
+export interface ResourceList {
+  resources: ProductResource[];
+  limits: ResourceLimits;
+}
+
+const productPath = (id: string) => `/products/${encodeURIComponent(id)}/resources`;
+
+export function clientResources(productId: string): Promise<ResourceList> {
+  return request<ResourceList>(productPath(productId));
+}
+
+export function clientAddResourceLink(productId: string, body: { title: string; url: string; category: ResourceCategory }): Promise<ProductResource> {
+  return request<ProductResource>(`${productPath(productId)}/link`, { method: "POST", body: JSON.stringify(body) });
+}
+
+export function clientDeleteResource(productId: string, resourceId: string): Promise<{ deleted: string }> {
+  return request<{ deleted: string }>(`${productPath(productId)}/${encodeURIComponent(resourceId)}`, { method: "DELETE" });
+}
+
+export function clientRetryResource(productId: string, resourceId: string): Promise<ProductResource> {
+  return request<ProductResource>(`${productPath(productId)}/${encodeURIComponent(resourceId)}/retry`, { method: "POST" });
+}
+
+/** The file travels as the raw request body (no multipart): its name and title ride in the headers. */
+export async function clientUploadResource(productId: string, file: File, title: string): Promise<ProductResource> {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}${productPath(productId)}/file`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "X-File-Name": encodeURIComponent(file.name),
+        "X-Resource-Title": encodeURIComponent(title),
+      },
+      body: file,
+    });
+  } catch {
+    throw new ClientApiError(0, "Could not reach the server.");
+  }
+  if (!response.ok) {
+    const { message, reasons } = await errorDetail(response);
+    throw new ClientApiError(response.status, message, reasons);
+  }
+  return (await response.json()) as ProductResource;
+}
+
+export function resourceDownloadUrl(productId: string, resourceId: string): string {
+  return `${BASE}${productPath(productId)}/${encodeURIComponent(resourceId)}/download`;
+}
+
+/* ── Payments to confirm (see src/sales_app/api/client_payments.py) ── */
+
+export type PaymentProgress = "claimed" | "proof_received" | "paid";
+
+export interface PaymentCase {
+  prospect_id: string;
+  prospect_name: string | null;
+  progress: PaymentProgress;
+  /** When the prospect said they paid or sent a receipt, if known. */
+  signalled_at: string | null;
+  /** Set once a person confirmed it. */
+  confirmed_at: string | null;
+  confirmed_by: string | null;
+  amount: string | null;
+  currency: string | null;
+  reference: string | null;
+}
+
+export interface PaymentsState {
+  cases: PaymentCase[];
+}
+
+export interface PaymentConfirmBody {
+  amount: string;
+  currency: string;
+  reference: string;
+}
+
+export function clientPayments(): Promise<PaymentsState> {
+  return request<PaymentsState>("/payments");
+}
+
+export function clientConfirmPayment(prospectId: string, body: PaymentConfirmBody): Promise<PaymentCase> {
+  return request<PaymentCase>(`/payments/${encodeURIComponent(prospectId)}/confirm`, { method: "POST", body: JSON.stringify(body) });
 }
