@@ -606,3 +606,33 @@ main { outline: none; }
 :root[data-app="client"] .client-card { max-width: none; padding: 24px; }
 :root[data-app="client"] .page,
 :root[data-app="client"] .page--focus { max-width: none; padding-inline: 0; }
+
+/* Agent status badge (flat, light). */
+.rv-orb {
+  --size: 40px;
+  flex: none;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  color: var(--tone-fg);
+  background: var(--tone-bg);
+  border: 2px solid var(--tone-fg);
+}
+.rv-orb[data-tone="success"] { --tone-fg: var(--success); --tone-bg: #e9f7f1; }
+.rv-orb[data-tone="attention"] { --tone-fg: var(--attention); --tone-bg: #fff4e0; }
+.rv-orb[data-tone="info"] { --tone-fg: var(--brand); --tone-bg: var(--brand-soft); }
+.rv-orb[data-tone="neutral"] { --tone-fg: var(--text-3); --tone-bg: var(--surface-2); }
+.rv-orb[data-live]::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--success);
+  opacity: 0;
+  animation: rv-orb-live 2.4s ease-out infinite;
+}
+@keyframes rv-orb-live { 0% { opacity: 0.5; transform: scale(0.9); } 100% { opacity: 0; transform: scale(1.15); } }
+@media (prefers-reduced-motion: reduce) { .rv-orb[data-live]::after { animation: none; } }

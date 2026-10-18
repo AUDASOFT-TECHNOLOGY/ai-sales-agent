@@ -2,12 +2,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { en, type MessageKey } from "./en";
 import { ar } from "./ar";
 import { frClient } from "./client.fr";
+import { frLegacy } from "./client.legacy.fr";
 
 export type Locale = "en" | "fr" | "ar";
 export type Direction = "ltr" | "rtl";
 export type { MessageKey };
 
-const catalogs: Record<Locale, Partial<Record<MessageKey, string>>> = { en, fr: frClient, ar };
+const catalogs: Record<Locale, Partial<Record<MessageKey, string>>> = { en, fr: { ...frLegacy, ...frClient }, ar };
 const DIRECTION: Record<Locale, Direction> = { en: "ltr", fr: "ltr", ar: "rtl" };
 const INTL: Record<Locale, string> = { en: "en", fr: "fr", ar: "ar-TN-u-nu-latn" };
 

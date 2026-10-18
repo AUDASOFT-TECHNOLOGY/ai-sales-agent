@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, Check, Clock, Pause, Play } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
-import { Pulse } from "../agent/Pulse";
+import { StatusOrb } from "../agent/StatusOrb";
 import { Button, LinkButton } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import {
@@ -155,7 +155,7 @@ export function ClientHomePage() {
       {notice ? <Note tone="success">{t(notice)}</Note> : null}
 
       <Card className="rv-hero" data-testid="home-hero">
-        <Pulse state={hero.pulse} size={64} />
+        <StatusOrb state={hero.pulse} size={64} />
         <div className="rv-hero__text">
           <h2 data-testid="agent-state">{t(`rv.home.hero.${hero.key}.title` as MessageKey)}</h2>
           <p>{t(`rv.home.hero.${hero.key}.text` as MessageKey)}</p>

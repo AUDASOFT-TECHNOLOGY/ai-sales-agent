@@ -10,7 +10,7 @@ import { useClientAuth } from "../client/ClientAuthContext";
 import { googleReturnOf } from "../client/ClientGmailCard";
 import { useClientAgentStatus } from "../client/useClientAgentStatus";
 import { useReviewCount } from "../client/useReviewCount";
-import { Pulse } from "../agent/Pulse";
+import { StatusOrb } from "../agent/StatusOrb";
 import { Button, LinkButton } from "../ui/Button";
 import { Segmented } from "../ui/Controls";
 import { PopoverCard } from "../ui/Overlays";
@@ -164,7 +164,7 @@ export function AppShell() {
           <Wordmark />
         </div>
         <NavLink to="/home" className="rv-agent" aria-label={`${t("rv.agent.name")}: ${t(agent.statusKey)}`}>
-          <Pulse state={agent.pulse} size={40} />
+          <StatusOrb state={agent.pulse} size={40} />
           <span className="rv-agent__text">
             <span className="rv-agent__name">{profile?.name ?? t("rv.agent.name")}</span>
             <span className="rv-agent__state" aria-live="polite">
