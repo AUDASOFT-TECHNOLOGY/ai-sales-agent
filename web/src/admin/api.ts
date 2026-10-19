@@ -396,6 +396,31 @@ export function adminDisconnectClientTelegram(clientId: string): Promise<Connect
   });
 }
 
+// A client's own Telegram account (the client signs in itself; the Admin sees only where it stands).
+export interface TelegramAccountAdmin {
+  platform_configured: boolean;
+  platform_missing: string[];
+  state: "not_connected" | "connected" | "reauth_required" | "unavailable";
+  limited: boolean;
+  message: string;
+}
+
+export function adminClientTelegramAccount(clientId: string): Promise<TelegramAccountAdmin> {
+  return request<TelegramAccountAdmin>(`/clients/${encodeURIComponent(clientId)}/integrations/telegram/account`);
+}
+
+export function adminDisconnectClientTelegramAccount(clientId: string): Promise<TelegramAccountAdmin> {
+  return request<TelegramAccountAdmin>(`/clients/${encodeURIComponent(clientId)}/integrations/telegram/account/disconnect`, {
+    method: "POST",
+  });
+}
+
+export function adminClearClientTelegramLimit(clientId: string): Promise<TelegramAccountAdmin> {
+  return request<TelegramAccountAdmin>(`/clients/${encodeURIComponent(clientId)}/integrations/telegram/account/clear-limit`, {
+    method: "POST",
+  });
+}
+
 export function adminTestOpenAI(): Promise<ConnectionTest> {
   return request<ConnectionTest>("/settings/integrations/openai/test", { method: "POST" });
 }

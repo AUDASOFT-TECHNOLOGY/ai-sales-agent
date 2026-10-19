@@ -95,6 +95,8 @@ EXPECTED = {
     "email.platform_mailbox": ("email", ScopeKind.CLIENT, False, Requirement.OPTIONAL, True),
     "telegram.bot_token": ("telegram", ScopeKind.CLIENT, True, Requirement.LIVE, False),
     "telegram.webhook_secret": ("telegram", ScopeKind.CLIENT, True, Requirement.LIVE, False),
+    "telegram.api_id": ("telegram", ScopeKind.GLOBAL, False, Requirement.OPTIONAL, False),
+    "telegram.api_hash": ("telegram", ScopeKind.GLOBAL, True, Requirement.OPTIONAL, False),
     "openai.api_key": ("openai", ScopeKind.GLOBAL, True, Requirement.ALWAYS, False),
     "openai.organization": ("openai", ScopeKind.GLOBAL, False, Requirement.OPTIONAL, False),
     "openai.project": ("openai", ScopeKind.GLOBAL, False, Requirement.OPTIONAL, False),
@@ -120,6 +122,11 @@ VALUES = {
         ["", "not-a-token", "123:short", "abc:AAH-secret-token-value-of-the-bot_xx", "1:2"],
     ),
     "telegram.webhook_secret": ("a" * 43, ["", "short", "a b" * 20, "a" * 257]),
+    "telegram.api_id": ("123456", ["", "abc", "123", "0123456", "12 345 678", "1" * 13]),
+    "telegram.api_hash": (
+        "0123456789abcdef0123456789abcdef",
+        ["", "short", "0123456789abcdef0123456789abcdeg", "0123456789abcdef" * 3],
+    ),
     "openai.api_key": ("sk-abc", [""]),
     "openai.organization": ("org-123", ["bad org!", "-leading", "x" * 129]),
     "openai.project": ("proj_abc", ["bad project", "/x"]),
@@ -192,6 +199,7 @@ class TestTheDeclarationsAreComplete:
         assert shown == {
             "whatsapp.api_version",
             "whatsapp.phone_number_id",
+            "telegram.api_id",
             "openai.organization",
             "openai.project",
             "openai.base_url",

@@ -19,6 +19,7 @@ import {
   type TelegramInvitations,
 } from "./api";
 import { ClientGmailCard, googleReturnOf } from "./ClientGmailCard";
+import { ClientTelegramAccountCard } from "./ClientTelegramAccountCard";
 
 interface Failure {
   key: MessageKey;
@@ -121,7 +122,8 @@ export function ClientChannelPage({ embedded = false }: { embedded?: boolean } =
     };
   }, [apply]);
 
-  const listInvitations = state?.channel === "telegram" && state.status === "ready";
+  const listInvitations =
+    state?.channel === "telegram" && state.telegram?.mode !== "account" && state.status === "ready";
   useEffect(() => {
     if (!listInvitations) return;
     let cancelled = false;
@@ -299,7 +301,7 @@ export function ClientChannelPage({ embedded = false }: { embedded?: boolean } =
             ) : null}
 
             {selected === "email" ? <div className="grid-2">{emailField("from_name")}{emailField("subject")}</div> : null}
-            {selected === "telegram" ? (
+            {selected === "telegram" && current.telegram?.mode !== "account" ? (
               <div className="grid-2">
                 {telegramField("contact_prompt")}
                 {telegramField("contact_button")}
@@ -343,6 +345,10 @@ export function ClientChannelPage({ embedded = false }: { embedded?: boolean } =
             </div>
           </Glass>
         )}
+
+        {current.channel === "telegram" ? (
+          <ClientTelegramAccountCard channel={current} onChannel={apply} onChanged={() => void load()} />
+        ) : null}
 
         {current.channel === "email" && current.email?.mode !== "custom" ? (
           <ClientGmailCard

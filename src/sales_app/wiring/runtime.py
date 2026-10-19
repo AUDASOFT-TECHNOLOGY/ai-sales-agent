@@ -16,6 +16,7 @@ from sales_app.config.runtime_config import (
     channel_provider_key,
 )
 from sales_app.config.schema import BrainSection
+from sales_app.config.telegram_settings import TelegramChannelSettings, account_mode_of
 from sales_app.errors import ClientNotReadyError, ClientUnavailableError, RuntimeBuildError
 from sales_app.llm_usage import RecordingLLMProvider
 from sales_app.send_cap import RefusingChannel, SendCapChannel
@@ -412,6 +413,17 @@ def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> Sa
     return _stage(client_id, "repository", lambda: CompositeRepository(source, store, consent))
 
 
+def _telegram_consent_attribute(config: ClientConfig) -> str | None:
+    """The source column in which a client on its own Telegram account marks the people who expect
+    to hear from it there; None for every other client (nobody is then written to first)."""
+    if "telegram" not in config.spec.channel_providers:
+        return None
+    raw = config.spec.channel_settings_for("telegram")
+    if not account_mode_of(raw):
+        return None
+    return TelegramChannelSettings.model_validate(raw).consent_field
+
+
 def _metered(
     provider: Any, config: ClientConfig, builders: IntegrationBuilders
 ) -> MessagingChannel:
@@ -578,6 +590,7 @@ def build_runtime(
                     unknown_sender=UnknownSenderPolicy(spec.inbound.unknown_contacts.policy),
                     max_new_per_day=spec.inbound.unknown_contacts.max_new_per_day,
                 ),
+                telegram_consent_attribute=_telegram_consent_attribute(config),
             ),
         ),
     )

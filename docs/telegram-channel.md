@@ -1,5 +1,10 @@
 # The Telegram channel
 
+> **Two modes.** This document describes the **bot** (`mode: bot`, the default). The client may instead
+> choose **its own Telegram account** (`mode: account`), the only way to start a conversation: see
+> `docs/telegram-user-account.md` (rules, rationing, security, limits, Admin set-up). In that mode
+> there is no bot, no token, no webhook and no invitation link; the rest of this page does not apply.
+
 A client talks to its prospects through **its own Telegram bot**. Revansa sends with the Bot API and
 receives what people write through a webhook. Nothing is shared between clients: the bot, its token
 and its webhook secret are each client's own. Which clients may use the channel at all is the Admin's
@@ -145,9 +150,9 @@ The chat id is the one contact detail Revansa *learns* rather than being given, 
   (`web/src/client/ClientChannelPage.tsx`): choose Telegram, edit the bot's sentences, see the
   channel's status, and see the waiting prospects with their invitation links. It has no technical
   field and no Connect or Test button. The agent is started from the agent page
-  (`ClientAgentPage.tsx`), which lists what is still missing. There is no Admin screen yet for storing
-  the token and connecting the bot: both are Admin API routes only. It has not been validated against
-  a real bot.
+  (`ClientAgentPage.tsx`), which lists what is still missing. The Admin stores the token and connects the
+  bot from the client's sheet (`AdminClientTelegramCard.tsx`). It has not been validated against a real
+  bot.
 - **Webhook only.** Telegram refuses a bot webhook and polling at once: a bot connected here cannot
   also be read by another program with `getUpdates`.
 - **A bot's token can be moved to another deployment only by connecting it again there** (it takes

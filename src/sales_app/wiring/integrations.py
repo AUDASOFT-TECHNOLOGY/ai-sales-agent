@@ -59,6 +59,9 @@ class ChannelProvider:
     build_inbox: Callable[[ClientConfig], InboxPoller] | None = None
     # Answers a sender no prospect matches (see `ChannelSupport.answer_unknown`); None: no answer.
     answer_unknown: Callable[[ClientConfig, InboundMessage], None] | None = None
+    # Whether this client's configuration needs its inbox polled (a channel that polls in one of its
+    # modes only: Telegram from the client's own account); None: always, when there is an inbox.
+    polls: Callable[[ClientConfig], bool] | None = None
     # Every message through this channel takes a place in the client's daily send cap (e-mail, in
     # both modes). The runtime wraps the channel it builds: with no guard wired, nothing is sent.
     metered: bool = False
@@ -100,7 +103,13 @@ class IntegrationBuilders:
         """The channels of this client that have to be polled, once each however many lanes share
         them (a mailbox is read once, not once per lane)."""
         found = (self.channels.get(key) for key in channel_provider_keys(config))
-        return [p for p in found if p is not None and p.build_inbox is not None]
+        return [
+            p
+            for p in found
+            if p is not None
+            and p.build_inbox is not None
+            and (p.polls is None or p.polls(config))
+        ]
 
     def polls_inbox(self, config: ClientConfig) -> bool:
         """Whether this client's replies are fetched by the scheduler. Never in a dry run, which
@@ -178,6 +187,8 @@ def default_builders(
     knowledge: Callable[[str], Any] | None = None,
     send_guards: Callable[[str, str], DailySendGuard] | None = None,
     gmail: Any = None,
+    telegram_accounts: Any = None,
+    first_contacts: Callable[[str, int], DailySendGuard] | None = None,
 ) -> IntegrationBuilders:
     """The builders of every provider the runtime can run today (those with a factory).
 
@@ -199,6 +210,13 @@ def default_builders(
             # service; the other modes are built exactly as before.
             build = lambda config: descriptor.build(config, gmail=gmail)
             build_inbox = lambda config: support.build_inbox(config, gmail=gmail)
+        if Channel(support.kind) is Channel.TELEGRAM and telegram_accounts is not None:
+            # A client on its own Telegram account is served by the application's account service,
+            # behind the rationing of first messages; a client on a bot is built as it always was.
+            build = lambda config: descriptor.build(
+                config, accounts=telegram_accounts, first_contacts=first_contacts
+            )
+            build_inbox = lambda config: support.build_inbox(config, accounts=telegram_accounts)
 
         def parser(secrets: Mapping[str, str]) -> WebhookParser:
             token = verify_token() if verify_token is not None else None
@@ -212,6 +230,7 @@ def default_builders(
             build_parser=parser if support.build_parser is not None else None,
             build_inbox=build_inbox,
             answer_unknown=support.answer_unknown,
+            polls=support.polls_inbox,
             metered=Channel(support.kind) is Channel.EMAIL,
         )
 

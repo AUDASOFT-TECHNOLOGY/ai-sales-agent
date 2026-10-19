@@ -111,6 +111,10 @@ class ChannelSupport:
     # waiting for an answer (Telegram asks them to share their number). Never raises into the
     # webhook: the application logs a failure and goes on.
     answer_unknown: Callable[[Any, Any], None] | None = None
+    # For a channel that polls only in one of its modes (Telegram from the client's own account): says
+    # whether this client's configuration needs its inbox polled. None: it always does, when it has
+    # an inbox.
+    polls_inbox: Callable[[Any], bool] | None = None
 
     def __post_init__(self) -> None:
         if self.build_parser is None and self.build_inbox is None:

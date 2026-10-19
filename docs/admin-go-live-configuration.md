@@ -91,8 +91,14 @@ One Google Cloud "Web application" OAuth client serves both features.
   therefore never cold-contacts on Telegram: each prospect receives a personal invitation link that the
   Client sends by its own means (`GET /client/v1/channel/invitations`), and only after they press Start
   does the conversation happen. A prospect list with no link sent yields no Telegram contact.
-- Contacting prospects proactively from the Client's own Telegram account (MTProto) is **not
-  implemented**: Telegram treats unsolicited outreach as spam; see `docs/telegram-user-account.md`
+- The bot is one mode. The other is the **Client's own Telegram account** (MTProto): the client signs
+  in itself and Revansa writes from that account, but first only to people the client marked as
+  expecting it, within a small daily maximum, and never after Telegram limits the account. Unsolicited
+  outreach stays refused (Telegram treats it as spam). It needs, once, from the operator: an `api_id`
+  and `api_hash` registered at <https://my.telegram.org> with the operator's own account, stored in
+  Settings → Integrations as `telegram.api_id` / `telegram.api_hash`; a database; one worker. No
+  public address or webhook is needed for this mode. Full procedure, limits and the one-time real test:
+  `docs/telegram-user-account.md`
   (decision pending).
 - Status: not validated with a real bot.
 

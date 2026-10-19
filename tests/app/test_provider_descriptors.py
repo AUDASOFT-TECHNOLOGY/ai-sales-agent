@@ -461,6 +461,7 @@ class TestTheBuildersTheRuntimeUsesAreUnchanged:
             "build_parser",
             "build_inbox",  # added with e-mail, the one channel that is polled, not pushed
             "answer_unknown",  # added with Telegram, where a stranger is asked who they are
+            "polls",  # Telegram from the client's own account: polled in that mode only
             "metered",  # e-mail: every message takes a place in the client's daily send cap
         ]
 

@@ -10,6 +10,7 @@ echoes the rejected input, which here would be the secret. Errors below describe
 broken, never the value, and responses are marked `no-store`.
 """
 
+import contextlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -70,6 +71,7 @@ from sales_app.secret_store import (
 )
 from sales_app.secret_store.catalog import normalize_value, spec_for
 from sales_app.sheets_wiring import CALLBACK_PATH as sheets_callback_path
+from sales_app.telegram_account import AccountLoginError
 from sales_app.telegram_connection import (
     BotProbeFactory,
     TelegramConnectionError,
@@ -251,6 +253,27 @@ async def _read_value(request: Request) -> str:
     if not isinstance(body, dict) or set(body) != {"value"} or not isinstance(body["value"], str):
         raise HTTPException(422, 'body must be {"value": "<text>"}')
     return body["value"]
+
+
+class TelegramAccountPlatformStatus(BaseModel):
+    """Whether the platform's Telegram application (my.telegram.org) is set, so clients can sign in with
+    their own account. `configured` means stored and the library is installed: NOT that Telegram
+    accepts them, which only a real sign-in proves."""
+
+    configured: bool
+    missing: list[str]
+    note: str
+
+
+class TelegramAccountAdminResponse(BaseModel):
+    """Where a client's own Telegram account stands, for the Admin. Never a number, a session or a
+    name: only whether it is connected, to be renewed, or limited by Telegram."""
+
+    platform_configured: bool  # the platform's Telegram application and library are in place
+    platform_missing: list[str]  # what the Admin still has to set (names only)
+    state: str  # not_connected | connected | reauth_required | unavailable
+    limited: bool  # Telegram limited the account: no first message is sent
+    message: str
 
 
 def _http_error(error: Exception) -> HTTPException:
@@ -613,6 +636,27 @@ def create_admin_integrations_router(
             ),
         )
 
+    @router.get(
+        "/settings/integrations/telegram-account/status",
+        response_model=TelegramAccountPlatformStatus,
+    )
+    def telegram_account_platform_status(
+        _admin: AdminUser = Depends(get_current_admin),
+    ) -> TelegramAccountPlatformStatus:
+        """Config-only (no network): the platform's Telegram application and the library on the
+        server. Values are never returned."""
+        service = getattr(application, "telegram_accounts", None)
+        missing = service.missing() if service is not None else ["Telegram account service"]
+        return TelegramAccountPlatformStatus(
+            configured=not missing,
+            missing=missing,
+            note=(
+                "Stored is not verified: Telegram accepts the application only once a client has "
+                "signed in. Register it with the platform operator's own account at "
+                "my.telegram.org (Telegram's API terms, 2.1)."
+            ),
+        )
+
     @router.get("/settings/integrations/hubspot/status", response_model=HubSpotPlatformStatus)
     def hubspot_platform_status(
         _admin: AdminUser = Depends(get_current_admin),
@@ -860,5 +904,87 @@ def create_admin_integrations_router(
         except TelegramConnectionError as error:
             raise HTTPException(error.status, error.message) from None
         return _test_response(result)
+
+    # ---- Telegram from the client's own account -------------------------------------------
+
+    def account_service():
+        service = getattr(application, "telegram_accounts", None)
+        if service is None:
+            raise HTTPException(409, "Telegram accounts are not available on this platform")
+        return service
+
+    def account_answer(client_id: str) -> TelegramAccountAdminResponse:
+        service = account_service()
+        status = service.status(client_id)
+        missing = service.missing()
+        if missing:
+            message = "The platform's Telegram application is not set up yet: " + ", ".join(missing)
+        elif status.state == "not_connected":
+            message = "The client has not connected its Telegram account."
+        elif status.state == "reauth_required":
+            message = "Telegram ended the session: the client has to sign in again."
+        elif status.limited:
+            message = (
+                "Telegram limited this account for messages to people who did not expect them. "
+                "No first message is sent. Lift the limit here once @SpamBot says it is over."
+            )
+        elif status.state == "connected":
+            message = "The account is connected."
+        else:
+            message = "The account state cannot be read just now."
+        return TelegramAccountAdminResponse(
+            platform_configured=not missing,
+            platform_missing=missing,
+            state=status.state,
+            limited=status.limited,
+            message=message,
+        )
+
+    @router.get(
+        "/clients/{client_id}/integrations/telegram/account",
+        response_model=TelegramAccountAdminResponse,
+    )
+    def client_telegram_account(
+        client_id: str, admin: AdminUser = Depends(get_current_admin)
+    ) -> TelegramAccountAdminResponse:
+        """Read-only. Telegram is not called."""
+        client_scope_for(admin, client_id)
+        return account_answer(client_id)
+
+    @router.post(
+        "/clients/{client_id}/integrations/telegram/account/disconnect",
+        response_model=TelegramAccountAdminResponse,
+    )
+    async def disconnect_client_telegram_account(
+        client_id: str, admin: AdminUser = Depends(require_owner)
+    ) -> TelegramAccountAdminResponse:
+        """Ends the client's session at Telegram (best effort) and forgets it here: the agent sends
+        nothing until the client signs in again."""
+        client_scope_for(admin, client_id)
+        service = account_service()
+        try:
+            await run_in_threadpool(service.disconnect, client_id)
+        except AccountLoginError:
+            raise HTTPException(503, "credential storage is temporarily unavailable") from None
+        if application.registry.get_config(client_id) is not None:
+            with contextlib.suppress(Exception):  # the runtime status says how it ended
+                application.runtime_manager.refresh_client(client_id)
+        return account_answer(client_id)
+
+    @router.post(
+        "/clients/{client_id}/integrations/telegram/account/clear-limit",
+        response_model=TelegramAccountAdminResponse,
+    )
+    def clear_client_telegram_limit(
+        client_id: str, admin: AdminUser = Depends(require_owner)
+    ) -> TelegramAccountAdminResponse:
+        """Lets first messages go again, once Telegram itself has lifted the limit. A decision of the
+        Admin: Revansa never tries to find out by sending."""
+        client_scope_for(admin, client_id)
+        try:
+            account_service().clear_limited(client_id)
+        except AccountLoginError:
+            raise HTTPException(503, "credential storage is temporarily unavailable") from None
+        return account_answer(client_id)
 
     return router

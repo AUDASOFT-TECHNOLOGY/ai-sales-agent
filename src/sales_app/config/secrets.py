@@ -67,6 +67,19 @@ EMAIL_ACTIVATION = "email.activation"
 # else's, and signs the invitation links. Resolved only when the client's channel is Telegram.
 TELEGRAM_BOT_TOKEN = "telegram.bot_token"
 TELEGRAM_WEBHOOK_SECRET = "telegram.webhook_secret"
+# Telegram from a client's own account (MTProto). The platform's own Telegram application (global,
+# Admin only, write-only): what lets each client sign in with its own account. Telegram's terms
+# (API ToS 2.1) require the application to be registered by whoever operates the platform.
+TELEGRAM_API_ID = "telegram.api_id"
+TELEGRAM_API_HASH = "telegram.api_hash"
+# One client's own account (client scope). Written only by the sign-in flow, never through the Admin
+# credentials API (not in the credential catalog): the session (a FULL access key to the account),
+# the account's numeric id (UNIQUE across clients), the mark that the session ended and the person
+# must sign in again, and the mark that Telegram limited the account for unsolicited messages.
+TELEGRAM_USER_SESSION = "telegram.user_session"
+TELEGRAM_USER_ACCOUNT = "telegram.user_account"
+TELEGRAM_USER_REAUTH = "telegram.user_reauth"
+TELEGRAM_USER_LIMITED = "telegram.user_limited"
 # Which channels clients may use (see `sales_app.config.channel_access`): the Admin's decision,
 # stored beside the credentials but not credentials, and never resolved into a client's secrets.
 CHANNELS_ALLOWED = "channels.allowed"  # global: "whatsapp,email" or "none"

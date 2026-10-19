@@ -14,6 +14,12 @@ verified by Telegram and neither needing the client to type anything by hand:
 - the **phone button**: a person who writes to the bot is asked to share their own number, and it is
   matched to the prospect holding that number.
 
+**The client's own account** (`mode: account`, `sales_app.telegram_account`) is the other way, and the
+only one that can open a conversation: the client signs in with Telegram and Revansa writes from that
+account, never to someone the client did not mark as expecting it (`consent_field`), never more than
+`max_new_conversations_per_day` new conversations a day, and never again once Telegram limits the
+account. Replies are read by polling the account (no webhook), for the client's prospects only.
+
 Which clients may use the channel at all is the Admin's decision (`sales_app.config.channel_access`).
 """
 
@@ -24,10 +30,20 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from sales_app.config import ClientConfig
-from sales_app.config.secrets import TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
-from sales_app.config.telegram_settings import TelegramChannelSettings, bot_id_of
+from sales_app.config.secrets import (
+    TELEGRAM_API_HASH,
+    TELEGRAM_API_ID,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_WEBHOOK_SECRET,
+)
+from sales_app.config.telegram_settings import (
+    TelegramChannelSettings,
+    account_mode_of,
+    bot_id_of,
+)
 from sales_app.connection_tests import BotProbeFailure
 from sales_app.secret_store import ScopeKind
+from sales_app.send_cap import FirstContactCapChannel
 from sales_app.wiring.providers.types import (
     ChannelSupport,
     CredentialDeclaration,
@@ -54,15 +70,48 @@ def _settings(config: ClientConfig) -> TelegramChannelSettings:
     return TelegramChannelSettings.model_validate(config.spec.channel_settings_for(KEY))
 
 
-def build_channel(config: ClientConfig) -> TelegramChannel:
-    return TelegramChannel(token=config.secrets.get(TELEGRAM_BOT_TOKEN))
+def is_account(config: ClientConfig) -> bool:
+    """Whether this client writes from its own Telegram account rather than through a bot."""
+    return account_mode_of(config.spec.channel_settings_for(KEY))
+
+
+def build_channel(config: ClientConfig, *, accounts=None, first_contacts=None):
+    """The bot's channel; or, in `account` mode, the client's own account behind the rationing of
+    first messages. `accounts` is the application's `TelegramAccountService`; `first_contacts` gives
+    the guard of a client's new conversations of the day (`guard(client_id, limit)`), and without it
+    no first message is sent."""
+    if not is_account(config):
+        return TelegramChannel(token=config.secrets.get(TELEGRAM_BOT_TOKEN))
+    if accounts is None:
+        raise ValueError("this platform cannot write from a client's own Telegram account")
+    settings = _settings(config)
+    guard = (
+        first_contacts(config.client_id, settings.max_new_conversations_per_day)
+        if first_contacts is not None
+        else None
+    )
+    return FirstContactCapChannel(accounts.channel(config), guard)
+
+
+def build_inbox(config: ClientConfig, *, accounts=None):
+    if accounts is None:
+        raise ValueError("this platform cannot read a client's own Telegram account")
+    return accounts.inbox(config)
+
+
+def polls_inbox(config: ClientConfig) -> bool:
+    return is_account(config)
 
 
 def routing_key(config: ClientConfig) -> str | None:
+    if is_account(config):
+        return None  # no bot, no webhook
     return bot_id_of(config.secrets.get_optional(TELEGRAM_BOT_TOKEN))
 
 
 def webhook_secret(config: ClientConfig) -> str | None:
+    if is_account(config):
+        return None
     return config.secrets.get_optional(TELEGRAM_WEBHOOK_SECRET)
 
 
@@ -160,12 +209,32 @@ DESCRIPTOR = ProviderDescriptor(
             pattern=re.compile(r"^[A-Za-z0-9_-]{32,256}$"),
             rule="must be 32 to 256 letters, digits, - or _",
         ),
+        # The platform's own Telegram application: needed only by clients who write from their own
+        # account (the sign-in is theirs, the application is Revansa's).
+        CredentialDeclaration(
+            key=TELEGRAM_API_ID,
+            label="Telegram application id",
+            scope=ScopeKind.GLOBAL,
+            sensitive=False,
+            pattern=re.compile(r"^[1-9]\d{3,11}$"),
+            rule="must be the numeric api_id of my.telegram.org (digits only)",
+        ),
+        CredentialDeclaration(
+            key=TELEGRAM_API_HASH,
+            label="Telegram application hash",
+            scope=ScopeKind.GLOBAL,
+            pattern=re.compile(r"^[0-9a-fA-F]{32}$"),
+            rule="must be the 32-character api_hash of my.telegram.org",
+        ),
     ),
     # The token is what a connection is made with; the secret proves itself only when Telegram
     # calls the webhook.
     connection_keys=(TELEGRAM_BOT_TOKEN,),
     capabilities={
-        "can_initiate": False,  # the person starts the conversation (see the module docstring)
+        "can_initiate": False,  # a bot: the person starts the conversation (see the docstring)
+        # From the client's own account (`mode: account`): a first message only to a person the
+        # client marked as expecting it, at most N new conversations a day.
+        "can_initiate_from_account_with_consent": True,
         "reply_window_hours": None,
         "requires_template_outside_window": False,
         "inbound": "webhook",
@@ -177,5 +246,7 @@ DESCRIPTOR = ProviderDescriptor(
         webhook_secret=webhook_secret,
         build_parser=build_parser,
         answer_unknown=answer_unknown,
+        build_inbox=build_inbox,
+        polls_inbox=polls_inbox,
     ),
 )

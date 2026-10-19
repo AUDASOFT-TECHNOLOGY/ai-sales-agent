@@ -27,7 +27,7 @@ from sales_app.config.secrets import (
     WHATSAPP_PHONE_NUMBER_ID,
     WHATSAPP_VERIFY_TOKEN,
 )
-from sales_app.config.telegram_settings import TelegramChannelSettings
+from sales_app.config.telegram_settings import TelegramChannelSettings, account_mode_of
 from sales_app.mailbox_proof import READY as READY_MAILBOX
 from sales_app.mailbox_proof import mailbox_state
 from sales_app.secret_store import GLOBAL_SCOPE, SecretStoreError, client_scope
@@ -192,13 +192,43 @@ def _platform_mailbox_problem(application: Application, client_id: str) -> str |
     return None if mailbox_state(application, client_id) == READY_MAILBOX else _PREPARING
 
 
+TELEGRAM_NOT_CONNECTED = "Connect your Telegram account so Revansa can write to your prospects."
+TELEGRAM_REAUTH = "Telegram needs you to sign in again. Reconnect your Telegram account."
+TELEGRAM_LIMITED = (
+    "Telegram limited your account for messages to people who did not expect them. Revansa sends "
+    "no first message until the Revansa team lifts it; replies to people who write to you go on."
+)
+
+
+def _telegram_account_status(application: Application, client_id: str) -> ChannelStatus:
+    """The client's own Telegram account: ready only with the platform's Telegram application set
+    (and the library on the server), a session Telegram still honours, and a database for the daily
+    count of new conversations. A limited account stays ready (replies go on), with the reason."""
+    from sales_app.telegram_account import CONNECTED, NOT_CONNECTED, REAUTH_REQUIRED
+
+    accounts = getattr(application, "telegram_accounts", None)
+    if accounts is None or not accounts.configured() or application.send_limits is None:
+        return WAITING_PLATFORM, _PREPARING
+    status = accounts.status(client_id)
+    if status.state == NOT_CONNECTED:
+        return ACTION_REQUIRED, TELEGRAM_NOT_CONNECTED
+    if status.state == REAUTH_REQUIRED:
+        return ACTION_REQUIRED, TELEGRAM_REAUTH
+    if status.state != CONNECTED:
+        return WAITING_PLATFORM, _PREPARING
+    return (READY, TELEGRAM_LIMITED) if status.limited else (READY, None)
+
+
 def _telegram_status(
     application: Application, client_id: str, document: Mapping[str, Any]
 ) -> ChannelStatus:
+    settings = channel_settings_of(document)
     try:
-        TelegramChannelSettings.model_validate(channel_settings_of(document))
+        TelegramChannelSettings.model_validate(settings)
     except ValueError:
         return ACTION_REQUIRED, "Review the messages your bot says first, then save again."
+    if account_mode_of(settings):
+        return _telegram_account_status(application, client_id)
     if not credential_stored(application, client_id, TELEGRAM_BOT_TOKEN) or not credential_stored(
         application, client_id, TELEGRAM_WEBHOOK_SECRET
     ):

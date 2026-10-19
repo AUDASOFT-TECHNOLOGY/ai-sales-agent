@@ -961,11 +961,15 @@ def test_a_reply_that_arrived_during_a_restart_is_still_answered(room):
 # ---- the wiring the application really uses -----------------------------------------------------
 
 
-def test_the_default_builders_make_telegram_a_channel_with_a_webhook_and_no_inbox(tmp_path):
+def test_the_default_builders_make_telegram_a_channel_with_a_webhook_and_an_inbox_for_accounts_only(
+    tmp_path,
+):
     builders = default_builders(make_settings(tmp_path))
     provider = builders.channels["telegram"]
     assert provider.kind is Channel.TELEGRAM
-    assert provider.build_parser is not None and provider.build_inbox is None
+    # a bot is called by Telegram; only the client's own account (another mode) is polled
+    assert provider.build_parser is not None and provider.build_inbox is not None
+    assert provider.polls is not None
     assert provider.answer_unknown is not None
     assert builders.channels["whatsapp"].answer_unknown is None
     assert builders.channels["email"].answer_unknown is None

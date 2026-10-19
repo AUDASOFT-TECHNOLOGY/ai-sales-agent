@@ -68,6 +68,7 @@ from sales_app.sheets_wiring import install as install_sheets_access
 from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
 from sales_app.sourcing.ports import OperationalStore
 from sales_app.sourcing.sql_store import SqlOperationalStore
+from sales_app.telegram_account import TelegramAccountService
 from sales_app.wiring import IntegrationBuilders, default_builders
 from sales_app.wiring.providers import ProviderRegistry, default_registry
 from sales_app.wiring.writeback import WritebackSupport, default_policies, sql_ledgers
@@ -142,6 +143,9 @@ class Application:
     # The Gmail mailbox mode: the platform's Google application (resolved at each use), the clients'
     # grants in the secret store and the channel/inbox of a client in Gmail mode.
     gmail: GmailMailService | None = None
+    # Telegram from a client's own account: the platform's Telegram application, the clients'
+    # sessions in the secret store, and the channel/inbox of a client in `account` mode.
+    telegram_accounts: TelegramAccountService | None = None
     # Google Sheets by the client's own Google authorisation (OAuth), same platform application as
     # Gmail, grants in the client's scope of the secret store. See `sales_app.sheets_wiring`.
     sheets_access: SheetsAccessService | None = None
@@ -355,6 +359,7 @@ def _assemble(
     gmail = gmail_service or GmailMailService(
         secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
     )
+    telegram_accounts = TelegramAccountService(secrets=secrets, clock=clock)
     sheets_access = SheetsAccessService(
         secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
     )
@@ -379,6 +384,12 @@ def _assemble(
         knowledge=knowledge.for_client if knowledge is not None else None,
         send_guards=send_limits.guard if send_limits is not None else None,
         gmail=gmail,
+        telegram_accounts=telegram_accounts,
+        first_contacts=(
+            (lambda client_id, limit: send_limits.fixed_guard(client_id, "telegram_new", limit))
+            if send_limits is not None
+            else None
+        ),
     )
     if builders.knowledge is None and knowledge is not None:
         builders = replace(builders, knowledge=knowledge.for_client)
@@ -482,6 +493,7 @@ def _assemble(
         send_caps=send_caps,
         send_limits=send_limits,
         gmail=gmail,
+        telegram_accounts=telegram_accounts,
         sheets_access=sheets_access,
         hubspot_access=hubspot_access,
         writeback_switch=writeback_switch,

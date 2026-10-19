@@ -315,6 +315,23 @@ CATALOG: tuple[CredentialSpec, ...] = (
         pattern=re.compile(r"^[A-Za-z0-9_-]{32,256}$"),
         rule="must be 32 to 256 letters, digits, - or _",
     ),
+    # The platform's own Telegram application (my.telegram.org), for the clients who write from their
+    # own Telegram account. Setting both is what turns that mode on; never returned.
+    CredentialSpec(
+        "telegram.api_id",
+        ScopeKind.GLOBAL,
+        "Telegram application id",
+        sensitive=False,
+        pattern=re.compile(r"^[1-9]\d{3,11}$"),
+        rule="must be the numeric api_id of my.telegram.org (digits only)",
+    ),
+    CredentialSpec(
+        "telegram.api_hash",
+        ScopeKind.GLOBAL,
+        "Telegram application hash",
+        pattern=re.compile(r"^[0-9a-fA-F]{32}$"),
+        rule="must be the 32-character api_hash of my.telegram.org",
+    ),
     CredentialSpec(
         "hubspot.access_token",
         ScopeKind.CLIENT,

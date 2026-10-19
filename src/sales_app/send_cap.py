@@ -188,6 +188,42 @@ class SendCapChannel:
         return result
 
 
+class FirstContactCapChannel:
+    """A channel whose FIRST messages to people who did not write to us are rationed: a first message
+    takes a place of the day in `guard`, a reply or a follow-up on a conversation the person started
+    does not. With no guard (a deployment without a database) no first message is sent at all.
+
+    The same rules as `SendCapChannel`: a place is given back only when the failure is certain."""
+
+    def __init__(self, inner, guard: DailySendGuard | None) -> None:
+        self._inner = inner
+        self._guard = guard
+
+    def __repr__(self) -> str:
+        return "FirstContactCapChannel()"
+
+    @property
+    def channel(self) -> Channel:
+        return self._inner.channel
+
+    def send(self, message: OutboundMessage) -> SendResult:
+        if not message.first_contact:
+            return self._inner.send(message)
+        reserved = self._guard.reserve() if self._guard is not None else Refusal(CAP_UNAVAILABLE)
+        if isinstance(reserved, Refusal):
+            return SendResult(
+                status=SendStatus.FAILED_TRANSIENT,
+                timestamp=datetime.now(UTC),
+                error_code=reserved.code,
+                error_message=_REFUSAL_TEXTS[reserved.code],
+                metadata={DEFERRED_KEY: DEFERRED_VALUE},
+            )
+        result = self._inner.send(message)  # if it raises, the message may have left: place kept
+        if not result.ok and self._guard is not None:
+            self._guard.release(reserved)
+        return result
+
+
 @dataclass(frozen=True, slots=True)
 class EffectiveCap:
     """What limits a client's e-mails today. `effective` is None when no valid Admin cap exists."""
@@ -243,6 +279,11 @@ class SendLimits:
 
     def used(self, client_id: str, channel: str, day: date) -> int:
         return self._counter.used(client_id, channel, day)
+
+    def fixed_guard(self, client_id: str, channel: str, limit: int) -> DailySendGuard:
+        """A guard for a count that is not the e-mail cap (Telegram's new conversations a day), with
+        a limit the caller states. Counted in the same shared counter, under its own channel name."""
+        return DailySendGuard(client_id, channel, lambda: limit, self._clock, self._counter)
 
 
 class RefusingChannel:

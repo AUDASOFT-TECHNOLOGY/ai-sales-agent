@@ -340,6 +340,7 @@ class TestCatalog:
         assert {s.key for s in CATALOG if not s.sensitive} == {
             "email.platform_smtp_username",
             "email.platform_imap_username",
+            "telegram.api_id",
             "whatsapp.api_version",
             "whatsapp.phone_number_id",
             "openai.organization",
@@ -390,6 +391,8 @@ class TestService:
             "openai.models",
             "whatsapp.verify_token",
             "whatsapp.app_secret",
+            "telegram.api_id",
+            "telegram.api_hash",
             "whatsapp.api_version",
             "email.platform_domain",
             "email.platform_smtp_host",

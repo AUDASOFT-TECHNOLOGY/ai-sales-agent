@@ -60,7 +60,11 @@ from sales_app.config.secrets import (
     SHEETS_REFRESH_TOKEN,
     SOURCE_CREDENTIALS,
     SOURCE_GRANTS,
+    TELEGRAM_API_HASH,
+    TELEGRAM_API_ID,
     TELEGRAM_BOT_TOKEN,
+    TELEGRAM_USER_REAUTH,
+    TELEGRAM_USER_SESSION,
     TELEGRAM_WEBHOOK_SECRET,
     WHATSAPP_ACCESS_TOKEN,
     WHATSAPP_API_VERSION,
@@ -68,7 +72,11 @@ from sales_app.config.secrets import (
     WHATSAPP_PHONE_NUMBER_ID,
     Secrets,
 )
-from sales_app.config.telegram_settings import TelegramChannelSettings, bot_id_of
+from sales_app.config.telegram_settings import (
+    TelegramChannelSettings,
+    account_mode_of,
+    bot_id_of,
+)
 from sales_app.config_store import ConfigStore, ConfigStoreError
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_app.secret_store import GLOBAL_SCOPE, SecretStore, SecretStoreError, client_scope
@@ -115,6 +123,8 @@ class ClientConfig:
         """The bot this client talks through, when its channel is Telegram and it has one."""
         if "telegram" not in self.spec.channel_providers:
             return None
+        if account_mode_of(self.spec.channel_settings_for("telegram")):
+            return None  # the client's own account has no bot, and no webhook
         return bot_id_of(self.secrets.get_optional(TELEGRAM_BOT_TOKEN))
 
     @property
@@ -482,12 +492,15 @@ def _resolve_secrets(
             (EMAIL_PLATFORM_MAILBOX, "Email mailbox", client, None, False),
             *((key, key, GLOBAL_SCOPE, None, False) for key in EMAIL_PLATFORM_PROFILE_KEYS),
         ]
+    telegram_account = "telegram" in channels and account_mode_of(
+        spec.channel_settings_for("telegram")
+    )
     telegram_wanted = (
         [
             (TELEGRAM_BOT_TOKEN, "Telegram bot token", client, None, live),
             (TELEGRAM_WEBHOOK_SECRET, "Telegram webhook secret", client, None, live),
         ]
-        if "telegram" in channels
+        if "telegram" in channels and not telegram_account
         else []
     )
     # A client whose prospects live elsewhere does not use the spreadsheet, so it needs no Google
@@ -584,6 +597,8 @@ def _resolve_secrets(
             TelegramChannelSettings.model_validate(spec.channel_settings_for("telegram"))
         except ValueError:
             missing.append("Telegram settings are incomplete")
+    if telegram_account and live:
+        _telegram_account_missing(secret_store, client, missing)
     granted = effective_channels(
         secret_store.get(GLOBAL_SCOPE, CHANNELS_ALLOWED) if secret_store is not None else None,
         secret_store.get(client, CHANNELS_ACCESS) if secret_store is not None else None,
@@ -613,6 +628,26 @@ def _resolve_secrets(
         if reason is not None:
             missing.append(reason)
     return Secrets(values), missing
+
+
+def _telegram_account_missing(
+    secret_store: SecretStore | None, client: str, missing: list[str]
+) -> None:
+    """A client on its own Telegram account runs only with the platform's Telegram application set
+    and a session of its own that Telegram still honours. The session is NOT resolved into the
+    client's secrets: the account service reads it from the store when it needs it."""
+    if secret_store is None:
+        missing.append("Telegram account is not connected yet")
+        return
+    if not all(
+        secret_store.entry(GLOBAL_SCOPE, key) is not None
+        for key in (TELEGRAM_API_ID, TELEGRAM_API_HASH)
+    ):
+        missing.append("Telegram account connection is not configured by the platform yet")
+    if secret_store.entry(client, TELEGRAM_USER_SESSION) is None:
+        missing.append("Telegram account is not connected yet")
+    elif secret_store.get(client, TELEGRAM_USER_REAUTH) == "1":
+        missing.append("Telegram account must be connected again")
 
 
 def _grant_state(

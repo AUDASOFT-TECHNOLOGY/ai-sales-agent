@@ -17,12 +17,17 @@ import { useAdminAuth } from "../AdminAuthContext";
 import { AdminClientActivationCard } from "./AdminEmailActivation";
 import { AdminClientMailboxCard } from "./AdminClientMailboxCard";
 import { AdminClientTelegramCard } from "./AdminClientTelegramCard";
+import { AdminClientTelegramAccountCard } from "./AdminClientTelegramAccountCard";
 import { AdminClientSendCapCard } from "./AdminClientSendCapCard";
 import { AdminClientSourcesCard } from "./AdminClientSourcesCard";
 import {
   AdminApiError,
+  adminClearClientTelegramLimit,
+  adminClientTelegramAccount,
   adminConnectClientTelegram,
   adminDisconnectClientTelegram,
+  adminDisconnectClientTelegramAccount,
+  type TelegramAccountAdmin,
   adminGetClient,
   adminGetClientPlan,
   adminGetLLMSettings,
@@ -200,6 +205,35 @@ function ClientTelegramSection({ clientId, canEdit }: { clientId: string; canEdi
   );
 }
 
+/** The client's own Telegram account: where it stands, and what only the Admin decides (disconnect, lift
+ *  Telegram's limit). Nothing here is a number, a code or a session. */
+function isAccountState(value: unknown): value is TelegramAccountAdmin {
+  const v = value as Partial<TelegramAccountAdmin> | null;
+  return !!v && typeof v.state === "string" && typeof v.platform_configured === "boolean" && Array.isArray(v.platform_missing);
+}
+
+function ClientTelegramAccountSection({ clientId, canEdit }: { clientId: string; canEdit: boolean }) {
+  const [initial, setInitial] = useState<TelegramAccountAdmin | null>(null);
+  useEffect(() => {
+    let alive = true;
+    adminClientTelegramAccount(clientId)
+      .then((value) => alive && setInitial(isAccountState(value) ? value : null))
+      .catch(() => alive && setInitial(null)); // a convenience: the bot card above still works
+    return () => {
+      alive = false;
+    };
+  }, [clientId]);
+  if (initial === null) return null;
+  return (
+    <AdminClientTelegramAccountCard
+      canEdit={canEdit}
+      initial={initial}
+      onDisconnect={() => adminDisconnectClientTelegramAccount(clientId)}
+      onClearLimit={() => adminClearClientTelegramLimit(clientId)}
+    />
+  );
+}
+
 function ClientSheet({
   client,
   notice,
@@ -364,6 +398,14 @@ function ClientSheet({
         <Glass level={1} className="admin-detail-card">
           <h3 className="t-label c-2">Telegram bot</h3>
           <ClientTelegramSection clientId={client.client_id} canEdit={admin !== null && CAN_EDIT_LLM_ROLES.has(admin.role)} />
+        </Glass>
+
+        <Glass level={1} className="admin-detail-card">
+          <h3 className="t-label c-2">Telegram account of the client</h3>
+          <ClientTelegramAccountSection
+            clientId={client.client_id}
+            canEdit={admin !== null && CAN_EDIT_LLM_ROLES.has(admin.role)}
+          />
         </Glass>
       </div>
     </>

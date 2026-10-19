@@ -164,9 +164,14 @@ export interface EmailSending {
 }
 
 export interface TelegramSettings {
+  /** `bot`: the Revansa bot; `account`: the client's own Telegram account. */
+  mode: "bot" | "account";
   contact_prompt: string;
   contact_button: string;
   not_found_text: string;
+  /** Account mode: the column of the client's prospects in which it writes "yes" for people who expect the contact. */
+  consent_field: string;
+  max_new_conversations_per_day: number;
 }
 
 /** Where a channel stands: the platform finishes setting it up, or the client has something to choose. */
@@ -193,7 +198,11 @@ export interface ChannelUpdate {
   channel: string;
   /** `use_gmail`: true to use the client's own Gmail, false to go back to a Revansa mailbox. */
   email?: { from_name?: string; subject?: string; use_gmail?: boolean };
-  telegram?: Partial<Record<"contact_prompt" | "contact_button" | "not_found_text", string>>;
+  telegram?: Partial<Record<"contact_prompt" | "contact_button" | "not_found_text" | "consent_field", string>> & {
+    /** true: write from the client's own Telegram account; false: back to the Revansa bot. */
+    use_account?: boolean;
+    max_new_conversations_per_day?: number;
+  };
 }
 
 export interface TelegramInvitations {
@@ -288,6 +297,68 @@ export function clientHubSpotAccessDisconnect(): Promise<HubSpotAccess> {
 
 export function clientTelegramInvitations(): Promise<TelegramInvitations> {
   return request<TelegramInvitations>("/channel/invitations");
+}
+
+/** Telegram from the client's own account (see src/sales_app/api/client_channel.py). The client signs in
+ *  with Telegram itself; the phone number, the code and the password are sent once and never come back. */
+export interface TelegramAccount {
+  /** The platform has set Telegram accounts up. */
+  available: boolean;
+  state: "not_connected" | "connected" | "reauth_required" | "unavailable";
+  /** Telegram limited the account for unsolicited messages: no first message is sent, replies go on. */
+  limited: boolean;
+  /** A sign-in is under way and waits for this. */
+  login: "code" | "password" | null;
+  new_today: number | null;
+  daily_limit: number | null;
+}
+
+export interface TelegramWaiting {
+  consent_field: string;
+  waiting: number;
+  people: Array<{
+    prospect_id: string;
+    display_name: string;
+    phone: string | null;
+    reason: "needs_consent" | "needs_phone" | "looking_up";
+  }>;
+}
+
+export function clientTelegramAccount(): Promise<TelegramAccount> {
+  return request<TelegramAccount>("/channel/telegram/account");
+}
+
+export function clientTelegramLoginStart(phone: string): Promise<TelegramAccount> {
+  return request<TelegramAccount>("/channel/telegram/account/start", {
+    method: "POST",
+    body: JSON.stringify({ phone }),
+  });
+}
+
+export function clientTelegramLoginCode(code: string): Promise<TelegramAccount> {
+  return request<TelegramAccount>("/channel/telegram/account/code", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
+export function clientTelegramLoginPassword(password: string): Promise<TelegramAccount> {
+  return request<TelegramAccount>("/channel/telegram/account/password", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}
+
+export function clientTelegramLoginCancel(): Promise<TelegramAccount> {
+  return request<TelegramAccount>("/channel/telegram/account/cancel", { method: "POST" });
+}
+
+export function clientTelegramDisconnect(): Promise<{ disconnected: boolean; ended_at_telegram: boolean }> {
+  return request("/channel/telegram/account", { method: "DELETE" });
+}
+
+export function clientTelegramWaiting(): Promise<TelegramWaiting> {
+  return request<TelegramWaiting>("/channel/telegram/waiting");
 }
 
 /* ── Approvals (see src/sales_app/api/client_approvals.py) ──

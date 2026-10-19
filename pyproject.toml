@@ -21,6 +21,8 @@ dependencies = [
     "alembic>=1.13",
     "psycopg[binary]>=3.2",
     "pypdf>=5.0",
+    # Telegram from a client's own account (MTProto). Imported only when a client uses that mode.
+    "telethon>=1.36",
 ]
 
 [dependency-groups]

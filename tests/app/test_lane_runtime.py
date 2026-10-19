@@ -756,7 +756,7 @@ def test_a_client_with_two_channels_to_poll_reads_each_inbox_and_acknowledges_wh
         channels={
             **d.application.builders.channels,
             "email": replace(email, build_inbox=lambda c: first),
-            "telegram": replace(telegram, build_inbox=lambda c: second),
+            "telegram": replace(telegram, build_inbox=lambda c: second, polls=None),
         },
     )
     poller = builders.open_inbox(config)

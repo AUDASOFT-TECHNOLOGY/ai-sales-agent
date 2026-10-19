@@ -20,7 +20,7 @@ with `ContactOrigin.INBOUND`. What happens with a sender who is not a prospect i
 import threading
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sales_core.approval import ApprovalMode, status_after_proposal
@@ -92,10 +92,12 @@ from sales_core.safety import (
     check_contactable,
     check_ready_to_send,
     has_initiated,
+    has_stated_consent,
     is_opt_out_message,
     recipient_for,
 )
 
+_RELINK_AFTER = timedelta(days=1)  # a number Telegram did not know is not asked again before
 UNCONFIRMED = "unconfirmed send"  # prefix of `last_error` on actions stuck in SENDING
 _ACTIVE_STATUSES = (ProspectStatus.NEW, ProspectStatus.ACTIVE)
 
@@ -142,6 +144,7 @@ class Engine:
         self._facts_writer = facts_writer  # None: facts a Brain proposes are refused, not lost
         self._lock = threading.RLock()
         self._events: list[AuditEvent] = []  # audit events not yet written
+        self._link_attempts: dict[str, datetime] = {}  # Telegram accounts looked for, by prospect
 
     @property
     def _channel(self) -> MessagingChannel:
@@ -279,7 +282,7 @@ class Engine:
         verdict = check_contactable(prospect, channel)
         return verdict if not verdict.allowed else self._initiation_verdict(prospect, channel)
 
-    def _initiated(self, prospect: Prospect, channel: Channel) -> bool:
+    def _wrote_first(self, prospect: Prospect, channel: Channel) -> bool:
         """Whether the person has proved they started the conversation on a channel where they
         must (always True elsewhere). An address on the prospect is never the proof: only an
         inbound message this Engine stored, from that address, is."""
@@ -290,6 +293,15 @@ class Engine:
             return True  # no address: `check_contactable` already says why
         conversation = self._repo.get_conversation(prospect.prospect_id)
         return has_initiated(conversation.messages, channel, address)
+
+    def _initiated(self, prospect: Prospect, channel: Channel) -> bool:
+        """Whether the prospect may be written to on `channel`: they wrote first, or (Telegram
+        from the client's own account only) the client recorded that they expect to be contacted."""
+        if channel is Channel.TELEGRAM and has_stated_consent(
+            prospect, self._config.telegram_consent_attribute
+        ):
+            return True
+        return self._wrote_first(prospect, channel)
 
     def _initiation_verdict(self, prospect: Prospect, channel: Channel) -> SafetyVerdict:
         return (
@@ -588,6 +600,7 @@ class Engine:
             recipient=recipient,
             draft=action.draft,
             idempotency_key=action.idempotency_key,
+            first_contact=not self._wrote_first(prospect, channel),
         )
         sending = replace(action, status=ActionStatus.SENDING)
         # Persist SENDING before the channel call. If this write fails we raise: nothing was sent.
@@ -872,14 +885,24 @@ class Engine:
         prefix = _created_prefix(day)
         return sum(1 for p in self._repo.list_prospects() if p.prospect_id.startswith(prefix))
 
-    def knows_inbound_sender(self, channel: Channel, sender: str) -> bool:
+    def knows_inbound_sender(
+        self, channel: Channel, sender: str, shared_phone: str | None = None
+    ) -> bool:
         """Whether `sender` is one of this client's prospects on `channel`.
 
         A question, nothing more: it stores nothing and emits no event. It is for a reader that must
         not let anyone else's message through (a person's own mailbox): the answer does not depend on
         the policy for unknown senders, because a stranger is never to be engaged from there."""
         with self._lock:
-            return self._find_prospect(channel, sender) is not None
+            if self._find_prospect(channel, sender) is not None:
+                return True
+            # A Telegram account that is not linked yet may still be a prospect we hold the number of
+            # (the number is the one Telegram itself reports for the sender).
+            return (
+                channel in OPT_IN_CHANNELS
+                and bool(shared_phone)
+                and self._repo.find_prospect_by_contact(phone=shared_phone) is not None
+            )
 
     def _find_sender(self, inbound: InboundMessage) -> Prospect | None:
         return self._find_prospect(inbound.channel, inbound.sender)
@@ -929,6 +952,65 @@ class Engine:
         self._repo.update_prospects([linked])
         self._emit(ev.PROSPECT_LINKED, prospect_id=claimed.prospect_id, via=via)
         return linked
+
+    def link_consented_telegram(
+        self, resolve: Callable[[str, str], str | None], *, limit: int
+    ) -> int:
+        """Find the Telegram account of prospects the client says expect to be contacted there.
+
+        `resolve(phone, display_name)` asks Telegram who holds a number and returns the account id,
+        or None. Only prospects that are active, on a Telegram lane, carry the client's consent mark,
+        have a phone and no Telegram account yet are tried, at most `limit` per call, and one that
+        could not be found is not tried again for a day. Returns how many were linked."""
+        attribute = self._config.telegram_consent_attribute
+        if not attribute or limit < 1:
+            return 0
+        with self._lock:
+            now = self._clock.now()
+            linked = 0
+            tried = 0
+            for p in self._repo.list_prospects():
+                if tried >= limit:
+                    break
+                if (
+                    p.client_id != self._client.client_id
+                    or p.status not in _ACTIVE_STATUSES
+                    or p.contact.telegram_chat_id
+                    or not (p.contact.phone or "").strip()
+                    or not has_stated_consent(p, attribute)
+                    or self._router.channel_for(p) is not Channel.TELEGRAM
+                ):
+                    continue
+                last = self._link_attempts.get(p.prospect_id)
+                if last is not None and now - last < _RELINK_AFTER:
+                    continue
+                self._link_attempts[p.prospect_id] = now
+                tried += 1
+                account = resolve(p.contact.phone, p.display_name)  # type: ignore[arg-type]
+                if not account:
+                    self._emit(
+                        ev.INBOUND_LINK_REFUSED,
+                        prospect_id=p.prospect_id,
+                        via="consent",
+                        reason="no account",
+                    )
+                    continue
+                if self._repo.find_prospect_by_contact(telegram_chat_id=account) is not None:
+                    self._emit(
+                        ev.INBOUND_LINK_REFUSED,
+                        prospect_id=p.prospect_id,
+                        via="consent",
+                        reason="already linked",
+                    )
+                    continue
+                self._repo.update_prospects(
+                    [replace(p, contact=replace(p.contact, telegram_chat_id=account))]
+                )
+                self._emit(ev.PROSPECT_LINKED, prospect_id=p.prospect_id, via="consent")
+                linked += 1
+            run = RunCollector()
+            self._flush(run)
+            return linked
 
     def _touch_last_inbound(self, prospect: Prospect, at: datetime) -> None:
         current = prospect.schedule.last_inbound_at

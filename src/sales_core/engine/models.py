@@ -60,6 +60,10 @@ class EngineConfig:
     max_attempts: int = 3  # failed Brain calls / transient send failures before FAILED
     opt_out_keywords: frozenset[str] = DEFAULT_OPT_OUT_KEYWORDS
     inbound: InboundPolicy = field(default_factory=InboundPolicy)
+    # Telegram from the client's own account: the prospect attribute (a source column) in which the
+    # client states that this person expects to be contacted there. A person who carries it may be
+    # written to first; without it, only a person who wrote first may be. None: nobody may.
+    telegram_consent_attribute: str | None = None
 
     def __post_init__(self) -> None:
         if self.daily_action_limit < 0:

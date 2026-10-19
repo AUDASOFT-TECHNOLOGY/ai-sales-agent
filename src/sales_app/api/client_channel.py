@@ -21,6 +21,11 @@ here; a body that names any technical setting is refused (422) without repeating
 - **Where the channel stands** is `status`: `ready`, `waiting_platform` (Revansa has to finish
   setting it up; the client has nothing to do) or `action_required` (the client has to choose or fix
   something of its own), with a sentence that mentions nothing technical.
+- **Telegram from the client's own account** (`telegram.use_account`, `/channel/telegram/account/...`):
+  the client signs in with Telegram itself (phone number, the code Telegram sends to its app, its
+  two-step password if any). Revansa keeps the session only, never the code or the password, and
+  writes first only to the people the client marked as expecting it. The sign-in is the client's own
+  authorisation, like Gmail's consent: nothing technical is ever asked of it.
 - **Telegram invitations** (`GET /channel/invitations`): a Telegram bot cannot write to a person who
   has not started it, so the prospects who have not are listed with a personal invitation link for
   the client to send them; they wait, they are never lost.
@@ -62,7 +67,12 @@ from sales_app.config.email_settings import (
     parse_email_settings,
 )
 from sales_app.config.secrets import TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
-from sales_app.config.telegram_settings import TelegramChannelSettings
+from sales_app.config.telegram_settings import (
+    ACCOUNT_MODE,
+    BOT_MODE,
+    TelegramChannelSettings,
+    account_mode_of,
+)
 from sales_app.config_store import ConfigStoreError
 from sales_app.connection_tests import BotProbeFailure
 from sales_app.email_activation import ActivationConflictError
@@ -70,10 +80,13 @@ from sales_app.errors import ClientNotReadyError
 from sales_app.mailbox_access import sender_name
 from sales_app.mailbox_exclusivity import mode_conflict
 from sales_app.secret_store import SecretStoreError, client_scope
+from sales_app.send_cap import utc_day
 from sales_app.send_cap_status import email_sending
+from sales_app.telegram_account import AccountLoginError
 from sales_app.telegram_connection import BotProbeFactory
 from sales_app.wiring.providers import ProviderKind
 from sales_app.wiring.providers import telegram as telegram_provider
+from sales_core.safety import has_stated_consent
 from sales_integrations.telegram import invitation_link, make_invitation
 
 # What this route may change in a stored settings document: the channel and its business wording.
@@ -112,6 +125,12 @@ class TelegramSettingsChanges(BaseModel):
     contact_prompt: str | None = None
     contact_button: str | None = None
     not_found_text: str | None = None
+    # Which Telegram: true, the client's own account (it signs in with Telegram); false, back to the
+    # bot the platform sets up. The column that marks who expects the contact, and the most new
+    # conversations a day, are the client's own business choices.
+    use_account: bool | None = None
+    consent_field: str | None = None
+    max_new_conversations_per_day: int | None = None
 
 
 class UpdateChannelRequest(BaseModel):
@@ -182,9 +201,64 @@ class EmailSettingsResponse(BaseModel):
 
 
 class TelegramSettingsResponse(BaseModel):
+    mode: Literal["bot", "account"] = "bot"
     contact_prompt: str
     contact_button: str
     not_found_text: str
+    consent_field: str
+    max_new_conversations_per_day: int
+
+
+class TelegramAccountResponse(BaseModel):
+    """Where the client's own Telegram account stands. Nothing here names a number, a code or a
+    session. `login` says a sign-in is under way and what it waits for."""
+
+    available: bool  # the platform has set Telegram accounts up
+    state: Literal["not_connected", "connected", "reauth_required", "unavailable"]
+    limited: bool = False  # Telegram limited the account for unsolicited messages
+    login: Literal["code", "password"] | None = None
+    new_today: int | None = None  # new conversations opened today
+    daily_limit: int | None = None  # at most this many a day
+
+
+class TelegramLoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: Annotated[str, StringConstraints(strip_whitespace=True, min_length=6, max_length=32)]
+
+
+class TelegramCodeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=4, max_length=16)]
+
+
+class TelegramPasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    password: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+
+
+class TelegramDisconnectResponse(BaseModel):
+    disconnected: bool = True
+    ended_at_telegram: (
+        bool  # False: Telegram could not be told; end it from Telegram's Devices list
+    )
+
+
+class WaitingResponse(BaseModel):
+    prospect_id: str
+    display_name: str
+    phone: str | None = None
+    # `needs_consent`: the client has not marked this person as expecting the contact; `needs_phone`:
+    # marked, but there is no number to find them by; `looking_up`: marked, being found on Telegram.
+    reason: Literal["needs_consent", "needs_phone", "looking_up"]
+
+
+class WaitingListResponse(BaseModel):
+    consent_field: str
+    waiting: int
+    people: list[WaitingResponse]
 
 
 class ChannelResponse(BaseModel):
@@ -240,6 +314,43 @@ async def _read_update(request: Request) -> UpdateChannelRequest:
             422,
             [{"loc": list(e["loc"]), "type": e["type"], "msg": e["msg"]} for e in error.errors()],
         ) from None
+
+
+async def _read_body(request: Request, model: type[BaseModel]) -> Any:
+    """Like `_read_update`, for the sign-in steps: a phone number, a code or a password the client
+    types is never repeated in an answer."""
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "body must be JSON") from None
+    try:
+        return model.model_validate(data)
+    except ValidationError as error:
+        raise HTTPException(
+            422,
+            [{"loc": list(e["loc"]), "type": e["type"], "msg": e["msg"]} for e in error.errors()],
+        ) from None
+
+
+_LOGIN_ERRORS: dict[str, tuple[int, str]] = {
+    "not_configured": (409, "Telegram accounts are not available yet"),
+    "bad_phone": (422, "this is not a phone number Telegram can use"),
+    "bad_code": (422, "this code is not right"),
+    "code_expired": (409, "this code has expired; ask for a new one"),
+    "bad_password": (422, "this password is not right"),
+    "too_many": (429, "too many attempts; wait a while before trying again"),
+    "flood": (429, "Telegram asks you to wait before trying again"),
+    "unreachable": (502, "Telegram could not be reached; try again in a moment"),
+    "no_login": (409, "no sign-in is waiting for this; start again"),
+    "already_used": (409, "this Telegram account is already connected to another account"),
+    "unavailable": (503, "this is temporarily unavailable"),
+}
+
+
+def _login_http_error(error: AccountLoginError) -> HTTPException:
+    status, message = _LOGIN_ERRORS.get(error.kind, (503, "this is temporarily unavailable"))
+    headers = {"Retry-After": str(error.retry_after)} if error.retry_after else None
+    return HTTPException(status, message, headers=headers)
 
 
 _CHANNEL_BODY: dict[str, Any] = {
@@ -488,6 +599,180 @@ def create_client_channel_router(
                     at=application.clock.now(),
                 )
 
+    # ---- Telegram from the client's own account --------------------------------------------
+
+    def account_service():
+        service = getattr(application, "telegram_accounts", None)
+        if service is None:
+            raise HTTPException(409, "Telegram accounts are not available yet")
+        return service
+
+    def account_ready(client_id: str):
+        """The account service, for a client whose channel is Telegram on its own account and may
+        be. Said as plainly for each way it is not."""
+        try:
+            raw, document, _ = current_state(client_id)
+        except ConfigStoreError:
+            raise HTTPException(503, "settings are temporarily unavailable") from None
+        if channel_provider_of(raw, document) != TELEGRAM or not account_mode_of(
+            channel_settings_of(document)
+        ):
+            raise HTTPException(409, "your channel is not Telegram on your own account")
+        if TELEGRAM not in allowed_channels(application, client_id):
+            raise HTTPException(403, "this channel is not available for your account")
+        return account_service()
+
+    def account_response(client_id: str, service) -> TelegramAccountResponse:
+        status = service.status(client_id)
+        new_today = limit = None
+        try:
+            _, document, _ = current_state(client_id)
+            limit = TelegramChannelSettings.model_validate(
+                channel_settings_of(document)
+            ).max_new_conversations_per_day
+            if application.send_limits is not None:
+                new_today = application.send_limits.used(
+                    client_id, "telegram_new", utc_day(application.clock.now())
+                )
+        except Exception:  # noqa: BLE001 - the figures are a courtesy; the state is what matters
+            new_today = None
+        return TelegramAccountResponse(
+            available=service.configured(),
+            state=status.state,
+            limited=status.limited,
+            login=status.login,
+            new_today=new_today,
+            daily_limit=limit,
+        )
+
+    def refresh(client_id: str) -> None:
+        if application.registry.get_config(client_id) is not None:
+            with contextlib.suppress(Exception):  # the Admin's runtime status says how it ended
+                application.runtime_manager.refresh_client(client_id)
+
+    @router.get("/channel/telegram/account", response_model=TelegramAccountResponse)
+    def get_telegram_account(
+        client: ClientProfile = Depends(get_current_client),
+    ) -> TelegramAccountResponse:
+        return account_response(client.client_id, account_ready(client.client_id))
+
+    @router.post("/channel/telegram/account/start", response_model=TelegramAccountResponse)
+    async def start_telegram_login(
+        request: Request, client: ClientProfile = Depends(get_current_client)
+    ) -> TelegramAccountResponse:
+        """Telegram sends a code to the person's own Telegram app. Nothing is kept but what is needed
+        to finish the sign-in, in memory, for ten minutes."""
+        body = await _read_body(request, TelegramLoginRequest)
+        service = account_ready(client.client_id)
+
+        def start() -> TelegramAccountResponse:
+            try:
+                service.start(client.client_id, body.phone)
+            except AccountLoginError as error:
+                raise _login_http_error(error) from None
+            return account_response(client.client_id, service)
+
+        return await run_in_threadpool(start)
+
+    @router.post("/channel/telegram/account/code", response_model=TelegramAccountResponse)
+    async def confirm_telegram_code(
+        request: Request, client: ClientProfile = Depends(get_current_client)
+    ) -> TelegramAccountResponse:
+        body = await _read_body(request, TelegramCodeRequest)
+        service = account_ready(client.client_id)
+
+        def confirm() -> TelegramAccountResponse:
+            try:
+                service.confirm_code(client.client_id, body.code)
+            except AccountLoginError as error:
+                raise _login_http_error(error) from None
+            refresh(client.client_id)
+            return account_response(client.client_id, service)
+
+        return await run_in_threadpool(confirm)
+
+    @router.post("/channel/telegram/account/password", response_model=TelegramAccountResponse)
+    async def confirm_telegram_password(
+        request: Request, client: ClientProfile = Depends(get_current_client)
+    ) -> TelegramAccountResponse:
+        body = await _read_body(request, TelegramPasswordRequest)
+        service = account_ready(client.client_id)
+
+        def confirm() -> TelegramAccountResponse:
+            try:
+                service.confirm_password(client.client_id, body.password)
+            except AccountLoginError as error:
+                raise _login_http_error(error) from None
+            refresh(client.client_id)
+            return account_response(client.client_id, service)
+
+        return await run_in_threadpool(confirm)
+
+    @router.post("/channel/telegram/account/cancel", response_model=TelegramAccountResponse)
+    def cancel_telegram_login(
+        client: ClientProfile = Depends(get_current_client),
+    ) -> TelegramAccountResponse:
+        service = account_ready(client.client_id)
+        service.cancel(client.client_id)
+        return account_response(client.client_id, service)
+
+    @router.delete("/channel/telegram/account", response_model=TelegramDisconnectResponse)
+    def disconnect_telegram_account(
+        client: ClientProfile = Depends(get_current_client),
+    ) -> TelegramDisconnectResponse:
+        """Ends Revansa's session at Telegram and forgets it here. The agent can no longer send
+        until the client signs in again. Forgotten here whatever Telegram answers."""
+        service = account_service()
+        try:
+            ended = service.disconnect(client.client_id)
+        except AccountLoginError as error:
+            raise _login_http_error(error) from None
+        refresh(client.client_id)
+        return TelegramDisconnectResponse(ended_at_telegram=ended)
+
+    @router.get("/channel/telegram/waiting", response_model=WaitingListResponse)
+    def get_telegram_waiting(
+        limit: int = Query(200, ge=1, le=1000),
+        client: ClientProfile = Depends(get_current_client),
+    ) -> WaitingListResponse:
+        """The prospects Revansa does not write to yet because the client has not said they expect
+        the contact (or it has no number to find them by). They wait: none is lost or paused."""
+        client_id = client.client_id
+        account_ready(client_id)
+        runtime = application.registry.get(client_id)
+        if runtime is None:
+            raise HTTPException(409, "your agent is not ready yet")
+        try:
+            _, document, _ = current_state(client_id)
+            settings = TelegramChannelSettings.model_validate(channel_settings_of(document))
+            with runtime.lease() as engine:
+                waiting = engine.prospects_awaiting_opt_in()
+        except ClientNotReadyError:
+            raise HTTPException(409, "your agent is not ready yet") from None
+        except ConfigStoreError:
+            raise HTTPException(503, "settings are temporarily unavailable") from None
+        except Exception:  # noqa: BLE001 - the source answers or it does not; never its words
+            raise HTTPException(502, "your prospects could not be read just now") from None
+        people = []
+        for prospect in waiting[:limit]:
+            if not has_stated_consent(prospect, settings.consent_field):
+                reason = "needs_consent"
+            elif not (prospect.contact.phone or "").strip():
+                reason = "needs_phone"
+            else:
+                reason = "looking_up"
+            people.append(
+                WaitingResponse(
+                    prospect_id=prospect.prospect_id,
+                    display_name=prospect.display_name,
+                    phone=prospect.contact.phone,
+                    reason=reason,  # type: ignore[arg-type]
+                )
+            )
+        return WaitingListResponse(
+            consent_field=settings.consent_field, waiting=len(waiting), people=people
+        )
+
     # ---- Telegram invitations -------------------------------------------------------------
 
     def reveal(client_id: str, key: str) -> str | None:
@@ -581,7 +866,11 @@ def _merged_telegram_settings(
     repeats a value. Only what the client set is kept: the rest stays the default."""
     merged = dict(current)
     if changes is not None:
-        merged.update(changes.model_dump(exclude_none=True))
+        data = changes.model_dump(exclude_none=True)
+        choice = data.pop("use_account", None)
+        if choice is not None:
+            merged["mode"] = ACCOUNT_MODE if choice else BOT_MODE
+        merged.update(data)
     try:
         TelegramChannelSettings.model_validate(merged)
     except ValidationError as error:

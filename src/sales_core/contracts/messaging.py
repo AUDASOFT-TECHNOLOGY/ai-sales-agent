@@ -25,6 +25,9 @@ class OutboundMessage:
     recipient: str  # channel-specific address (phone number, email, ...)
     draft: MessageDraft
     idempotency_key: str  # channels should not deliver the same key twice
+    # True when this opens a conversation the person has not started themselves (the first message
+    # to someone who never wrote to us): a channel that rations such messages counts it.
+    first_contact: bool = False
 
     def __post_init__(self) -> None:
         require_text(self.client_id, "client_id")
