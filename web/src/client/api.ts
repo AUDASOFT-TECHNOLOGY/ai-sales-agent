@@ -654,6 +654,8 @@ export interface ConversationMessage {
   channel: string;
   text: string;
   timestamp: string;
+  /** What WhatsApp reported for a message we sent; absent until it reports something. */
+  delivery?: "sent" | "delivered" | "read" | "failed" | null;
 }
 
 export interface ConversationHistory {

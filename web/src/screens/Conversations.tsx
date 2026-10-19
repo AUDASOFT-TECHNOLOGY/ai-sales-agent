@@ -10,6 +10,7 @@ import { ChevronLeft } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { clientConversation, clientProspects, type ProspectRow } from "../client/api";
+import { whatsappText, type WhatsAppKey } from "../whatsapp/copy";
 import { crmFailureOf, type CrmFailure } from "../client/crmFailure";
 import { useFetched } from "../client/useFetched";
 import { Button } from "../ui/Button";
@@ -44,7 +45,7 @@ function useSignOutOn(failure: CrmFailure | null) {
 }
 
 function Thread({ id, name }: { id: string; name: string | null }) {
-  const { t, d } = useI18n();
+  const { t, d, locale } = useI18n();
   const navigate = useNavigate();
   const wide = useMedia("(min-width: 1024px)");
   const [attempt, setAttempt] = useState(0);
@@ -105,6 +106,7 @@ function Thread({ id, name }: { id: string; name: string | null }) {
                   </div>
                   <p className="c-3 t-body-sm">
                     {d(m.timestamp, { dateStyle: "medium", timeStyle: "short" })} · {m.channel}
+                    {mine && m.delivery ? ` · ${whatsappText(locale, `delivery.${m.delivery}` as WhatsAppKey)}` : ""}
                   </p>
                 </div>
               </li>

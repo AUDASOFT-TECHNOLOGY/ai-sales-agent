@@ -7,10 +7,12 @@ processing in the background and answers. Deciding what to reply is never done h
 
 import asyncio
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import parse_qs
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 
@@ -27,11 +29,13 @@ from sales_app.api.admin_lanes import create_admin_lanes_router
 from sales_app.api.admin_send_cap import create_admin_send_cap_router
 from sales_app.api.admin_writeback import create_admin_writeback_router
 from sales_app.api.admin_settings import create_admin_settings_router
+from sales_app.api.admin_whatsapp import create_admin_whatsapp_router
 from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
 from sales_app.api.client_approvals import create_client_approvals_router
 from sales_app.api.client_channel import create_client_channel_router
 from sales_app.api.client_gmail import create_application_gmail_router
+from sales_app.api.client_whatsapp import create_client_whatsapp_router
 from sales_app.api.client_lanes import create_client_lanes_router
 from sales_app.api.client_payments import create_client_payments_router
 from sales_app.api.client_prospects import create_client_prospects_router
@@ -124,6 +128,9 @@ def create_app(
             application, connection_http, platform_mail_probe, bot_probe, mail_login_probe
         )
     )
+    admin_whatsapp_router = create_admin_whatsapp_router(application)
+    if admin_whatsapp_router is not None:
+        app.include_router(admin_whatsapp_router)
     app.include_router(create_admin_email_activation_router(application, mail_login_probe))
     app.include_router(create_client_router(application))
     app.include_router(create_client_agent_router(application))
@@ -139,6 +146,9 @@ def create_app(
     if hubspot_oauth_router is not None:
         app.include_router(hubspot_oauth_router)
     app.include_router(create_client_channel_router(application, bot_probe))
+    whatsapp_router = create_client_whatsapp_router(application)
+    if whatsapp_router is not None:
+        app.include_router(whatsapp_router)
     gmail_router = create_application_gmail_router(application)
     if gmail_router is not None:
         app.include_router(gmail_router)
@@ -163,6 +173,35 @@ def create_app(
             raise HTTPException(403)
         return PlainTextResponse(challenge)
 
+    @app.post("/webhooks/whatsapp/deauthorize")
+    async def whatsapp_deauthorize(request: Request) -> Response:
+        """Meta tells us a person removed the app from their Facebook account. Their WhatsApp
+        authorisation is gone: everything held for it is forgotten here."""
+        client_id = await _signed_client(application, request)
+        if client_id is not None:
+            await run_in_threadpool(application.whatsapp.forget_locally, client_id)
+            log.info("%s: WhatsApp authorisation removed at Meta's request", client_id)
+        return Response(status_code=200)
+
+    @app.post("/webhooks/whatsapp/data-deletion")
+    async def whatsapp_data_deletion(request: Request) -> dict[str, str]:
+        """Meta's data-deletion request: forget the person's WhatsApp account at once and answer
+        with the status address and a confirmation code Meta shows to the person."""
+        client_id = await _signed_client(application, request)
+        if client_id is not None:
+            await run_in_threadpool(application.whatsapp.forget_locally, client_id)
+            log.info("%s: WhatsApp data deleted at Meta's request", client_id)
+        code = secrets.token_hex(8)
+        base = (application.settings.public_base_url or "").rstrip("/")
+        return {"url": f"{base}/webhooks/whatsapp/data-deletion/status", "confirmation_code": code}
+
+    @app.get("/webhooks/whatsapp/data-deletion/status")
+    def whatsapp_data_deletion_status() -> dict[str, str]:
+        return {
+            "status": "completed",
+            "detail": "The WhatsApp authorisation and the data held for it were deleted on receipt.",
+        }
+
     @app.post("/webhooks/{provider}")
     async def receive(provider: str, request: Request, background: BackgroundTasks):
         parser = application.parsers.get(provider)
@@ -178,6 +217,9 @@ def create_app(
             log.warning("rejected %s webhook: malformed payload: %s", provider, error)
             raise HTTPException(400) from None
 
+        if provider == WHATSAPP_PROVIDER:
+            await _whatsapp_notifications(application, parser, body, request.headers)
+
         handled = 0
         for event in events:
             runtime = application.registry.by_routing_key(provider, event.routing_key)
@@ -185,6 +227,10 @@ def create_app(
                 # Retrying can never help, and providers disable endpoints that keep failing.
                 _drop(application, provider, event.routing_key)
                 continue
+            if provider == WHATSAPP_PROVIDER and application.whatsapp is not None:
+                # The person wrote: their 24-hour window opens before anything else, so the reply
+                # that follows may go as free text.
+                application.whatsapp.note_inbound(runtime.client_id, event.message)
             try:
                 receipt = await run_in_threadpool(_receive, runtime, event.message)
             except ClientNotReadyError:  # it lost a credential since the lookup above
@@ -212,6 +258,48 @@ def create_app(
         return {"received": handled}
 
     return app
+
+
+WHATSAPP_PROVIDER = "whatsapp"
+
+
+async def _whatsapp_notifications(
+    application: Application, parser: Any, body: bytes, headers: Any
+) -> None:
+    """Delivery statuses, template approvals and account changes. They are authenticated with the
+    app secret (they carry no phone number to route by) and applied to the client they concern.
+    One that cannot be applied is logged and skipped: Meta is not made to retry statuses forever."""
+    service = application.whatsapp
+    notifications = getattr(parser, "notifications", None)
+    if service is None or notifications is None:
+        return
+    try:
+        found = notifications(body, headers)
+    except InvalidSignatureError:
+        log.warning("rejected whatsapp webhook: invalid signature")
+        raise HTTPException(401) from None
+    except MalformedPayloadError as error:
+        log.warning("whatsapp notifications unreadable: %s", error)
+        return
+    for notification in found:
+        try:
+            await run_in_threadpool(service.handle, notification)
+        except Exception:
+            log.exception("could not apply a whatsapp %s notification", notification.kind)
+
+
+async def _signed_client(application: Application, request: Request) -> str | None:
+    """The client a Meta `signed_request` (deauthorisation, data deletion) is about. A call that
+    the app secret does not sign is refused (401); an unknown person is answered as handled."""
+    service = application.whatsapp
+    if service is None:
+        raise HTTPException(404)
+    form = parse_qs((await request.body()).decode("utf-8", "replace"))
+    signed = (form.get("signed_request") or [""])[0]
+    client_id, valid = await run_in_threadpool(service.client_of_signed_request, signed)
+    if not valid:
+        raise HTTPException(401)
+    return client_id
 
 
 def _drop(application: Application, provider: str, routing_key: str) -> None:

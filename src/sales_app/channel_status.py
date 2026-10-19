@@ -57,7 +57,7 @@ def channel_provider_of(raw: Mapping[str, Any], document: Mapping[str, Any]) -> 
 def is_channel_reason(reason: str) -> bool:
     """Whether a "not ready" reason is about the channel, which a client sees as its own checks
     (with what to do) rather than as "contact your administrator"."""
-    return reason.startswith(("Email ", "Telegram ")) or reason.endswith(
+    return reason.startswith(("Email ", "Telegram ", "WhatsApp ")) or reason.endswith(
         "channel is not authorized for this account"
     )
 
@@ -236,6 +236,13 @@ def _telegram_status(
     return READY, None
 
 
+WHATSAPP_NOT_CONNECTED = (
+    "Connect your WhatsApp Business account so Revansa can write to your prospects."
+)
+WHATSAPP_REAUTH = "WhatsApp needs you to authorise Revansa again. Reconnect your WhatsApp account."
+WHATSAPP_RECONNECT = "Your WhatsApp number changed. Connect the account of your new number."
+
+
 def _whatsapp_status(application: Application, client_id: str) -> ChannelStatus:
     """The Meta credentials are all the Admin's: the platform's app secret and verify token, and the
     client's access token and phone number id. Stored is not verified (only Meta's own call to the
@@ -249,6 +256,18 @@ def _whatsapp_status(application: Application, client_id: str) -> ChannelStatus:
             stored = False
         if not stored:
             return WAITING_PLATFORM, _PREPARING
+    service = getattr(application, "whatsapp", None)
+    status = service.status(client_id) if service is not None else None
+    if status is not None and status.state == "reauth_required":
+        return ACTION_REQUIRED, WHATSAPP_REAUTH
+    profile = application.client_profiles.get(client_id)
+    if profile is not None and profile.whatsapp_reconnect_required:
+        # The number was changed: the account connected before is no longer the client's number.
+        return ACTION_REQUIRED, WHATSAPP_RECONNECT
     if not all(credential_stored(application, client_id, key) for key in per_client):
+        # Revansa's Meta app is set: the client connects its own account in one click. Without it,
+        # the Admin connects the account by hand and the client waits.
+        if service is not None and service.configured():
+            return ACTION_REQUIRED, WHATSAPP_NOT_CONNECTED
         return WAITING_PLATFORM, _PREPARING
     return READY, None

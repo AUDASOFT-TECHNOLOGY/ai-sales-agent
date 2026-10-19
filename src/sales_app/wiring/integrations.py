@@ -187,6 +187,7 @@ def default_builders(
     knowledge: Callable[[str], Any] | None = None,
     send_guards: Callable[[str, str], DailySendGuard] | None = None,
     gmail: Any = None,
+    whatsapp_service: Any = None,
     telegram_accounts: Any = None,
     first_contacts: Callable[[str, int], DailySendGuard] | None = None,
 ) -> IntegrationBuilders:
@@ -217,6 +218,10 @@ def default_builders(
                 config, accounts=telegram_accounts, first_contacts=first_contacts
             )
             build_inbox = lambda config: support.build_inbox(config, accounts=telegram_accounts)
+
+        if Channel(support.kind) is Channel.WHATSAPP and whatsapp_service is not None:
+            # The WhatsApp channel of a client follows the 24-hour window with its templates.
+            build = lambda config: descriptor.build(config, service=whatsapp_service)
 
         def parser(secrets: Mapping[str, str]) -> WebhookParser:
             token = verify_token() if verify_token is not None else None

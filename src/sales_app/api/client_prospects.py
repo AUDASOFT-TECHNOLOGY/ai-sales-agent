@@ -22,7 +22,7 @@ Only fields the stored model holds are returned. What the source keeps in free c
 
 from collections.abc import Callable
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
@@ -82,6 +82,9 @@ class MessageResponse(BaseModel):
     channel: str
     text: str
     timestamp: datetime
+    # For a WhatsApp message we sent: what WhatsApp reported (sent | delivered | read | failed).
+    # None when the channel reports nothing or nothing has been reported yet.
+    delivery: str | None = None
 
 
 class ConversationResponse(BaseModel):
@@ -169,6 +172,7 @@ def create_client_prospects_router(application: Application) -> APIRouter:
         )
         if found is None:
             raise HTTPException(404, NOT_FOUND)
+        delivered = _deliveries(application, client.client_id, found.messages)
         return ConversationResponse(
             prospect_id=found.prospect_id,
             conversation_id=found.conversation_id,
@@ -180,9 +184,27 @@ def create_client_prospects_router(application: Application) -> APIRouter:
                     channel=m.channel.value,
                     text=m.text,
                     timestamp=m.timestamp,
+                    delivery=delivered.get(m.external_id or ""),
                 )
                 for m in sorted(found.messages, key=lambda m: m.timestamp)
             ],
         )
 
     return router
+
+
+def _deliveries(application: Application, client_id: str, messages: Any) -> dict[str, str]:
+    """WhatsApp's own report for the messages we sent, by the id WhatsApp gave them. A register that
+    cannot be read only means no status is shown; the conversation is never refused for it."""
+    service = application.whatsapp
+    ids = [
+        m.external_id
+        for m in messages
+        if m.external_id and m.direction.value == "outbound" and m.channel.value == "whatsapp"
+    ]
+    if service is None or not ids:
+        return {}
+    try:
+        return {m: r.status for m, r in service.state.deliveries(client_id, ids).items()}
+    except Exception:  # noqa: BLE001
+        return {}

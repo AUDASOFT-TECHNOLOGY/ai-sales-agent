@@ -135,6 +135,24 @@ CATALOG: tuple[CredentialSpec, ...] = (
     CredentialSpec("openai.models", ScopeKind.GLOBAL, "OpenAI models", sensitive=False),
     CredentialSpec("whatsapp.verify_token", ScopeKind.GLOBAL, "WhatsApp verify token"),
     CredentialSpec("whatsapp.app_secret", ScopeKind.GLOBAL, "Meta app secret"),
+    # The platform's Meta app, for the clients who connect their own WhatsApp Business account with
+    # Meta's Embedded Signup. Both are public identifiers of the app, not secrets.
+    CredentialSpec(
+        "whatsapp.app_id",
+        ScopeKind.GLOBAL,
+        "Meta app id",
+        sensitive=False,
+        pattern=re.compile(r"^\d{5,32}$"),
+        rule="must be the numeric id of the Meta app (digits only)",
+    ),
+    CredentialSpec(
+        "whatsapp.config_id",
+        ScopeKind.GLOBAL,
+        "Meta Embedded Signup configuration id",
+        sensitive=False,
+        pattern=re.compile(r"^\d{5,32}$"),
+        rule="must be the numeric id of the Login for Business configuration (digits only)",
+    ),
     CredentialSpec(
         "whatsapp.api_version",
         ScopeKind.GLOBAL,
@@ -287,6 +305,14 @@ CATALOG: tuple[CredentialSpec, ...] = (
         unique=True,
         pattern=re.compile(r"^\d{5,32}$"),
         rule="must be the numeric id Meta gives the phone number (digits only)",
+    ),
+    CredentialSpec(
+        "whatsapp.waba_id",
+        ScopeKind.CLIENT,
+        "WhatsApp Business Account id",
+        sensitive=False,
+        pattern=re.compile(r"^\d{5,32}$"),
+        rule="must be the numeric id Meta gives the WhatsApp Business Account (digits only)",
     ),
     CredentialSpec("email.password", ScopeKind.CLIENT, "Email password"),
     # The mailbox Revansa assigned to this client (e-mail mode `platform`). Not a secret, and held

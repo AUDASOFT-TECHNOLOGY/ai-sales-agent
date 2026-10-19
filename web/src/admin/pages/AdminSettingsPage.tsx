@@ -94,6 +94,8 @@ const META_GLOBAL_FIELDS: FieldDef[] = [
   { key: "whatsapp.app_secret", label: "App Secret", help: "Revansa-wide. Signs the webhook calls Meta sends." },
   { key: "whatsapp.verify_token", label: "Verify Token", help: "Revansa-wide. The token you give Meta when registering the webhook." },
   { key: "whatsapp.api_version", label: "API Version", help: "Revansa-wide Graph API version.", placeholder: "v21.0" },
+  { key: "whatsapp.app_id", label: "Meta App ID", help: "Revansa-wide. The id of the Meta app clients connect through (public).", placeholder: "123456789012345" },
+  { key: "whatsapp.config_id", label: "Embedded Signup configuration ID", help: "Revansa-wide. The Login for Business configuration of the app (public).", placeholder: "123456789012345" },
 ];
 
 export function AdminSettingsPage() {
@@ -355,8 +357,8 @@ function MetaSection({ canEdit }: { canEdit: boolean }) {
         connection test.
       </p>
       <p className="c-3 t-body-sm">
-        A client&apos;s own Meta credentials are not entered here: they come from the WhatsApp onboarding of that client&apos;s
-        number.
+        A client&apos;s own Meta credentials are not entered here: the client connects its account with Meta&apos;s own
+        window once the four values above are stored (see the WhatsApp section of its page for the rest).
       </p>
     </Glass>
   );

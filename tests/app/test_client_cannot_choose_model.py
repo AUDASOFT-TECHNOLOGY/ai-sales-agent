@@ -36,6 +36,12 @@ CLIENT_ROUTES = {
     ("POST", "/client/v1/channel/email-activation"),
     ("POST", "/client/v1/channel/google/disconnect"),
     ("POST", "/client/v1/channel/google/start"),
+    # The client's own WhatsApp Business account, through Meta's Embedded Signup (a click, then
+    # Meta's window): no token, password or key crosses these routes; the one-time code goes in.
+    ("GET", "/client/v1/channel/whatsapp"),
+    ("POST", "/client/v1/channel/whatsapp/start"),
+    ("POST", "/client/v1/channel/whatsapp/complete"),
+    ("POST", "/client/v1/channel/whatsapp/disconnect"),
     ("POST", "/client/v1/reports/generate"),
     ("POST", "/client/v1/reports/{day}/resend"),
     ("PUT", "/client/v1/reporting/settings"),
@@ -209,6 +215,8 @@ TECHNICAL_FIELD = re.compile(
 # consent. Neither route takes or gives a token, a password or a server.
 OWN_GOOGLE_AUTHORIZATION = {
     "/client/v1/channel/google/disconnect",
+    # The same for WhatsApp Business (Meta's Embedded Signup): withdraw the authorisation.
+    "/client/v1/channel/whatsapp/disconnect",
     # The same kind of consent for Google Sheets and HubSpot (a click, then the provider's page).
     "/client/v1/sheets-access",
     "/client/v1/sheets-access/callback",

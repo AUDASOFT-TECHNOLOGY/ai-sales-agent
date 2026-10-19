@@ -606,3 +606,46 @@ consent_events = Table(
     CheckConstraint("seq >= 1", name="ck_consent_events_seq"),
     Index("ix_consent_events_key", "client_id", "key"),
 )
+
+
+# ---- WhatsApp registers (see `sales_app.whatsapp_state`) -----------------------------------------
+# The last time each person wrote to a client's WhatsApp account (the 24-hour window): a phone number
+# and a date, nothing of a message.
+wa_contact_windows = Table(
+    "wa_contact_windows",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("wa_id", String(32), primary_key=True),
+    Column("last_inbound_at", UtcDateTime, nullable=False),
+)
+
+# Meta's status of each message a client sent, by the id Meta gave it. Counts and error codes only.
+wa_deliveries = Table(
+    "wa_deliveries",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("message_id", String(128), primary_key=True),
+    Column("status", String(16), nullable=False),
+    Column("at", UtcDateTime, nullable=False),
+    Column("recipient", String(32), nullable=False),
+    Column("error_code", String(16), nullable=False),
+    Column("error_title", String(200), nullable=False),
+    Index("ix_wa_deliveries_status", "client_id", "status", "at"),
+)
+
+# A client's message templates as Meta knows them, and the one that opens a conversation.
+wa_templates = Table(
+    "wa_templates",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("name", String(512), primary_key=True),
+    Column("language", String(16), primary_key=True),
+    Column("category", String(24), nullable=False),
+    Column("status", String(24), nullable=False),
+    Column("body", Text, nullable=False),
+    Column("parameter_names", String(512), nullable=False),
+    Column("reason", String(300), nullable=False),
+    Column("meta_id", String(40), nullable=False),
+    Column("is_opening", Boolean, nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+)

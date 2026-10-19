@@ -6,7 +6,7 @@ The credential keys and their rules are the ones the credential store already ho
 
 import re
 from collections.abc import Mapping
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
@@ -14,9 +14,12 @@ from sales_app.config import ClientConfig
 from sales_app.config.secrets import (
     WHATSAPP_ACCESS_TOKEN,
     WHATSAPP_API_VERSION,
+    WHATSAPP_APP_ID,
     WHATSAPP_APP_SECRET,
+    WHATSAPP_CONFIG_ID,
     WHATSAPP_PHONE_NUMBER_ID,
     WHATSAPP_VERIFY_TOKEN,
+    WHATSAPP_WABA_ID,
 )
 from sales_app.secret_store import ScopeKind
 from sales_app.wiring.providers.types import (
@@ -43,7 +46,12 @@ class WhatsAppChannelSettings(BaseModel):
     api_version: NonEmpty = "v21.0"  # a global setting in the credential store wins
 
 
-def build_channel(config: ClientConfig) -> WhatsAppChannel:
+def build_channel(config: ClientConfig, *, service: Any = None) -> WhatsAppChannel:
+    """The client's sending channel. `service` is the application's `WhatsAppService`: it binds the
+    channel to the client's 24-hour windows and message templates. Without it the channel sends
+    exactly what it is given (tests, and the deployments that predate the service)."""
+    if service is not None:
+        return service.channel_for(config)
     return WhatsAppChannel(
         token=config.secrets.get(WHATSAPP_ACCESS_TOKEN),
         phone_number_id=config.secrets.get(WHATSAPP_PHONE_NUMBER_ID),
@@ -79,6 +87,24 @@ DESCRIPTOR = ProviderDescriptor(
             scope=ScopeKind.GLOBAL,
             required_when=Requirement.LIVE,
         ),
+        # The Meta app that clients connect their own account through (Embedded Signup): public
+        # identifiers, not secrets. Setting them is what turns "Connect WhatsApp" on for clients.
+        CredentialDeclaration(
+            key=WHATSAPP_APP_ID,
+            label="Meta app id",
+            scope=ScopeKind.GLOBAL,
+            sensitive=False,
+            pattern=re.compile(r"^\d{5,32}$"),
+            rule="must be the numeric id of the Meta app (digits only)",
+        ),
+        CredentialDeclaration(
+            key=WHATSAPP_CONFIG_ID,
+            label="Meta Embedded Signup configuration id",
+            scope=ScopeKind.GLOBAL,
+            sensitive=False,
+            pattern=re.compile(r"^\d{5,32}$"),
+            rule="must be the numeric id of the Login for Business configuration (digits only)",
+        ),
         CredentialDeclaration(
             key=WHATSAPP_API_VERSION,
             label="WhatsApp API version",
@@ -103,6 +129,16 @@ DESCRIPTOR = ProviderDescriptor(
             unique=True,
             pattern=re.compile(r"^\d{5,32}$"),
             rule="must be the numeric id Meta gives the phone number (digits only)",
+        ),
+        # The client's WhatsApp Business Account: written when the client connects, or by the Admin.
+        # Needed for the message templates and the webhook subscription.
+        CredentialDeclaration(
+            key=WHATSAPP_WABA_ID,
+            label="WhatsApp Business Account id",
+            scope=ScopeKind.CLIENT,
+            sensitive=False,
+            pattern=re.compile(r"^\d{5,32}$"),
+            rule="must be the numeric id Meta gives the WhatsApp Business Account (digits only)",
         ),
     ),
     # What Meta can check on its own: the token for the phone number. The app secret and the verify

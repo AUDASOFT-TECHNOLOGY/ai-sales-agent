@@ -20,6 +20,18 @@ WHATSAPP_PHONE_NUMBER_ID = "whatsapp.phone_number_id"
 WHATSAPP_APP_SECRET = "whatsapp.app_secret"
 WHATSAPP_API_VERSION = "whatsapp.api_version"
 WHATSAPP_VERIFY_TOKEN = "whatsapp.verify_token"  # global; read when the parsers are built
+# The platform's Meta app, for Embedded Signup (global, Admin only): the app id and the Login
+# configuration id are public identifiers (the browser needs them); the app secret is the existing key.
+WHATSAPP_APP_ID = "whatsapp.app_id"
+WHATSAPP_CONFIG_ID = "whatsapp.config_id"
+# One client's WhatsApp Business Account (client scope, not secret): written by the Embedded Signup
+# completion or by the Admin; needed to manage message templates and the webhook subscription.
+WHATSAPP_WABA_ID = "whatsapp.waba_id"
+# Written only by the platform (never through the Admin credentials API: not in the catalog): "1"
+# once Meta has refused the client's token, until the client connects again. Not a credential.
+WHATSAPP_REAUTH_REQUIRED = "whatsapp.reauth_required"
+# The state key that signs the Embedded Signup `state` is derived from the app secret (see
+# `sales_app.whatsapp_service`); no extra credential to enter.
 # Resolved from an environment variable only, and not in the credential store: the Google access
 # model is going to change (OAuth per client), so nothing is stored for it in the meantime.
 SHEETS_CREDENTIALS_FILE = "sheets.credentials_file"

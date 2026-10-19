@@ -17,6 +17,7 @@ import { useAdminAuth } from "../AdminAuthContext";
 import { AdminClientActivationCard } from "./AdminEmailActivation";
 import { AdminClientMailboxCard } from "./AdminClientMailboxCard";
 import { AdminClientTelegramCard } from "./AdminClientTelegramCard";
+import { AdminClientWhatsAppCard } from "./AdminClientWhatsAppCard";
 import { AdminClientTelegramAccountCard } from "./AdminClientTelegramAccountCard";
 import { AdminClientSendCapCard } from "./AdminClientSendCapCard";
 import { AdminClientSourcesCard } from "./AdminClientSourcesCard";
@@ -393,6 +394,14 @@ function ClientSheet({
         <Glass level={1} className="admin-detail-card">
           <h3 className="t-label c-2">Email mailbox</h3>
           <AdminClientMailboxCard clientId={client.client_id} />
+        </Glass>
+
+        <Glass level={1} className="admin-detail-card">
+          <h3 className="t-label c-2">WhatsApp Business</h3>
+          <AdminClientWhatsAppCard
+            clientId={client.client_id}
+            canEdit={admin !== null && CAN_EDIT_LLM_ROLES.has(admin.role)}
+          />
         </Glass>
 
         <Glass level={1} className="admin-detail-card">

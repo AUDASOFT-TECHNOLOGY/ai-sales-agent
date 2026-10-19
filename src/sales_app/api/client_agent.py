@@ -40,8 +40,10 @@ from sales_app.api.admin_clients import (
 from sales_app.api.client import make_current_client_dependency
 from sales_app.bootstrap import Application
 from sales_app.channel_status import (
+    ACTION_REQUIRED,
     channel_problem,
     channel_provider_of,
+    channel_status,
     is_channel_reason,
 )
 from sales_app.client_auth import is_client_active
@@ -142,6 +144,7 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
     source_problem = "Choose where your prospects come from, in your data source settings."
     channel = "whatsapp"
     channel_issue: str | None = None
+    whatsapp_action: str | None = None  # what only the client can do about its WhatsApp account
     lane_channel_checks: tuple[_Check, ...] | None = None
     if found is not None:
         raw, document = found
@@ -152,6 +155,12 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
         else:
             channel = channel_provider_of(raw, document)
             channel_issue = channel_problem(application, client_id, channel, document)
+            if (
+                channel == "whatsapp"
+                and not profile.whatsapp_reconnect_required  # `whatsapp_number` says it already
+                and channel_status(application, client_id, channel, document)[0] == ACTION_REQUIRED
+            ):
+                whatsapp_action = channel_issue
             source_problem = _source_problem(
                 application, client_id, source_provider(raw, document), document
             )
@@ -174,6 +183,9 @@ def evaluate_readiness(application: Application, profile: ClientProfile) -> tupl
                 bool(profile.whatsapp_number) and not profile.whatsapp_reconnect_required,
                 "Your WhatsApp number is missing, or was changed and is not connected yet.",
             ),
+            # Only when the client itself has something to do (connect, reconnect): the credentials
+            # Revansa holds are `platform_connections`', as they always were.
+            *((_Check("channel_ready", False, whatsapp_action),) if whatsapp_action else ()),
         )
         if channel == "whatsapp"
         else (_Check("channel_ready", channel_issue is None, channel_issue or ""),)
@@ -280,7 +292,9 @@ def access_problem(
         if state == "not_connected" and application.hubspot_access is not None:
             if application.hubspot_access.configured():
                 return f"connect your {descriptor.label} account in your data sources"
-        return f"{descriptor.label} is being connected by the platform. There is nothing for you to do"
+        return (
+            f"{descriptor.label} is being connected by the platform. There is nothing for you to do"
+        )
     return None
 
 

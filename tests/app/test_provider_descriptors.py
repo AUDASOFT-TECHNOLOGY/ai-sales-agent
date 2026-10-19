@@ -20,9 +20,12 @@ from sales_app.config.secrets import (
     SHEETS_CREDENTIALS_FILE,
     WHATSAPP_ACCESS_TOKEN,
     WHATSAPP_API_VERSION,
+    WHATSAPP_APP_ID,
     WHATSAPP_APP_SECRET,
+    WHATSAPP_CONFIG_ID,
     WHATSAPP_PHONE_NUMBER_ID,
     WHATSAPP_VERIFY_TOKEN,
+    WHATSAPP_WABA_ID,
 )
 from sales_app.errors import RuntimeBuildError
 from sales_app.secret_store import CATALOG, ScopeKind
@@ -177,6 +180,9 @@ class TestWhatsApp:
             WHATSAPP_API_VERSION,
             WHATSAPP_ACCESS_TOKEN,
             WHATSAPP_PHONE_NUMBER_ID,
+            WHATSAPP_APP_ID,
+            WHATSAPP_CONFIG_ID,
+            WHATSAPP_WABA_ID,
         }
 
     @pytest.mark.parametrize("credential", whatsapp.DESCRIPTOR.credentials, ids=lambda c: c.key)

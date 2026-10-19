@@ -28,6 +28,8 @@ from sales_app.email_activation import EmailActivationService
 from sales_app.email_platform import AuthLedger
 from sales_app.errors import ConfigurationError
 from sales_app.gmail_wiring import GmailMailService
+from sales_app.hubspot_wiring import HubSpotAccessService
+from sales_app.hubspot_wiring import install as install_hubspot_access
 from sales_app.inbox import PositionStore
 from sales_app.llm_pricing import LLMPricingStore
 from sales_app.llm_usage import LLMUsageStore
@@ -61,17 +63,17 @@ from sales_app.secret_wiring import open_secrets
 from sales_app.send_cap import SendCapStore, SendLimits
 from sales_app.settings import Settings
 from sales_app.sheets_wiring import SheetsAccessService
-from sales_app.hubspot_wiring import HubSpotAccessService
-from sales_app.writeback_switch import WritebackSwitch
-from sales_app.hubspot_wiring import install as install_hubspot_access
 from sales_app.sheets_wiring import install as install_sheets_access
 from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
 from sales_app.sourcing.ports import OperationalStore
 from sales_app.sourcing.sql_store import SqlOperationalStore
 from sales_app.telegram_account import TelegramAccountService
+from sales_app.whatsapp_service import WhatsAppService
+from sales_app.whatsapp_state import InMemoryWhatsAppState, WhatsAppState
 from sales_app.wiring import IntegrationBuilders, default_builders
 from sales_app.wiring.providers import ProviderRegistry, default_registry
 from sales_app.wiring.writeback import WritebackSupport, default_policies, sql_ledgers
+from sales_app.writeback_switch import WritebackSwitch
 from sales_core.approval import ApprovalMode
 from sales_core.ports import Clock
 from sales_integrations.system import SystemClock
@@ -143,6 +145,9 @@ class Application:
     # The Gmail mailbox mode: the platform's Google application (resolved at each use), the clients'
     # grants in the secret store and the channel/inbox of a client in Gmail mode.
     gmail: GmailMailService | None = None
+    # A client's WhatsApp account: connection with Meta's Embedded Signup, message templates, the
+    # 24-hour windows and the delivery statuses. See `sales_app.whatsapp_service`.
+    whatsapp: WhatsAppService | None = None
     # Telegram from a client's own account: the platform's Telegram application, the clients'
     # sessions in the secret store, and the channel/inbox of a client in `account` mode.
     telegram_accounts: TelegramAccountService | None = None
@@ -359,6 +364,12 @@ def _assemble(
     gmail = gmail_service or GmailMailService(
         secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
     )
+    whatsapp = WhatsAppService(
+        secrets=secrets,
+        clock=clock,
+        state=_whatsapp_state(account_stores),
+        public_base_url=lambda: settings.public_base_url,
+    )
     telegram_accounts = TelegramAccountService(secrets=secrets, clock=clock)
     sheets_access = SheetsAccessService(
         secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
@@ -384,6 +395,7 @@ def _assemble(
         knowledge=knowledge.for_client if knowledge is not None else None,
         send_guards=send_limits.guard if send_limits is not None else None,
         gmail=gmail,
+        whatsapp_service=whatsapp,
         telegram_accounts=telegram_accounts,
         first_contacts=(
             (lambda client_id, limit: send_limits.fixed_guard(client_id, "telegram_new", limit))
@@ -442,6 +454,10 @@ def _assemble(
         client_records=client_records,
     )
     credentials.set_on_change(manager.notify_change)
+    whatsapp.bind(
+        client_ids=lambda: [c.client_id for c in registry.configs()],
+        changed=lambda client_id: _refresh_quietly(manager, client_id),
+    )
     channel_policy = ChannelPolicyService(secrets, audit, now=clock.now)
     channel_policy.set_on_change(manager.notify_change)
     writeback_switch.set_on_change(manager.notify_change)
@@ -493,6 +509,7 @@ def _assemble(
         send_caps=send_caps,
         send_limits=send_limits,
         gmail=gmail,
+        whatsapp=whatsapp,
         telegram_accounts=telegram_accounts,
         sheets_access=sheets_access,
         hubspot_access=hubspot_access,
@@ -561,6 +578,25 @@ def _send_limits(
 def _llm_pricing_store(account_stores: AccountStores | None) -> LLMPricingStore | None:
     engine = account_stores.engine if account_stores is not None else None
     return SqlLLMPricingStore(engine) if engine is not None else None
+
+
+def _whatsapp_state(account_stores: AccountStores | None) -> WhatsAppState:
+    """The WhatsApp windows, delivery statuses and templates in the deployment's database. Without
+    one they live in memory: lost on restart, which is safe (an unknown window is a closed one, and
+    the templates are read again from Meta)."""
+    if account_stores is None:
+        return InMemoryWhatsAppState()
+    from sales_app.persistence.whatsapp_rows import SqlWhatsAppState
+
+    return SqlWhatsAppState(account_stores.engine)
+
+
+def _refresh_quietly(manager: Any, client_id: str) -> None:
+    """Apply a connection change to the client's running runtime; a failure never fails the call."""
+    try:
+        manager.refresh_client(client_id)
+    except Exception:  # noqa: BLE001
+        log.warning("%s: could not refresh the runtime after a WhatsApp change", client_id)
 
 
 def _mail_cursor_stores(

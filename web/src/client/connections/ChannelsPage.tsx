@@ -11,6 +11,7 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { Chip } from "../../ui/Chip";
 import { clientChannel, type ChannelState } from "../api";
 import { ClientChannelPage } from "../ClientChannelPage";
+import { ClientWhatsAppCard } from "../ClientWhatsAppCard";
 import { useClientAuth } from "../ClientAuthContext";
 import { Card, Note } from "../kit";
 
@@ -102,6 +103,10 @@ export function ChannelsPage() {
             })}
           </ul>
         </Card>
+      ) : null}
+
+      {state?.channel === "whatsapp" && state.options.some((o) => o.key === "whatsapp") ? (
+        <ClientWhatsAppCard onChanged={() => void clientChannel().then(setState, () => undefined)} />
       ) : null}
 
       {state && state.options.length === 0 ? <Note tone="warn">{t("rv.chan.noneOpen")}</Note> : null}
