@@ -435,12 +435,65 @@ export interface GmailPlatformStatus {
   configured: boolean;
   missing: string[];
   redirect_uri: string | null; // to copy into the Google Cloud OAuth client; not a secret
+  sheets_redirect_uri?: string | null; // the "Connect Google Sheets" callback, registered on the same client
   verified: boolean;
   note: string;
 }
 
 export function adminGmailPlatformStatus(): Promise<GmailPlatformStatus> {
   return request<GmailPlatformStatus>("/settings/integrations/gmail/status");
+}
+
+// The platform's HubSpot application, which the clients connect their own account with. Config-only:
+// "configured" is not "verified" (HubSpot accepts the application only after a real consent).
+export interface HubSpotPlatformStatus {
+  configured: boolean;
+  missing: string[];
+  redirect_uri: string | null; // to register in the HubSpot developer account; not a secret
+  scopes: string[]; // the permissions the HubSpot app must declare
+  verified: boolean;
+  note: string;
+}
+
+export function adminHubSpotPlatformStatus(): Promise<HubSpotPlatformStatus> {
+  return request<HubSpotPlatformStatus>("/settings/integrations/hubspot/status");
+}
+
+// The platform's write-back switch (see src/sales_app/api/admin_writeback.py).
+export interface WritebackSwitch {
+  enabled: boolean;
+  decided_by: "admin" | "deployment";
+  deployment_default: boolean;
+  needs_database: boolean;
+  note: string;
+}
+
+export function adminGetWriteback(): Promise<WritebackSwitch> {
+  return request<WritebackSwitch>("/settings/writeback");
+}
+
+/** `null` follows the deployment default again. */
+export function adminSetWriteback(enabled: boolean | null): Promise<WritebackSwitch> {
+  return request<WritebackSwitch>("/settings/writeback", { method: "PUT", body: JSON.stringify({ enabled }) });
+}
+
+// A client's sources, from the Admin's side.
+export interface ClientSourceSettings {
+  provider: string;
+  configured: boolean;
+  settings: Record<string, unknown> | null;
+}
+
+export function adminGetClientSource(clientId: string): Promise<ClientSourceSettings> {
+  return request<ClientSourceSettings>(`/clients/${encodeURIComponent(clientId)}/source`);
+}
+
+export function adminSaveClientSource(clientId: string, settings: Record<string, unknown>): Promise<ClientSourceSettings> {
+  return request<ClientSourceSettings>(`/clients/${encodeURIComponent(clientId)}/source`, { method: "PUT", body: JSON.stringify(settings) });
+}
+
+export function adminAdoptLanes(clientId: string, confirmNewIds = false): Promise<{ lane: string; source: string; channel: string; version: number }> {
+  return request(`/clients/${encodeURIComponent(clientId)}/lanes/adopt`, { method: "POST", body: JSON.stringify({ confirm_new_ids: confirmNewIds }) });
 }
 
 export function adminEmailServiceStatus(): Promise<EmailServiceStatus> {

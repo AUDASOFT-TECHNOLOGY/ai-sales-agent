@@ -66,6 +66,7 @@ def test_only_the_status_and_four_copies_of_revansas_bookkeeping_can_ever_be_wri
         ProspectField.LAST_INBOUND_AT,
         ProspectField.FOLLOW_UP_COUNT,
         ProspectField.NEXT_ACTION,
+        ProspectField.SUMMARY,
     }
     assert WRITEBACK_FIELDS == {STATUS} | mirrored
     assert not WRITEBACK_FIELDS & SOURCE_ONLY_FIELDS

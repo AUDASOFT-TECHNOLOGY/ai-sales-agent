@@ -33,7 +33,9 @@ import {
 import { useClientAuth } from "../ClientAuthContext";
 import { Card, FailureNote, Loading, Note, failureOf, type Failure } from "../kit";
 import { slugify, uniqueSlug } from "../offer/productModel";
+import { HubSpotAccessCard } from "./HubSpotAccessCard";
 import { SheetsAccessCard } from "./SheetsAccessCard";
+import { SyncCard } from "./SyncCard";
 
 const SHEETS = "google_sheets";
 const HUBSPOT = "hubspot";
@@ -212,15 +214,7 @@ function SingleSource({ source, onChanged }: { source: SourceState; onChanged: (
           <TextInput label={t("rv.src.sheets.tab")} helper={t("rv.src.sheets.tabHelp")} value={tab} onChange={(e) => { setTab(e.target.value); setDone(false); }} maxLength={100} />
         </>
       ) : null}
-      {choice === HUBSPOT ? (
-        source.access === "waiting_platform" ? (
-          <Note tone="warn" title={t("rv.src.hubspot.waiting.title")}>
-            {t("rv.src.hubspot.waiting.text")}
-          </Note>
-        ) : (
-          <Note tone="info">{t("rv.src.hubspot.ready")}</Note>
-        )
-      ) : null}
+      {choice === HUBSPOT ? <HubSpotAccessCard onChanged={() => void onChanged()} /> : null}
 
       {failure ? <FailureNote failure={failure} /> : null}
       {done ? <Note tone="success">{t("rv.src.saved")}</Note> : null}
@@ -368,6 +362,7 @@ function MultiSource({ state, onChanged }: { state: LanesState; onChanged: () =>
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [notice, setNotice] = useState<MessageKey | null>(null);
+  const [syncing, setSyncing] = useState<Lane | null>(null);
 
   async function remove(lane: Lane) {
     setBusy(lane.id);
@@ -407,6 +402,8 @@ function MultiSource({ state, onChanged }: { state: LanesState; onChanged: () =>
           }}
         />
       ) : null}
+      {syncing ? <SyncCard key={syncing.id} laneId={syncing.id} laneName={syncing.source.label} onClose={() => setSyncing(null)} onChanged={onChanged} /> : null}
+      {state.lanes.some((l) => l.source.source === HUBSPOT) ? <HubSpotAccessCard onChanged={() => void onChanged()} /> : null}
       <Card flush aria-label={t("rv.src.yours")}>
         <ul className="rv-list">
           {state.lanes.map((lane) => {
@@ -431,6 +428,9 @@ function MultiSource({ state, onChanged }: { state: LanesState; onChanged: () =>
                   {lane.channel.problem ? <span className="rv-row__sub">{lane.channel.problem}</span> : null}
                 </div>
                 <div className="rv-actions">
+                  <Button size="sm" onClick={() => { setNotice(null); setSyncing(lane); }} disabled={form !== null}>
+                    {t("rv.sync.button")}
+                  </Button>
                   <Button size="sm" onClick={() => { setNotice(null); setForm(lane); }} disabled={form !== null}>
                     {t("rv.common.edit")}
                   </Button>
@@ -492,7 +492,6 @@ export function SourcesPage() {
   if (failure || !lanes) return failure ? <FailureNote failure={failure} onRetry={() => void load()} /> : null;
 
   const several = lanes.editable;
-  const waiting = source?.access === "waiting_platform";
 
   return (
     <div className="rv-page">
@@ -507,12 +506,6 @@ export function SourcesPage() {
       </div>
 
       {several ? <MultiSource state={lanes} onChanged={load} /> : source ? <SingleSource key={source.version ?? "none"} source={source} onChanged={load} /> : <Note tone="danger">{t("rv.err.unavailable")}</Note>}
-
-      {waiting && several ? (
-        <Note tone="warn" title={t("rv.src.hubspot.waiting.title")}>
-          {t("rv.src.hubspot.waiting.text")}
-        </Note>
-      ) : null}
 
       <TestCard readiness={readiness} source={source} onDone={load} />
       <p className="c-3 t-body-sm">

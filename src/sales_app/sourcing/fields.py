@@ -27,6 +27,7 @@ class ProspectField(StrEnum):
     CONVERSATION_ID = "conversation_id"
     TELEGRAM_CHAT_ID = "telegram_chat_id"  # learned by Revansa from the person: never a source's
     LANE_ID = "lane_id"  # which lane the person belongs to: Revansa's own, written once
+    SUMMARY = "summary"  # a one-line commercial recap Revansa builds; only ever written back
 
 
 # What a person is: always the source's, whatever else it owns. A source may leave them empty.

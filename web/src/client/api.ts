@@ -265,6 +265,27 @@ export function clientSheetsAccessDisconnect(): Promise<SheetsAccess> {
   return request<SheetsAccess>("/sheets-access/disconnect", { method: "POST" });
 }
 
+/** HubSpot by the client's own HubSpot authorisation (see src/sales_app/api/client_hubspot_oauth.py). */
+export interface HubSpotAccess {
+  state: "not_connected" | "connected" | "reauth_required" | "unavailable";
+  /** The client's own HubSpot account, shown to that client only. */
+  account: string | null;
+  message: string;
+}
+
+export function clientHubSpotAccess(): Promise<HubSpotAccess> {
+  return request<HubSpotAccess>("/hubspot-access");
+}
+
+/** The HubSpot consent URL: the browser is sent there; the client types nothing. */
+export function clientHubSpotAccessStart(): Promise<{ authorize_url: string }> {
+  return request<{ authorize_url: string }>("/hubspot-access/start", { method: "POST" });
+}
+
+export function clientHubSpotAccessDisconnect(): Promise<HubSpotAccess> {
+  return request<HubSpotAccess>("/hubspot-access/disconnect", { method: "POST" });
+}
+
 export function clientTelegramInvitations(): Promise<TelegramInvitations> {
   return request<TelegramInvitations>("/channel/invitations");
 }
@@ -356,6 +377,51 @@ export function clientCreateLane(body: LaneCreate): Promise<Lane> {
 
 export function clientUpdateLane(id: string, body: LaneUpdate): Promise<Lane> {
   return request<Lane>(`/lanes/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) });
+}
+
+/* ── The results copied back into a lane's source (see src/sales_app/api/client_lane_sync.py) ──
+ * Nothing is copied until the client names, one by one, the existing column or property of each
+ * result. "waiting_platform": saved, but the platform has not switched copying on (nothing is written). */
+
+export type SyncResultKey = "status" | "last_contacted_at" | "last_inbound_at" | "follow_up_count" | "next_action_type" | "next_action_due_at" | "summary";
+
+export interface SheetsSync {
+  columns: Partial<Record<SyncResultKey, string>>;
+  propagate_opt_out?: boolean;
+}
+
+export interface HubSpotSync {
+  status?: boolean;
+  properties?: Partial<Record<Exclude<SyncResultKey, "status">, string>>;
+  propagate_opt_out?: boolean;
+}
+
+export interface LaneSync {
+  version: number | null;
+  lane: string;
+  source: string;
+  supported: boolean;
+  state: "off" | "waiting_platform" | "configured";
+  message: string;
+  deployment_enabled: boolean;
+  results: Array<{ key: SyncResultKey; label: string }>;
+  google_sheets: SheetsSync | null;
+  hubspot: HubSpotSync | null;
+}
+
+export interface LaneSyncUpdate {
+  expected_version: number | null;
+  enabled?: boolean;
+  google_sheets?: SheetsSync;
+  hubspot?: HubSpotSync;
+}
+
+export function clientLaneSync(id: string): Promise<LaneSync> {
+  return request<LaneSync>(`/lanes/${encodeURIComponent(id)}/sync`);
+}
+
+export function clientSaveLaneSync(id: string, body: LaneSyncUpdate): Promise<LaneSync> {
+  return request<LaneSync>(`/lanes/${encodeURIComponent(id)}/sync`, { method: "PUT", body: JSON.stringify(body) });
 }
 
 /** Answers the lanes that remain. */

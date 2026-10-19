@@ -45,6 +45,8 @@ from sales_app.email_platform import (
     run_login_check,
 )
 from sales_app.gmail_wiring import redirect_uri_for
+from sales_app.hubspot_oauth import HUBSPOT_SCOPES
+from sales_app.hubspot_wiring import CALLBACK_PATH as hubspot_callback_path
 from sales_app.llm_models import ModelTest, foreign_model_keys, record_test, stored_models
 from sales_app.mailbox_exclusivity import dedicated_credential_conflict
 from sales_app.mailbox_proof import (
@@ -67,6 +69,7 @@ from sales_app.secret_store import (
     client_scope,
 )
 from sales_app.secret_store.catalog import normalize_value, spec_for
+from sales_app.sheets_wiring import CALLBACK_PATH as sheets_callback_path
 from sales_app.telegram_connection import (
     BotProbeFactory,
     TelegramConnectionError,
@@ -217,7 +220,22 @@ class GmailPlatformStatus(BaseModel):
     configured: bool
     missing: list[str]
     redirect_uri: str | None  # to copy into the Google Cloud OAuth client (not a secret)
+    # The same Google OAuth client also serves "Connect Google Sheets": that flow has its own callback,
+    # which must be registered next to the Gmail one (otherwise Google answers redirect_uri_mismatch).
+    sheets_redirect_uri: str | None = None
     verified: bool = False  # never true here: nothing is checked against Google
+    note: str
+
+
+class HubSpotPlatformStatus(BaseModel):
+    """Whether the HubSpot application clients connect their account with is set. `configured`
+    means the credentials are stored and the public URL is usable: NOT that HubSpot accepts them."""
+
+    configured: bool
+    missing: list[str]
+    redirect_uri: str | None  # to register in the HubSpot developer account (not a secret)
+    scopes: list[str]  # the permissions the app must declare in HubSpot
+    verified: bool = False  # never true here: nothing is checked against HubSpot
     note: str
 
 
@@ -586,9 +604,33 @@ def create_admin_integrations_router(
             configured=not missing,
             missing=missing,
             redirect_uri=redirect_uri_for(application.settings.public_base_url),
+            sheets_redirect_uri=redirect_uri_for(
+                application.settings.public_base_url, sheets_callback_path
+            ),
             note=(
                 "Stored is not verified: Google accepts the application only after a consent has "
                 "succeeded, and for other people's accounts only once Google has verified it."
+            ),
+        )
+
+    @router.get("/settings/integrations/hubspot/status", response_model=HubSpotPlatformStatus)
+    def hubspot_platform_status(
+        _admin: AdminUser = Depends(get_current_admin),
+    ) -> HubSpotPlatformStatus:
+        """Config-only (no network): the HubSpot app credentials and the public base URL. Values are
+        never returned."""
+        hubspot = application.hubspot_access
+        missing = hubspot.missing() if hubspot is not None else ["HubSpot service"]
+        return HubSpotPlatformStatus(
+            configured=not missing,
+            missing=missing,
+            redirect_uri=redirect_uri_for(
+                application.settings.public_base_url, hubspot_callback_path
+            ),
+            scopes=list(HUBSPOT_SCOPES),
+            note=(
+                "Stored is not verified: HubSpot accepts the application only after a consent has "
+                "succeeded. The app must declare exactly these scopes and this redirect URL."
             ),
         )
 

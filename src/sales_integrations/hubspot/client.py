@@ -1,4 +1,4 @@
-"""An HTTP client for the contacts of one HubSpot account (a Private App token).
+"""An HTTP client for the contacts of one HubSpot account (a Private App token, or an OAuth one).
 
 It is bound to one token, so to one client's account. It reads, and it has exactly one way to
 write: `update_contact`, a `PATCH` of the properties of one contact, **bounded to the property
@@ -85,7 +85,7 @@ class HubSpotProperty:
 class HubSpotClient:
     def __init__(
         self,
-        access_token: str,
+        access_token: str | Callable[[], str],
         *,
         base_url: str = BASE_URL,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
@@ -94,11 +94,17 @@ class HubSpotClient:
         max_pages: int = MAX_PAGES,
         writable_properties: Sequence[str] = (),
     ) -> None:
-        if not access_token or not access_token.strip():
-            raise ValueError("a HubSpot access token is required")
+        # A Private App token is fixed; an OAuth access token lives 30 minutes, so the caller may
+        # give a function that returns a fresh one (and raises a `HubSpotError` if it cannot).
+        if callable(access_token):
+            self._token: Callable[[], str] = access_token
+        else:
+            if not access_token or not access_token.strip():
+                raise ValueError("a HubSpot access token is required")
+            fixed = access_token.strip()
+            self._token = lambda: fixed
         if not 1 <= page_size <= PAGE_SIZE:
             raise ValueError(f"page_size must be between 1 and {PAGE_SIZE}")
-        self._headers = {"Authorization": f"Bearer {access_token.strip()}"}
         self._base_url = base_url.rstrip("/")
         self._http = http or (lambda: httpx.Client(timeout=timeout_seconds))
         self._page_size = page_size
@@ -231,6 +237,9 @@ class HubSpotClient:
         forbidden: str = _READ_MESSAGE,
         not_found: bool = False,
     ) -> Any:
+        token = self._token()
+        if not isinstance(token, str) or not token.strip():
+            raise HubSpotAuthError("HubSpot access is not available")
         try:
             with self._http() as client:
                 response = client.request(
@@ -238,7 +247,7 @@ class HubSpotClient:
                     f"{self._base_url}{path}",
                     params=params,
                     json=json,
-                    headers=self._headers,
+                    headers={"Authorization": f"Bearer {token.strip()}"},
                 )
         except httpx.HTTPError:  # a timeout, a refused connection...: never repeat what it said
             raise HubSpotUnavailableError("HubSpot could not be reached") from None

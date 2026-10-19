@@ -111,6 +111,22 @@ def redirect_uri_for(public_base_url: str | None, callback_path: str = CALLBACK_
     return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}{callback_path}"
 
 
+@dataclass(frozen=True, slots=True)
+class PlatformKeys:
+    """Where the platform's OAuth application is kept (Gmail's, by default), and how it is named in
+    what is still missing."""
+
+    client_id: str = GMAIL_OAUTH_CLIENT_ID
+    client_secret: str = GMAIL_OAUTH_CLIENT_SECRET
+    state_key: str = GMAIL_OAUTH_STATE_KEY
+    id_label: str = "Google OAuth client id"
+    secret_label: str = "Google OAuth client secret"
+    state_label: str = "Google OAuth state signing key"
+
+
+GOOGLE_PLATFORM_KEYS = PlatformKeys()
+
+
 def _global(secrets: SecretStore, key: str) -> str | None:
     try:
         return secrets.get(GLOBAL_SCOPE, key)
@@ -119,15 +135,18 @@ def _global(secrets: SecretStore, key: str) -> str | None:
 
 
 def platform_missing(
-    secrets: SecretStore, public_base_url: str | None, callback_path: str = CALLBACK_PATH
+    secrets: SecretStore,
+    public_base_url: str | None,
+    callback_path: str = CALLBACK_PATH,
+    keys: PlatformKeys = GOOGLE_PLATFORM_KEYS,
 ) -> list[str]:
     """What the Admin still has to set for Gmail to be offered. Names only, never a value."""
     missing = [
         label
         for key, label in (
-            (GMAIL_OAUTH_CLIENT_ID, "Google OAuth client id"),
-            (GMAIL_OAUTH_CLIENT_SECRET, "Google OAuth client secret"),
-            (GMAIL_OAUTH_STATE_KEY, "Google OAuth state signing key"),
+            (keys.client_id, keys.id_label),
+            (keys.client_secret, keys.secret_label),
+            (keys.state_key, keys.state_label),
         )
         if not _global(secrets, key)
     ]
@@ -137,11 +156,14 @@ def platform_missing(
 
 
 def read_platform(
-    secrets: SecretStore, public_base_url: str | None, callback_path: str = CALLBACK_PATH
+    secrets: SecretStore,
+    public_base_url: str | None,
+    callback_path: str = CALLBACK_PATH,
+    keys: PlatformKeys = GOOGLE_PLATFORM_KEYS,
 ) -> GmailPlatform | None:
-    client_id = _global(secrets, GMAIL_OAUTH_CLIENT_ID)
-    client_secret = _global(secrets, GMAIL_OAUTH_CLIENT_SECRET)
-    state_key = _global(secrets, GMAIL_OAUTH_STATE_KEY)
+    client_id = _global(secrets, keys.client_id)
+    client_secret = _global(secrets, keys.client_secret)
+    state_key = _global(secrets, keys.state_key)
     redirect = redirect_uri_for(public_base_url, callback_path)
     if not (client_id and client_secret and state_key and redirect):
         return None
@@ -254,19 +276,21 @@ class ResolvingOAuth:
         public_base_url: Callable[[], str | None],
         factory: OAuthFactory = GoogleOAuthClient,
         callback_path: str = CALLBACK_PATH,
+        platform_keys: PlatformKeys = GOOGLE_PLATFORM_KEYS,
     ) -> None:
         self._secrets = secrets
         self._base = public_base_url
         self._factory = factory
         self._callback_path = callback_path
+        self._keys = platform_keys
 
     def __repr__(self) -> str:
         return "ResolvingOAuth()"
 
     def _client(self) -> GoogleOAuthPort:
-        platform = read_platform(self._secrets, self._base(), self._callback_path)
+        platform = read_platform(self._secrets, self._base(), self._callback_path, self._keys)
         if platform is None:
-            raise GoogleTransientError("Google is not configured")
+            raise GoogleTransientError("the OAuth application is not configured")
         return self._factory(
             client_id=platform.client_id,
             client_secret=platform.client_secret,
@@ -307,7 +331,9 @@ class GoogleConnectionService:
         clock: Clock,
         callback_path: str = CALLBACK_PATH,
         required_scopes: tuple[str, ...] | None = None,
+        platform_keys: PlatformKeys = GOOGLE_PLATFORM_KEYS,
     ) -> None:
+        self._keys = platform_keys
         self._secrets = secrets
         self._grants = grants
         self._pending = pending
@@ -321,12 +347,12 @@ class GoogleConnectionService:
         return "GoogleConnectionService()"
 
     def configured(self) -> bool:
-        return read_platform(self._secrets, self._base(), self._callback_path) is not None
+        return read_platform(self._secrets, self._base(), self._callback_path, self._keys) is not None
 
     def _connection(self) -> GoogleMailboxConnection:
-        platform = read_platform(self._secrets, self._base(), self._callback_path)
+        platform = read_platform(self._secrets, self._base(), self._callback_path, self._keys)
         if platform is None:
-            raise GoogleTransientError("Google is not configured")
+            raise GoogleTransientError("the OAuth application is not configured")
         extra = {} if self._required_scopes is None else {"required_scopes": self._required_scopes}
         return GoogleMailboxConnection(
             oauth=self._oauth,
@@ -461,9 +487,11 @@ class GmailMailService:
 
 __all__ = [
     "GmailMailService",
+    "GOOGLE_PLATFORM_KEYS",
     "GmailPlatform",
     "GoogleConnectionService",
     "GrantKeys",
+    "PlatformKeys",
     "ResolvingOAuth",
     "SecretStoreGrantStore",
     "platform_missing",

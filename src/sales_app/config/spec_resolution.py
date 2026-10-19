@@ -100,6 +100,13 @@ def resolve_client_spec(
         if document_errors:
             return SpecResolution(errors=tuple(f"{name}: {stored}: {e}" for e in document_errors))
 
+    # Same decision as `loader.resolve_client_config`: a client still holding a placeholder where its
+    # model, Brain or Sheet goes is awaiting its configuration, not refused.
+    from sales_app.config.loader import awaiting_configuration  # lazy: the loader imports this package
+
+    if awaiting_configuration(_candidate(raw, document)):
+        return SpecResolution(disabled=True)
+
     try:
         normalized = normalize(raw, document, known_brains=known_brains)
     except NormalizationError as error:
@@ -123,6 +130,20 @@ def resolve_client_spec(
         config_version=version.version if version is not None else None,
         origin=normalized.origin,
     )
+
+
+def _candidate(raw: Mapping[str, Any], document: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """The settings in force, as the loader judges them: the file with the published version over."""
+    from sales_app.config.resolution import (
+        merge_document,
+        strip_settings,
+        upgrade_document,
+        with_legacy_inbound,
+    )
+
+    if document is not None:
+        return merge_document(strip_settings(raw), upgrade_document(document))
+    return with_legacy_inbound(raw)
 
 
 def _stored_note(name: str, stored: str | None) -> tuple[str, ...]:

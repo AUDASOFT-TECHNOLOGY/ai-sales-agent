@@ -17,7 +17,7 @@ with no mapping does not run rather than run on a guess.
 """
 
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -33,7 +33,7 @@ from pydantic import (
 
 from sales_app.config import ClientConfig
 from sales_app.config.schema import SourceInstance
-from sales_app.config.secrets import HUBSPOT_ACCESS_TOKEN
+from sales_app.config.secrets import HUBSPOT_ACCESS_TOKEN, HUBSPOT_OAUTH_GRANT
 from sales_app.secret_store import ScopeKind
 from sales_app.sourcing.contacts import normalize_phone
 from sales_app.sourcing.crm_source import CrmProspectSource, CrmRecord
@@ -90,6 +90,7 @@ WritebackProperty = Literal[
     "follow_up_count",
     "next_action_type",
     "next_action_due_at",
+    "summary",
 ]
 _FIELD_OF: Mapping[str, ProspectField] = {
     "last_contacted_at": ProspectField.LAST_CONTACTED_AT,
@@ -97,6 +98,7 @@ _FIELD_OF: Mapping[str, ProspectField] = {
     "follow_up_count": ProspectField.FOLLOW_UP_COUNT,
     "next_action_type": ProspectField.NEXT_ACTION,
     "next_action_due_at": ProspectField.NEXT_ACTION,
+    "summary": ProspectField.SUMMARY,
 }
 # The kind of HubSpot property each written value needs (checked against HubSpot before any write).
 _PROPERTY_TYPE: Mapping[str, str] = {
@@ -105,6 +107,7 @@ _PROPERTY_TYPE: Mapping[str, str] = {
     "follow_up_count": "number",
     "next_action_type": "string",
     "next_action_due_at": "datetime",
+    "summary": "string",
 }
 
 
@@ -385,6 +388,8 @@ class HubSpotReader:
                     held[each] = _moment(values.get(names["last_inbound_at"]))
                 case ProspectField.FOLLOW_UP_COUNT:
                     held[each] = _count(values.get(names["follow_up_count"]))
+                case ProspectField.SUMMARY:
+                    held[each] = _text(values.get(names["summary"]))
                 case ProspectField.NEXT_ACTION:
                     held[each] = (
                         _text(values.get(names["next_action_type"])),
@@ -410,6 +415,8 @@ class HubSpotReader:
                     texts[names["last_inbound_at"]] = _moment_text(value)
                 case ProspectField.FOLLOW_UP_COUNT:
                     texts[names["follow_up_count"]] = "" if value is None else str(int(value))
+                case ProspectField.SUMMARY:
+                    texts[names["summary"]] = "" if value is None else str(value)
                 case ProspectField.NEXT_ACTION:
                     action, due = value
                     texts[names["next_action_type"]] = "" if action is None else str(action)
@@ -537,6 +544,35 @@ def writeback_of(settings: Mapping[str, Any]) -> tuple[frozenset[ProspectField],
     return (frozenset(), False) if section is None else (section.fields, section.propagate_opt_out)
 
 
+def _oauth_token(client_id: str) -> Callable[[], str]:
+    """A function that gives the client's HubSpot access token, renewed when it is old. Its failures
+    are the adapter's own, so the source reports them as it reports any HubSpot failure."""
+    from sales_app import hubspot_wiring  # not at import: it needs the whole application
+
+    service = hubspot_wiring.installed()
+    if service is None:
+        raise ValueError("HubSpot access is not available")
+
+    def token() -> str:
+        try:
+            return service.access_token(client_id)
+        except hubspot_wiring.HubSpotAccessError as error:
+            if error.reauthorise:
+                raise HubSpotAuthError(str(error)) from None
+            raise HubSpotUnavailableError(str(error)) from None
+
+    return token
+
+
+def _credential(config: ClientConfig) -> str | Callable[[], str]:
+    """The client's own HubSpot authorisation when it holds one, else the Private App token."""
+    if HUBSPOT_OAUTH_GRANT in config.secrets and config.secrets.get(HUBSPOT_OAUTH_GRANT) == "1":
+        return _oauth_token(config.client_id)
+    if HUBSPOT_ACCESS_TOKEN in config.secrets:
+        return config.secrets.get(HUBSPOT_ACCESS_TOKEN)
+    raise ValueError("the HubSpot access token is not configured")
+
+
 def _build(
     config: ClientConfig, raw_settings: Mapping[str, Any], namespace: str, *, writeback: bool
 ) -> CrmProspectSource:
@@ -548,17 +584,16 @@ def _build(
             for problem in error.errors()
         )
         raise ValueError(f"source.settings: {problems}") from None
-    if HUBSPOT_ACCESS_TOKEN not in config.secrets:
-        raise ValueError("the HubSpot access token is not configured")
+    credential = _credential(config)
     section = settings.writeback if writeback else None
     if section is not None:
         names = list(section.properties.values())
         if section.status:
             names.append(settings.status_property)
-        client = HubSpotClient(config.secrets.get(HUBSPOT_ACCESS_TOKEN), writable_properties=names)
+        client = HubSpotClient(credential, writable_properties=names)
     else:
         settings = settings.model_copy(update={"writeback": None})  # a read-only source
-        client = HubSpotClient(config.secrets.get(HUBSPOT_ACCESS_TOKEN))
+        client = HubSpotClient(credential)
     return CrmProspectSource(
         HubSpotReader(client, settings),
         client_id=config.client_id,

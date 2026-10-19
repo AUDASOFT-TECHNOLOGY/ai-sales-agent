@@ -51,7 +51,7 @@ from sales_app.config.schema import DEFAULT_SOURCE
 from sales_app.config_store import ConfigStoreError
 from sales_app.secret_store import ScopeKind, SecretStoreError, client_scope
 from sales_app.source_checks import SourceCheckStoreCorruptError, SourceCheckStoreUnavailableError
-from sales_app.wiring.providers import ProviderKind, Requirement, google_sheets
+from sales_app.wiring.providers import ProviderKind, Requirement, google_sheets, hubspot
 from sales_app.wiring.providers.types import CredentialDeclaration, ProviderDescriptor
 
 PLACEHOLDER_MODELS = ("", "todo")
@@ -241,6 +241,49 @@ def _client_credentials(descriptor: ProviderDescriptor) -> tuple[CredentialDecla
     )
 
 
+def oauth_state(application: Application, client_id: str, provider: str) -> str | None:
+    """Where the client's own authorisation of this source stands (`connected`, `reauth_required`,
+    `not_connected`, `unavailable`), or None for a source that is not connected that way."""
+    if provider == hubspot.KEY and application.hubspot_access is not None:
+        return application.hubspot_access.connection.status(client_id).state
+    return None
+
+
+def _oauth_mark(application: Application, client_id: str, provider: str) -> str | None:
+    """What identifies the client's own authorisation in a test fingerprint (its state and account,
+    never a token): a test made before a reconnection, or another account, stops counting."""
+    if provider == hubspot.KEY and application.hubspot_access is not None:
+        held = application.hubspot_access.connection.status(client_id)
+        return f"{held.state}|{held.address or ''}"
+    return None
+
+
+def access_problem(
+    application: Application, client_id: str, descriptor: ProviderDescriptor
+) -> str | None:
+    """Why the secret a source needs from the client is not in place (a sentence for the client), or
+    None. The client's own authorisation counts as the secret; a stored token is the older way."""
+    state = oauth_state(application, client_id, descriptor.key)
+    if state == "connected":
+        return None
+    for credential in _client_credentials(descriptor):
+        try:
+            stored = application.credentials.status(
+                client_scope(client_id), credential.key
+            ).configured
+        except SecretStoreError:
+            stored = False
+        if stored:
+            continue
+        if state == "reauth_required":
+            return f"authorise {descriptor.label} again in your data sources"
+        if state == "not_connected" and application.hubspot_access is not None:
+            if application.hubspot_access.configured():
+                return f"connect your {descriptor.label} account in your data sources"
+        return f"{descriptor.label} is being connected by the platform. There is nothing for you to do"
+    return None
+
+
 def source_fingerprint(
     application: Application, client_id: str, provider: str, document: Mapping[str, Any]
 ) -> str:
@@ -257,6 +300,7 @@ def source_fingerprint(
             parts[credential.key] = status.updated_at.isoformat() if status.updated_at else None
         except SecretStoreError:
             parts[credential.key] = "unreadable"
+    parts["oauth"] = _oauth_mark(application, client_id, provider)
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -300,15 +344,9 @@ def _source_problem(
         return "The prospect source you chose is not available. Choose another one."
     if not descriptor.runnable:
         return f"{descriptor.label} cannot run your agent yet. Choose another source to start it."
-    for credential in _client_credentials(descriptor):
-        try:
-            stored = application.credentials.status(
-                client_scope(client_id), credential.key
-            ).configured
-        except SecretStoreError:
-            stored = False
-        if not stored:
-            return f"{descriptor.label} is being connected by the platform. There is nothing for you to do."
+    problem = access_problem(application, client_id, descriptor)
+    if problem is not None:
+        return problem[0].upper() + problem[1:] + "."
     if not _operator_settings_ok(descriptor, document):
         return f"{descriptor.label} is not set up on the platform side yet. Contact your administrator."
     try:
@@ -375,6 +413,10 @@ def lane_sources_fingerprint(
             item["prospects_tab"] = str(settings.get("prospects_tab", "Prospects"))
             if settings.get("writeback"):  # the columns written to are part of what was tested
                 item["writeback"] = _plain(settings["writeback"])
+        elif provider == hubspot.KEY:
+            for key in ("status_property", "status_mapping", "writeback"):
+                if settings.get(key):  # what its statuses mean and where results go are tested
+                    item[key] = _plain(settings[key])
         descriptor = application.provider_registry.get(provider)
         for credential in _client_credentials(descriptor) if descriptor is not None else ():
             try:
@@ -382,6 +424,7 @@ def lane_sources_fingerprint(
                 item[credential.key] = status.updated_at.isoformat() if status.updated_at else None
             except SecretStoreError:
                 item[credential.key] = "unreadable"
+        item["oauth"] = _oauth_mark(application, client_id, provider)
         parts.append(item)
     parts.sort(key=lambda item: item["id"])
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode("utf-8")).hexdigest()
@@ -410,15 +453,9 @@ def lane_source_static_problem(
         return "the prospect source is not available"
     if not descriptor.runnable or descriptor.build_instance is None:
         return f"{descriptor.label} cannot run your agent yet"
-    for credential in _client_credentials(descriptor):
-        try:
-            stored = application.credentials.status(
-                client_scope(client_id), credential.key
-            ).configured
-        except SecretStoreError:
-            stored = False
-        if not stored:
-            return f"{descriptor.label} is being connected by the platform: nothing for you to do"
+    problem = access_problem(application, client_id, descriptor)
+    if problem is not None:
+        return problem
     model = descriptor.settings_models.get(ProviderKind.SOURCE)
     if model is not None:
         settings = source.get("settings")

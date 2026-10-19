@@ -167,3 +167,44 @@ describe("Conversations (live)", () => {
     await waitFor(() => expect(logout).toHaveBeenCalled());
   });
 });
+
+describe("Conversations (history by prospect, channel and day)", () => {
+  it("puts the prospects with the most recent exchange first and says channel and date", async () => {
+    const recent = { ...row("p2", "Bea"), preferred_channel: "email", last_inbound_at: "2026-10-12T10:00:00Z" };
+    const older = { ...row("p1", "Amel"), preferred_channel: "telegram", last_contacted_at: "2026-10-01T10:00:00Z" };
+    stub({ [LIST]: () => json(200, prospects([older, recent, row("p3", "Zed")])) });
+    renderPage("/conversations");
+    await screen.findByText("Amel");
+    const names = screen.getAllByRole("link").map((a) => a.textContent ?? "");
+    expect(names[0]).toContain("Bea");
+    expect(names[0]).toContain("email");
+    expect(names[1]).toContain("Amel");
+    expect(names[2]).toContain("Zed");
+  });
+
+  it("filters the list by channel", async () => {
+    const a = { ...row("p1", "Amel"), preferred_channel: "telegram" };
+    const b = { ...row("p2", "Bea"), preferred_channel: "email" };
+    stub({ [LIST]: () => json(200, prospects([a, b])) });
+    renderPage("/conversations");
+    await screen.findByText("Amel");
+    await userEvent.selectOptions(screen.getByLabelText("Channel"), "email");
+    expect(screen.queryByText("Amel")).not.toBeInTheDocument();
+    expect(screen.getByText("Bea")).toBeInTheDocument();
+  });
+
+  it("separates the messages by day", async () => {
+    stub({
+      [LIST]: () => json(200, prospects([row("p1", "Amel")])),
+      "GET /client/v1/conversations/p1": () =>
+        json(200, history("p1", [
+          message("m1", "outbound", "Hello", 1),
+          { id: "m2", direction: "inbound", channel: "email", text: "Hi", timestamp: "2026-10-11T09:00:00Z" },
+        ])),
+    });
+    renderPage("/conversations/p1");
+    await screen.findByTestId("message-m1");
+    expect(screen.getByTestId("day-2026-10-10")).toBeInTheDocument();
+    expect(screen.getByTestId("day-2026-10-11")).toBeInTheDocument();
+  });
+});

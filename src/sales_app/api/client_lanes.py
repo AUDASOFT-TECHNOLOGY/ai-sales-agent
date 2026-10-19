@@ -37,6 +37,17 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from sales_app.api.admin_clients import client_wiring_and_document, publish_client_settings
 from sales_app.api.client import make_current_client_dependency
 from sales_app.api.client_agent import runs_lanes, source_provider, switch_available
+from sales_app.api.client_lane_sync import (
+    RESULTS,
+    ResultOption,
+    SyncResponse,
+    UpdateSyncRequest,
+    hubspot_changes,
+    hubspot_view,
+    sheets_block,
+    sheets_view,
+    state_of,
+)
 from sales_app.api.client_source import sheets_credentials_file
 from sales_app.bootstrap import Application
 from sales_app.channel_status import allowed_channels, channel_problem, channel_provider_of
@@ -45,7 +56,7 @@ from sales_app.config import validate_settings_document
 from sales_app.config.lanes import DEFAULT_LANE
 from sales_app.config_store import ConfigStoreError
 from sales_app.config_store.models import thaw_document
-from sales_app.wiring.providers import ProviderDescriptor, ProviderKind, google_sheets
+from sales_app.wiring.providers import ProviderDescriptor, ProviderKind, google_sheets, hubspot
 from sales_core.contracts import ALL_PRODUCTS
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2048)]
@@ -522,6 +533,120 @@ def create_client_lanes_router(application: Application) -> APIRouter:
                 note="client lane changed",
             )
             return lane_of(client_id, lane_id)
+        except ConfigStoreError:
+            raise HTTPException(503, "settings are temporarily unavailable") from None
+
+    # ---- the results copied back into the lane's source ------------------------------------
+
+    def sync_of(
+        client_id: str, lane_id: str, document: Mapping[str, Any], version: int | None
+    ) -> SyncResponse:
+        lanes = _mappings(document["lanes"]) if runs_lanes(document) else []
+        lane = next((lane for lane in lanes if lane.get("id") == lane_id), None)
+        if lane is None:
+            raise HTTPException(404, "no such lane")
+        source = next(
+            (s for s in _mappings(document["sources"]) if s.get("id") == lane.get("source")), {}
+        )
+        provider = str(source.get("provider", ""))
+        settings = source.get("settings")
+        settings = settings if isinstance(settings, Mapping) else {}
+        supported = provider in (google_sheets.KEY, hubspot.KEY)
+        sheets = sheets_view(settings) if provider == google_sheets.KEY else None
+        crm = hubspot_view(settings) if provider == hubspot.KEY else None
+        has_block = isinstance(settings.get("writeback"), Mapping)
+        switch = application.writeback_switch
+        platform_on = switch.enabled() if switch is not None else False
+        state, message = state_of(has_block=has_block, deployment_enabled=platform_on)
+        if not supported:
+            message = "This source cannot receive results."
+        return SyncResponse(
+            version=version,
+            lane=lane_id,
+            source=provider,
+            supported=supported,
+            state=state,
+            message=message,
+            deployment_enabled=platform_on,
+            results=[
+                ResultOption(key=key, label=label)
+                for key, label in RESULTS
+                if provider == hubspot.KEY or key != "summary"  # a recap goes to a HubSpot property
+            ],
+            google_sheets=sheets,
+            hubspot=crm,
+        )
+
+    @router.get("/lanes/{lane_id}/sync", response_model=SyncResponse)
+    def get_sync(lane_id: str, client: ClientProfile = Depends(get_current_client)) -> SyncResponse:
+        try:
+            _, document, version = current_state(client.client_id)
+            return sync_of(client.client_id, lane_id, document, version)
+        except ConfigStoreError:
+            raise HTTPException(503, "settings are temporarily unavailable") from None
+
+    @router.put("/lanes/{lane_id}/sync", response_model=SyncResponse)
+    async def put_sync(
+        lane_id: str, request: Request, client: ClientProfile = Depends(get_current_client)
+    ) -> SyncResponse:
+        body = await _read(request, UpdateSyncRequest)
+        return await run_in_threadpool(update_sync, lane_id, body, client)
+
+    def update_sync(lane_id: str, body: UpdateSyncRequest, client: ClientProfile) -> SyncResponse:
+        client_id = client.client_id
+        if body.google_sheets is not None and body.hubspot is not None:
+            raise HTTPException(422, "give the settings of one source only")
+        try:
+            raw, document, version = current_state(client_id)
+            require_lanes(document, version, body.expected_version)
+            sources = _mappings(document["sources"])
+            lanes = _mappings(document["lanes"])
+            lane = next((lane for lane in lanes if lane.get("id") == lane_id), None)
+            if lane is None:
+                raise HTTPException(404, "no such lane")
+            source = next(s for s in sources if s.get("id") == lane.get("source"))
+            provider = source.get("provider")
+            settings = dict(source.get("settings") or {})
+            if provider == google_sheets.KEY:
+                if body.hubspot is not None:
+                    raise HTTPException(422, "hubspot settings belong to a HubSpot source")
+                if not body.enabled:
+                    settings.pop("writeback", None)
+                elif body.google_sheets is None:
+                    raise HTTPException(422, "name the columns Revansa may fill")
+                else:
+                    settings["writeback"] = sheets_block(body.google_sheets)
+            elif provider == hubspot.KEY:
+                if body.google_sheets is not None:
+                    raise HTTPException(
+                        422, "google_sheets settings belong to a Google Sheets source"
+                    )
+                if not body.enabled:
+                    settings.pop("writeback", None)
+                elif body.hubspot is None:
+                    raise HTTPException(422, "name the HubSpot properties Revansa may fill")
+                else:
+                    changes = hubspot_changes(body.hubspot)
+                    if not changes:
+                        raise HTTPException(422, "no setting to change")
+                    settings.update(changes)
+            else:
+                raise HTTPException(422, "this source cannot receive results")
+            if settings != dict(source.get("settings") or {}):
+                source["settings"] = settings
+                # What leaves is copied, never who is contacted: the agent keeps running.
+                publish(
+                    client_id,
+                    raw,
+                    document,
+                    sources,
+                    lanes,
+                    expected=version,
+                    pause=False,
+                    note="client results copied back",
+                )
+            _, fresh, fresh_version = current_state(client_id)
+            return sync_of(client_id, lane_id, fresh, fresh_version)
         except ConfigStoreError:
             raise HTTPException(503, "settings are temporarily unavailable") from None
 

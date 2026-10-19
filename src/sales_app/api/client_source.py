@@ -41,6 +41,7 @@ from sales_app.api.client_agent import (
     lane_of_source,
     lane_source_entries,
     lane_sources_fingerprint,
+    oauth_state,
     runs_lanes,
     sheets_of,
     source_fingerprint,
@@ -313,10 +314,12 @@ def create_client_source_router(
         return source_fingerprint(application, client_id, provider, document)
 
     def access_state(
-        client_id: str, declaration: CredentialDeclaration
+        client_id: str, declaration: CredentialDeclaration, provider: str
     ) -> Literal["ready", "waiting_platform"]:
         """Whether the platform has connected what this source needs. A client never provides it:
         it only learns whether it is in place."""
+        if oauth_state(application, client_id, provider) == "connected":
+            return "ready"  # the client's own authorisation
         try:
             status = application.credentials.status(client_scope(client_id), declaration.key)
         except SecretStoreError:
@@ -356,7 +359,7 @@ def create_client_source_router(
                 if provider == SHEETS and not lanes  # a lane client's spreadsheets: `/lanes`
                 else None
             ),
-            access=access_state(client_id, declaration) if declaration else None,
+            access=access_state(client_id, declaration, provider) if declaration else None,
             last_test=(
                 LastTestResponse(
                     ok=check.ok,
@@ -470,6 +473,23 @@ def create_client_source_router(
 
     # ---- the test -------------------------------------------------------------------------
 
+    def hubspot_token(client_id: str) -> str | None:
+        """The access token a HubSpot check uses: the client's own authorisation (a fresh access
+        token), else the stored Private App token. None: nothing to read with."""
+        access = application.hubspot_access
+        if access is not None and oauth_state(application, client_id, hubspot.KEY) in (
+            "connected",
+            "reauth_required",
+        ):
+            try:
+                return access.token_source(client_id).access_token()
+            except Exception:  # noqa: BLE001 - a grant that cannot give a token is "not connected"
+                return None
+        try:
+            return application.credentials.reveal(client_scope(client_id), HUBSPOT_ACCESS_TOKEN)
+        except SecretStoreError:
+            raise HTTPException(503, "credential storage is temporarily unavailable") from None
+
     def run_check(client_id: str, provider: str, document: Mapping[str, Any]) -> ConnectionResult:
         if provider == SHEETS:
             spreadsheet_id, prospects_tab = sheets_of(document)
@@ -479,13 +499,7 @@ def create_client_source_router(
                 prospects_tab=prospects_tab,
             )
         if provider == hubspot.KEY:
-            try:
-                token = application.credentials.reveal(
-                    client_scope(client_id), HUBSPOT_ACCESS_TOKEN
-                )
-            except SecretStoreError:
-                raise HTTPException(503, "credential storage is temporarily unavailable") from None
-            return check_hubspot(access_token=token, http=http)
+            return check_hubspot(access_token=hubspot_token(client_id), http=http)
         return ConnectionResult(False, "There is no connection check for this source yet.")
 
     def run_lane_checks(client_id: str, document: Mapping[str, Any]) -> SourceTestResponse:
@@ -506,15 +520,7 @@ def create_client_source_router(
                     writeback_headers=_writeback_headers(settings),
                 )
             elif provider == hubspot.KEY:
-                try:
-                    token = application.credentials.reveal(
-                        client_scope(client_id), HUBSPOT_ACCESS_TOKEN
-                    )
-                except SecretStoreError:
-                    raise HTTPException(
-                        503, "credential storage is temporarily unavailable"
-                    ) from None
-                result = check_hubspot(access_token=token, http=http)
+                result = check_hubspot(access_token=hubspot_token(client_id), http=http)
             else:
                 result = nothing
             results.append(LaneSourceTestResponse(lane=lane, ok=result.ok, message=result.message))

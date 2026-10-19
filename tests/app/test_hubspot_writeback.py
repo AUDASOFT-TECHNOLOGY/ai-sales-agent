@@ -961,3 +961,63 @@ def test_a_hubspot_source_and_another_source_of_the_same_client_do_not_interfere
     assert summary.not_ready == 1 and summary.applied == 1
     assert env.hub.value("1", "hs_lead_status") == "UNQUALIFIED"
     assert {str(e.prospect_id) for e in env.ledger.entries()} == {"hs_a:1"}
+
+
+# ---- the commercial recap ------------------------------------------------------------------------
+
+
+def recap_env(hubs, **overrides):
+    from hubspot_writeback_support import DEFINITIONS
+
+    hub = FakeHubSpot(definitions={**DEFINITIONS, "revansa_summary": {"type": "string"}})
+    raw = settings(
+        writeback={"status": True, "properties": {**PROPERTIES, "summary": "revansa_summary"}},
+        **overrides,
+    )
+    return Env(hubs, hub, raw=raw)
+
+
+def test_a_commercial_recap_is_written_in_its_own_property_and_holds_no_personal_data(hubs):
+    env = recap_env(hubs)
+    env.hub.add("1", firstname="Ada", email="ada@example.org")
+    env.revansa(
+        "1",
+        S.ACTIVE,
+        last_contacted_at=T0,
+        last_inbound_at=T0 - timedelta(hours=3),
+        follow_up_count=2,
+        next_action_type="follow_up",
+        next_action_due_at=T0 + timedelta(days=2),
+    )
+    env.syncer.run_once()
+    text = env.hub.value("1", "revansa_summary")
+    assert text == (
+        "Revansa - status: active; follow-ups: 2; last message: 2026-03-01; "
+        "last reply: 2026-03-01; next: follow_up on 2026-03-03"
+    )
+    assert "Ada" not in text and "@" not in text and len(text) <= 240
+
+
+def test_the_recap_follows_revansa_but_never_replaces_a_persons_own_text(hubs):
+    env = recap_env(hubs)
+    env.hub.add("1")
+    env.hub.add("2", revansa_summary="Call back after the holidays (Sam)")
+    env.revansa("1", S.ACTIVE, follow_up_count=1)
+    env.revansa("2", S.ACTIVE, follow_up_count=1)
+    env.syncer.run_once()
+    first = env.hub.value("1", "revansa_summary")
+    assert first.endswith("follow-ups: 1")
+    assert env.hub.value("2", "revansa_summary") == "Call back after the holidays (Sam)"
+    env.revansa("1", S.ACTIVE, follow_up_count=2)  # Revansa moves on: its own text is renewed
+    env.clock.advance(hours=3)
+    env.syncer.run_once()
+    assert env.hub.value("1", "revansa_summary").endswith("follow-ups: 2")
+    assert env.hub.value("2", "revansa_summary") == "Call back after the holidays (Sam)"
+
+
+def test_a_recap_with_nothing_to_say_is_not_written(hubs):
+    env = recap_env(hubs)
+    env.hub.add("1")
+    env.revansa("1", None)
+    env.syncer.run_once()
+    assert env.hub.value("1", "revansa_summary") in (None, "")

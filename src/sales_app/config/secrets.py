@@ -96,10 +96,34 @@ SHEETS_ACCOUNT_ADDRESS = "sheets.account_address"
 SHEETS_REAUTH_REQUIRED = "sheets.reauth_required"
 SHEETS_OAUTH_GRANT = "sheets.oauth_grant"
 
+# The platform's write-back switch (global, not a credential, never in the Admin catalog): "true" or
+# "false"; absent means the deployment default. See `sales_app.writeback_switch`.
+WRITEBACK_ENABLED = "writeback.enabled"
+
+# The platform's HubSpot application (a "public app" in a HubSpot developer account; global, Admin only,
+# write-only): what lets each client connect its own HubSpot account by OAuth.
+HUBSPOT_OAUTH_CLIENT_ID = "hubspot.oauth_client_id"
+HUBSPOT_OAUTH_CLIENT_SECRET = "hubspot.oauth_client_secret"
+HUBSPOT_OAUTH_STATE_KEY = "hubspot.oauth_state_key"  # signs the OAuth `state`; at least 16 characters
+# One client's HubSpot grant (client scope). Written only by the OAuth callback, never through the
+# Admin credentials API (not in the credential catalog): the refresh token, the connected account and
+# the mark that HubSpot needs the person to authorise again. `HUBSPOT_OAUTH_GRANT` is not stored: it is
+# resolved into a client's secrets ("1") when that client holds a usable grant.
+HUBSPOT_REFRESH_TOKEN = "hubspot.refresh_token"
+HUBSPOT_ACCOUNT_ADDRESS = "hubspot.account_address"
+HUBSPOT_REAUTH_REQUIRED = "hubspot.reauth_required"
+HUBSPOT_OAUTH_GRANT = "hubspot.oauth_grant"
+
 # The credential a client's own source needs, by the source's provider key: (key, label). Only a
 # client that chose that source resolves it; every other client's secrets are what they were.
 SOURCE_CREDENTIALS: dict[str, tuple[str, str]] = {
     "hubspot": (HUBSPOT_ACCESS_TOKEN, "HubSpot access token"),
+}
+
+# A CRM source whose client may also connect with its own authorisation: (refresh token key, reauth
+# mark key, flag put in the client's secrets when the grant is usable), by the source's provider key.
+SOURCE_GRANTS: dict[str, tuple[str, str, str]] = {
+    "hubspot": (HUBSPOT_REFRESH_TOKEN, HUBSPOT_REAUTH_REQUIRED, HUBSPOT_OAUTH_GRANT),
 }
 
 _MIN_REDACTED_LENGTH = 8  # shorter values (an API version) would blank out ordinary words

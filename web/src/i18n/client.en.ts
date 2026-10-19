@@ -43,6 +43,9 @@ const common = {
 const shell = {
   "rv.nav.home": "Home",
   "rv.nav.prospects": "Prospects",
+  "rv.convo.channel": "Channel",
+  "rv.convo.allChannels": "All channels",
+  "rv.nav.conversations": "Conversations",
   "rv.nav.review": "To review",
   "rv.nav.offer": "My offer",
   "rv.nav.connections": "Connections",

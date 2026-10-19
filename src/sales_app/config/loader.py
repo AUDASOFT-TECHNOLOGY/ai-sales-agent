@@ -59,6 +59,7 @@ from sales_app.config.secrets import (
     SHEETS_REAUTH_REQUIRED,
     SHEETS_REFRESH_TOKEN,
     SOURCE_CREDENTIALS,
+    SOURCE_GRANTS,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_WEBHOOK_SECRET,
     WHATSAPP_ACCESS_TOKEN,
@@ -493,10 +494,12 @@ def _resolve_secrets(
     # access; it needs the credential its own source declares, from the credential store only.
     if spec.sources is not None:  # lanes: every source says what it needs, once per provider
         providers = tuple(dict.fromkeys(source.provider for source in spec.sources))
+        source_providers = providers
         sheets_used = spec.sheets.provider in providers
         source_credentials = [SOURCE_CREDENTIALS[p] for p in providers if p in SOURCE_CREDENTIALS]
     else:
         sheets_used = not spec.source_apart_from_store
+        source_providers = (spec.source_provider,)
         source_credentials = (
             [SOURCE_CREDENTIALS[spec.source_provider]]
             if not sheets_used and spec.source_provider in SOURCE_CREDENTIALS
@@ -523,7 +526,24 @@ def _resolve_secrets(
     sheets_grant = _sheets_grant_state(secret_store, client) if sheets_used else None
     if sheets_grant == "usable":
         values[SHEETS_OAUTH_GRANT] = "1"
+    # Same for a CRM source: the client's own authorisation first, the stored token after.
+    source_grants: dict[str, Literal["usable", "reauth"]] = {}
+    for provider in source_providers:
+        refresh_key, reauth_key, flag = SOURCE_GRANTS.get(provider, (None, None, None))
+        if refresh_key and reauth_key and flag and provider in SOURCE_CREDENTIALS:
+            state = _grant_state(secret_store, client, refresh_key, reauth_key)
+            if state is not None:
+                source_grants[SOURCE_CREDENTIALS[provider][0]] = state
+                if state == "usable":
+                    values[flag] = "1"
     for key, label, scope, variable, required in wanted:
+        if key in source_grants:
+            value = lookup(scope, key, variable)
+            if value:
+                values[key] = value
+            elif source_grants[key] == "reauth":
+                missing.append(f"{label.removesuffix(' access token')} must be authorised again")
+            continue
         if key == SHEETS_CREDENTIALS_FILE and sheets_grant is not None:
             value = lookup(scope, key, variable)
             if value:
@@ -595,13 +615,20 @@ def _resolve_secrets(
     return Secrets(values), missing
 
 
+def _grant_state(
+    secret_store: SecretStore | None, client: str, refresh_key: str, reauth_key: str
+) -> Literal["usable", "reauth"] | None:
+    """`None`: the client has not connected this service with its own authorisation."""
+    if secret_store is None or secret_store.entry(client, refresh_key) is None:
+        return None
+    return "reauth" if secret_store.get(client, reauth_key) == "1" else "usable"
+
+
 def _sheets_grant_state(
     secret_store: SecretStore | None, client: str
 ) -> Literal["usable", "reauth"] | None:
     """`None`: the client has not connected Google Sheets with its own authorisation."""
-    if secret_store is None or secret_store.entry(client, SHEETS_REFRESH_TOKEN) is None:
-        return None
-    return "reauth" if secret_store.get(client, SHEETS_REAUTH_REQUIRED) == "1" else "usable"
+    return _grant_state(secret_store, client, SHEETS_REFRESH_TOKEN, SHEETS_REAUTH_REQUIRED)
 
 
 def _spreadsheets(client: ClientConfig) -> list[str]:

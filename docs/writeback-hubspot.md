@@ -146,3 +146,18 @@ scopes, and the five properties created by hand with the right types:
    each contact before writing it) and the duration of a pass on a realistic account;
 7. restart the application between two passes and confirm that nothing is written twice;
 8. check what HubSpot's own workflows do with the written status.
+
+## Update: client OAuth and the client's own write-back settings
+
+- **Connection.** A client connects its HubSpot account with OAuth (`/client/v1/hubspot-access`,
+  `src/sales_app/hubspot_wiring.py`): refresh token encrypted in the client's scope, access token
+  (30 min) renewed per request, `reauth_required` on revocation. The Admin enters the HubSpot app's
+  client id / secret / state key in Settings (global, write-only) and registers the redirect URL and
+  scopes shown there (`crm.objects.contacts.read`, `.write`, `crm.schemas.contacts.read`). The Private
+  App token remains a fallback for a client with no grant. Only one HubSpot account per client.
+- **Settings.** The client chooses the properties in
+  `PUT /client/v1/lanes/{lane}/sync`.
+  Same route for Google Sheets columns. `SALES_AGENT_WRITEBACK_ENABLED` stays the platform's master
+  switch: while off, the saved choice writes nothing and the client is told so.
+- **Not done:** conversation text is not sent to HubSpot (no notes/engagements), only the properties
+  above. Nothing here was tried against a real HubSpot account.

@@ -428,8 +428,8 @@ def check_hubspot(
             message = "HubSpot refused this access token."
         elif status == 403:
             message = (
-                "HubSpot accepted the token but it may not read contacts: give the Private App "
-                "the contacts read permission."
+                "HubSpot accepted the access but it may not read contacts: connect HubSpot again "
+                "and accept every permission."
             )
         elif status == 429:
             message = "HubSpot's rate limit is reached: try again in a moment."

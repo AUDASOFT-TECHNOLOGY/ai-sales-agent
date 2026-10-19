@@ -194,7 +194,7 @@ def default_builders(
     def channel_provider(descriptor) -> ChannelProvider:
         support = descriptor.channel
         build, build_inbox = descriptor.build, support.build_inbox
-        if descriptor.key == "email" and gmail is not None:
+        if Channel(support.kind) is Channel.EMAIL and gmail is not None:
             # The e-mail channel of a client in Gmail mode comes from the application's Gmail
             # service; the other modes are built exactly as before.
             build = lambda config: descriptor.build(config, gmail=gmail)

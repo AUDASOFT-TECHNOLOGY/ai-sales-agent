@@ -62,6 +62,9 @@ PLATFORM_GMAIL_KEYS = {
     "gmail.oauth_client_id",
     "gmail.oauth_client_secret",
     "gmail.oauth_state_key",
+    "hubspot.oauth_client_id",
+    "hubspot.oauth_client_secret",
+    "hubspot.oauth_state_key",
 }
 PLATFORM_MAIL_KEYS = {
     "email.platform_domain",

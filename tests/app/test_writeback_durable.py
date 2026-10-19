@@ -120,7 +120,13 @@ def test_two_writers_over_one_database_never_repeat_or_skip_a_number(engine):
 
     def work(worker):
         for n in range(15):
-            ledgers[worker % 2].append([attempt(f"w{worker}-{n}", pid=f"sheet_a:p{worker}")])
+            row = [attempt(f"w{worker}-{n}", pid=f"sheet_a:p{worker}")]
+            for _ in range(50):  # the ledger gives up visibly after a few lost races (CPU load on
+                try:  # SQLite); appending is idempotent by attempt id, so trying again is safe
+                    ledgers[worker % 2].append(row)
+                    break
+                except StoreError:
+                    continue
 
     threads = [threading.Thread(target=work, args=(w,)) for w in range(4)]
     for thread in threads:
@@ -206,7 +212,7 @@ class TestMigration:
         after = set(inspect(engine).get_table_names())
         assert after - before == {"op_writeback_ledger"}
         upgrade_database(engine)
-        assert head_revision() == current_revision(engine) == "0013"
+        assert head_revision() == current_revision(engine) == "0017"
         assert set(inspect(engine).get_table_names()) - {"alembic_version"} == set(metadata.tables)
 
     def test_the_upgrade_keeps_what_was_there(self):

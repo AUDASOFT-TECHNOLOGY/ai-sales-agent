@@ -23,7 +23,7 @@ written. No column is ever created.
 
 1. The deployment: `SALES_AGENT_WRITEBACK_ENABLED=true` (default `false`). Needs the SQL database:
    the attempts are kept in `op_writeback_ledger` (migration 0005).
-2. The source, in its settings, by the operator (the client cannot set it):
+2. The source, in its settings: the client chooses the columns in `PUT /client/v1/lanes/{lane}/sync` (Results button), or the operator writes them:
 
    ```yaml
    sources:

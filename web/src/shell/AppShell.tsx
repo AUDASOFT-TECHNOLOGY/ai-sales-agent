@@ -4,7 +4,7 @@
 
 import { Suspense, useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { CheckSquare, FileText, House, Link2, LogOut, Package, UserRound, Users } from "lucide-react";
+import { CheckSquare, FileText, House, Link2, LogOut, MessageSquare, Package, UserRound, Users } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { googleReturnOf } from "../client/ClientGmailCard";
@@ -23,13 +23,14 @@ interface NavEntry {
   to: string;
   key: MessageKey;
   icon: typeof House;
-  /** Other paths that belong to this entry (the conversation opened from a prospect). */
+  /** Other paths that belong to this entry. */
   also?: string[];
 }
 
 const NAV: NavEntry[] = [
   { to: "/home", key: "rv.nav.home", icon: House },
-  { to: "/prospects", key: "rv.nav.prospects", icon: Users, also: ["/conversations"] },
+  { to: "/prospects", key: "rv.nav.prospects", icon: Users },
+  { to: "/conversations", key: "rv.nav.conversations", icon: MessageSquare },
   { to: "/review", key: "rv.nav.review", icon: CheckSquare },
   { to: "/offer", key: "rv.nav.offer", icon: Package },
   { to: "/connections", key: "rv.nav.connections", icon: Link2 },

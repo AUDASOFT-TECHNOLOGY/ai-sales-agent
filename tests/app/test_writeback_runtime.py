@@ -164,10 +164,12 @@ def test_a_source_without_a_block_is_never_switched_on_by_the_deployment(deploy_
     assert Job.SYNC not in d.due("alpha")
 
 
-def test_the_default_deployment_and_settings_have_it_off():
+def test_the_deployment_default_is_on_but_nothing_is_written_without_a_support_or_a_block():
+    """The deployment default is ON (a forgotten flag is not a safety); a bare support, builders
+    without one, and any source without its own `writeback` block still write nothing."""
     from sales_app.settings import Settings
 
-    assert Settings().writeback_enabled is False
+    assert Settings().writeback_enabled is True
     assert WritebackSupport().enabled is False
     from sales_app.wiring import default_builders
 

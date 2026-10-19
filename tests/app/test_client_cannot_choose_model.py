@@ -77,6 +77,28 @@ CLIENT_ROUTES = {
     ("GET", "/client/v1/lanes/{lane_id}"),
     ("PUT", "/client/v1/lanes/{lane_id}"),
     ("DELETE", "/client/v1/lanes/{lane_id}"),
+    # Results copied back to the source, chosen per lane by the client (columns / properties).
+    ("GET", "/client/v1/lanes/{lane_id}/sync"),
+    ("PUT", "/client/v1/lanes/{lane_id}/sync"),
+    # The client's own authorisation of Google Sheets and HubSpot (consent on the provider's page;
+    # no token, password or key ever crosses these routes). Reviewed: no model, no provider key.
+    ("GET", "/client/v1/sheets-access"),
+    ("GET", "/client/v1/sheets-access/callback"),
+    ("POST", "/client/v1/sheets-access/start"),
+    ("POST", "/client/v1/sheets-access/disconnect"),
+    ("GET", "/client/v1/hubspot-access"),
+    ("GET", "/client/v1/hubspot-access/callback"),
+    ("POST", "/client/v1/hubspot-access/start"),
+    ("POST", "/client/v1/hubspot-access/disconnect"),
+    # Product documents the agent reads, and the payments the client confirms.
+    ("GET", "/client/v1/products/{product_id}/resources"),
+    ("POST", "/client/v1/products/{product_id}/resources/file"),
+    ("POST", "/client/v1/products/{product_id}/resources/link"),
+    ("DELETE", "/client/v1/products/{product_id}/resources/{resource_id}"),
+    ("GET", "/client/v1/products/{product_id}/resources/{resource_id}/download"),
+    ("POST", "/client/v1/products/{product_id}/resources/{resource_id}/retry"),
+    ("GET", "/client/v1/payments"),
+    ("POST", "/client/v1/payments/{prospect_id}/confirm"),
 }
 
 
@@ -185,7 +207,18 @@ TECHNICAL_FIELD = re.compile(
 # The client's own Google authorization (Gmail mode) is the one place it acts on a connection: it
 # consents on Google's page, which Revansa never sees the password of, and it can withdraw that
 # consent. Neither route takes or gives a token, a password or a server.
-OWN_GOOGLE_AUTHORIZATION = {"/client/v1/channel/google/disconnect"}
+OWN_GOOGLE_AUTHORIZATION = {
+    "/client/v1/channel/google/disconnect",
+    # The same kind of consent for Google Sheets and HubSpot (a click, then the provider's page).
+    "/client/v1/sheets-access",
+    "/client/v1/sheets-access/callback",
+    "/client/v1/sheets-access/start",
+    "/client/v1/sheets-access/disconnect",
+    "/client/v1/hubspot-access",
+    "/client/v1/hubspot-access/callback",
+    "/client/v1/hubspot-access/start",
+    "/client/v1/hubspot-access/disconnect",
+}
 # `mailbox_sync` is a status word about reading replies, not a mailbox setting.
 STATUS_FIELDS = {
     "/client/v1/channel/google": {"mailbox_sync"},

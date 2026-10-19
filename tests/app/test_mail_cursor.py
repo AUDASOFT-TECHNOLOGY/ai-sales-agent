@@ -97,6 +97,12 @@ class TestMigration0010:
             "payment_events",
             "daily_reports",
             "client_report_settings",
+            # 0014 (product resources), 0016 (secrets) and 0017 (consent events) come after as well.
+            "product_resources",
+            "product_resource_chunks",
+            "secrets",
+            "secret_audit",
+            "consent_events",
         }
         assert after - {"alembic_version"} == set(metadata.tables) - later
 

@@ -256,9 +256,19 @@ class TestACanonicalClientNamesItsBrainByKey:
         assert any("brain.settings" in error for error in result.errors)
 
     def test_settings_are_validated_by_the_installed_engine_descriptor(self, tmp_path):
-        result = resolve(tmp_path, canonical({"agent": "consultative", "settings": {}}), None)
+        # Settings the client wrote but that do not hold are an error. Settings not written yet
+        # ({}) are not: that client is awaiting its data (see test_a_client_with_no_settings...).
+        result = resolve(
+            tmp_path, canonical({"agent": "consultative", "settings": {"unknown_key": 1}}), None
+        )
         assert result.config is None
         assert any("brain.settings" in error for error in result.errors)
+
+    def test_a_client_with_no_commercial_settings_yet_is_awaiting_not_failing(self, tmp_path):
+        result = resolve(tmp_path, canonical({"agent": "consultative", "settings": {}}), None)
+        assert result.config is None
+        assert result.disabled is True
+        assert result.errors == ()
 
     def test_prepare_settings_uses_the_descriptor_for_an_agent(self):
         registry = discover_brains([entry("test_brain", descriptor(spec=ConsultativeSalesSpec()))])

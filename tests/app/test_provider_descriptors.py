@@ -447,6 +447,7 @@ class TestTheBuildersTheRuntimeUsesAreUnchanged:
                 "source_instances",  # E5: added last, with a default, so older callers are unchanged
                 "writeback",  # E9: the same, and None (off) unless the deployment builds it
                 "llm_usage",  # the LLM usage register of a client, None without a database
+                "knowledge",  # the product documents of a client, None without a database
                 "send_guards",  # the daily send cap of a client's metered channel, None without a database
             ]
         )

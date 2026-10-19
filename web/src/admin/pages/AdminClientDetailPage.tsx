@@ -18,6 +18,7 @@ import { AdminClientActivationCard } from "./AdminEmailActivation";
 import { AdminClientMailboxCard } from "./AdminClientMailboxCard";
 import { AdminClientTelegramCard } from "./AdminClientTelegramCard";
 import { AdminClientSendCapCard } from "./AdminClientSendCapCard";
+import { AdminClientSourcesCard } from "./AdminClientSourcesCard";
 import {
   AdminApiError,
   adminConnectClientTelegram,
@@ -343,6 +344,11 @@ function ClientSheet({
         <Glass level={1} className="admin-detail-card">
           <h3 className="t-label c-2">Daily email limit</h3>
           <AdminClientSendCapCard clientId={client.client_id} />
+        </Glass>
+
+        <Glass level={1} className="admin-detail-card">
+          <h3 className="t-label c-2">Prospect sources</h3>
+          <AdminClientSourcesCard clientId={client.client_id} />
         </Glass>
 
         <Glass level={1} className="admin-detail-card">

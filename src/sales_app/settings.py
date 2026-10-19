@@ -44,11 +44,14 @@ class Settings(BaseSettings):
     # files in admin_dir / profiles_dir / config_dir (the fallback kept during the move to a
     # database). The URL carries a password, so SecretStr keeps it out of any repr or log.
     database_url: SecretStr | None = None
-    # Writing Revansa's results back into a client's Google Sheet (see sales_app.wiring.writeback).
-    # OFF until the mechanism has been validated against a real Google Sheet: a source that carries
-    # a `writeback` block is still never written to while this is false.
-    # SALES_AGENT_WRITEBACK_ENABLED=true turns it on for the deployment; each source still has to ask.
-    writeback_enabled: bool = False
+    # Writing Revansa's results back into a client's Google Sheet or HubSpot (see
+    # sales_app.wiring.writeback). The deployment default is ON: the feature is part of Revansa, and a
+    # flag nobody remembers to set is not a safety. What keeps it safe is per source: nothing is written
+    # unless the client named the columns/properties one by one, identity fields are never written,
+    # and a database keeps the attempts. The kill switch is the Admin's (Settings -> Write-back, which
+    # overrides this value, see sales_app.writeback_switch); SALES_AGENT_WRITEBACK_ENABLED=false makes
+    # a deployment start with it off.
+    writeback_enabled: bool = True
     admin_session_ttl_hours: float = Field(default=24.0, gt=0)
     client_session_ttl_hours: float = Field(default=24.0, gt=0)
     # False only for local http development; a production deployment must keep this true so the

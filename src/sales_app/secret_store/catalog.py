@@ -175,6 +175,29 @@ CATALOG: tuple[CredentialSpec, ...] = (
         pattern=re.compile(r"^[!-~]{16,256}$"),
         rule="must be 16 to 256 printable characters without spaces",
     ),
+    # The platform's HubSpot application, for the clients who connect their own HubSpot account.
+    # Setting them is what turns the HubSpot connection on; they are never returned.
+    CredentialSpec(
+        "hubspot.oauth_client_id",
+        ScopeKind.GLOBAL,
+        "HubSpot app client id",
+        pattern=re.compile(r"^[!-~]{8,256}$"),
+        rule="must be 8 to 256 printable characters without spaces",
+    ),
+    CredentialSpec(
+        "hubspot.oauth_client_secret",
+        ScopeKind.GLOBAL,
+        "HubSpot app client secret",
+        pattern=re.compile(r"^[!-~]{8,256}$"),
+        rule="must be 8 to 256 printable characters without spaces",
+    ),
+    CredentialSpec(
+        "hubspot.oauth_state_key",
+        ScopeKind.GLOBAL,
+        "HubSpot OAuth state signing key",
+        pattern=re.compile(r"^[!-~]{16,256}$"),
+        rule="must be 16 to 256 printable characters without spaces",
+    ),
     # The servers of the mailboxes Revansa provides (OVH today). Only the servers: which mailbox a
     # client gets, and its password, are the client's own (`email.password`, client scope).
     CredentialSpec(

@@ -61,6 +61,38 @@ def _moment(value: datetime | None) -> datetime | None:
     return None if value is None else value.replace(microsecond=0)
 
 
+SUMMARY_MAX_CHARS = 240  # the ledger keeps at most 255
+
+
+def summary_of(state: ProspectState) -> str:
+    """A one-line commercial recap from what Revansa itself holds: the status, the sales stage, the
+    follow-ups, the dates of the last message and the last reply, the next action. Words and dates
+    only: never a name, a number, an address or a word of a conversation. Empty when Revansa has
+    nothing to say yet."""
+    schedule = state.schedule
+    parts: list[str] = []
+    if state.status is not None:
+        parts.append(f"status: {state.status.value}")
+    if state.stage:
+        parts.append(f"stage: {state.stage}")
+    if schedule.follow_up_count > 0:
+        parts.append(f"follow-ups: {schedule.follow_up_count}")
+    for label, moment in (
+        ("last message", schedule.last_contacted_at),
+        ("last reply", schedule.last_inbound_at),
+    ):
+        stamp = _moment(moment)
+        if stamp is not None:
+            parts.append(f"{label}: {stamp.astimezone(UTC).date().isoformat()}")
+    if schedule.next_action_type is not None:
+        due = _moment(schedule.next_action_due_at)
+        when = f" on {due.astimezone(UTC).date().isoformat()}" if due is not None else ""
+        parts.append(f"next: {schedule.next_action_type}{when}")
+    if not parts:
+        return ""
+    return ("Revansa - " + "; ".join(parts))[:SUMMARY_MAX_CHARS]
+
+
 def value_text(field: ProspectField, value: Any) -> ProspectStatus | str:
     """A value of a written-back field in the canonical form the ledger keeps.
 
@@ -77,6 +109,8 @@ def value_text(field: ProspectField, value: Any) -> ProspectStatus | str:
             return f"{action or ''}|{value_text(ProspectField.LAST_CONTACTED_AT, due)}"
         case ProspectField.FOLLOW_UP_COUNT:
             return "" if value is None else str(int(value))
+        case ProspectField.SUMMARY:
+            return "" if value is None else str(value)
         case _:
             moment = _moment(value)
             return "" if moment is None else moment.astimezone(UTC).isoformat(timespec="seconds")
@@ -213,6 +247,7 @@ WRITEBACK_ORDER = (
     ProspectField.LAST_INBOUND_AT,
     ProspectField.FOLLOW_UP_COUNT,
     ProspectField.NEXT_ACTION,
+    ProspectField.SUMMARY,
 )
 _MOMENTS = (ProspectField.LAST_CONTACTED_AT, ProspectField.LAST_INBOUND_AT)
 _NOTHING = (None, None)
@@ -311,6 +346,17 @@ def _wanted(
         if current == mine:
             return None, SkipReason.ALREADY_APPLIED
         return (mine, None) if current < mine else (None, SkipReason.NOT_ADVANCING)
+    if each is ProspectField.SUMMARY:
+        mine_summary = summary_of(state)
+        if mine_summary == "":
+            return None, SkipReason.NOTHING_TO_WRITE
+        theirs_summary = "" if current is None else str(current)
+        if theirs_summary == mine_summary:
+            return None, SkipReason.ALREADY_APPLIED
+        # Written over an empty cell, or over what Revansa itself wrote last: never over a person's text.
+        if theirs_summary == "" or theirs_summary == written():
+            return mine_summary, None
+        return None, SkipReason.OCCUPIED
     # the next action: type and due date, written and cleared together
     mine_text = value_text(each, (schedule.next_action_type, schedule.next_action_due_at))
     theirs_text = value_text(each, current)

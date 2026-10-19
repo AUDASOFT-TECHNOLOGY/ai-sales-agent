@@ -161,7 +161,7 @@ def test_an_admin_session_does_not_open_the_lane_routes(world):
 def test_no_route_takes_a_client_id(world, alpha):
     paths = alpha.get("/openapi.json").json()["paths"]
     mine = [p for p in paths if p.startswith(LANES)]
-    assert set(mine) == {LANES, f"{LANES}/{{lane_id}}"}
+    assert set(mine) == {LANES, f"{LANES}/{{lane_id}}", f"{LANES}/{{lane_id}}/sync"}
     for path in mine:
         for operation in paths[path].values():
             assert {p["name"] for p in operation.get("parameters", []) if p["in"] == "path"} <= {

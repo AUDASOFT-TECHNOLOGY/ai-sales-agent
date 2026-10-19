@@ -28,7 +28,10 @@ import {
   adminDeleteOpenAIModel,
   adminListOpenAIModels,
   adminEmailServiceStatus,
+  adminGetWriteback,
   adminGmailPlatformStatus,
+  adminSetWriteback,
+  adminHubSpotPlatformStatus,
   adminSetEmailForNewClients,
   adminTestEmailImap,
   adminTestEmailServers,
@@ -39,6 +42,8 @@ import {
   type Credential,
   type EmailServiceStatus,
   type GmailPlatformStatus,
+  type WritebackSwitch,
+  type HubSpotPlatformStatus,
   type OpenAIModel,
 } from "../api";
 
@@ -79,6 +84,12 @@ const GMAIL_FIELDS: FieldDef[] = [
   { key: "gmail.oauth_state_key", label: "State signing key", help: "At least 16 random characters. Signs the return from Google. Stored encrypted." },
 ];
 
+const HUBSPOT_FIELDS: FieldDef[] = [
+  { key: "hubspot.oauth_client_id", label: "HubSpot app client id", help: "From the HubSpot developer account. Stored encrypted. Never shown again once saved." },
+  { key: "hubspot.oauth_client_secret", label: "HubSpot app client secret", help: "Stored encrypted. Never shown again once saved." },
+  { key: "hubspot.oauth_state_key", label: "State signing key", help: "At least 16 random characters. Signs the return from HubSpot. Stored encrypted." },
+];
+
 const META_GLOBAL_FIELDS: FieldDef[] = [
   { key: "whatsapp.app_secret", label: "App Secret", help: "Revansa-wide. Signs the webhook calls Meta sends." },
   { key: "whatsapp.verify_token", label: "Verify Token", help: "Revansa-wide. The token you give Meta when registering the webhook." },
@@ -100,6 +111,8 @@ export function AdminSettingsPage() {
       <MetaSection canEdit={canEdit} />
       <EmailSection canEdit={canEdit} />
       <GmailSection canEdit={canEdit} />
+      <HubSpotSection canEdit={canEdit} />
+      <WritebackSection canEdit={canEdit} />
       <MuseSparkSection />
     </div>
   );
@@ -385,7 +398,13 @@ function GmailSection({ canEdit }: { canEdit: boolean }) {
       ) : null}
       {status?.redirect_uri ? (
         <p className="c-3 t-body-sm">
-          Authorised redirect URI to enter in Google Cloud: <code>{status.redirect_uri}</code>
+          Authorised redirect URIs to enter in Google Cloud (same OAuth client): <code>{status.redirect_uri}</code>
+          {status.sheets_redirect_uri ? (
+            <>
+              {" "}
+              and, for Google Sheets, <code>{status.sheets_redirect_uri}</code>
+            </>
+          ) : null}
         </p>
       ) : (
         <p className="c-3 t-body-sm">
@@ -397,6 +416,125 @@ function GmailSection({ canEdit }: { canEdit: boolean }) {
         Reading and sending mail uses a restricted Google scope: until Google has verified the application, only the test users
         you list in Google Cloud (at most 100) can connect.
       </p>
+    </Glass>
+  );
+}
+
+// ---- Write-back (results copied into the clients' own sheets and HubSpot) -----------------------
+
+function WritebackSection({ canEdit }: { canEdit: boolean }) {
+  const [state, setState] = useState<WritebackSwitch | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    adminGetWriteback()
+      .then(setState)
+      .catch(() => setState(null));
+  }, []);
+  async function change(value: boolean | null) {
+    setBusy(true);
+    setError(null);
+    try {
+      setState(await adminSetWriteback(value));
+    } catch {
+      setError("Could not change the write-back switch.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Glass level={1} className="admin-settings__card" aria-labelledby="settings-writeback">
+      <div className="admin-settings__head">
+        <h2 className="t-h2" id="settings-writeback">
+          Write-back (results in the clients&apos; sources)
+        </h2>
+        <span className="admin-settings__status">
+          <span className="c-3 t-body-sm">State</span>
+          <Chip tint={state?.enabled ? "success" : "neutral"}>{state ? (state.enabled ? "On" : "Off") : "Unknown"}</Chip>
+        </span>
+      </div>
+      <p className="c-2 t-body-sm">
+        Master switch for copying Revansa&apos;s results (status, last contact, follow-ups) into a client&apos;s Google Sheet or HubSpot.
+        Turning it on writes nothing by itself: a source is written only when its client named the columns or properties, and never
+        a name, phone number or e-mail address.
+      </p>
+      {state ? (
+        <p className="c-3 t-body-sm" data-testid="writeback-state">
+          {state.note} Decided by: {state.decided_by === "admin" ? "an administrator" : "the deployment (SALES_AGENT_WRITEBACK_ENABLED)"}.
+          {state.needs_database ? " No database is configured: no source can be written back." : ""}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="admin-alert admin-alert--danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="row">
+        <Button size="sm" loading={busy} onClick={() => void change(true)} disabled={!canEdit || state?.enabled === true} disabledReason={!canEdit ? "Only an owner can change it." : undefined}>
+          Turn on
+        </Button>
+        <Button size="sm" loading={busy} onClick={() => void change(false)} disabled={!canEdit || state?.enabled === false} disabledReason={!canEdit ? "Only an owner can change it." : undefined}>
+          Turn off
+        </Button>
+        {state?.decided_by === "admin" ? (
+          <Button size="sm" variant="ghost" loading={busy} onClick={() => void change(null)} disabled={!canEdit}>
+            Follow the deployment
+          </Button>
+        ) : null}
+      </div>
+    </Glass>
+  );
+}
+
+// ---- HubSpot (clients connecting their own account) --------------------------------------------
+
+function HubSpotSection({ canEdit }: { canEdit: boolean }) {
+  const store = useGlobalCredentials();
+  const [status, setStatus] = useState<HubSpotPlatformStatus | null>(null);
+  const credentialsSeen = store.credentials.map((c) => `${c.key}:${c.configured}`).join(",");
+  useEffect(() => {
+    adminHubSpotPlatformStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  }, [credentialsSeen]);
+  return (
+    <Glass level={1} className="admin-settings__card" aria-labelledby="settings-hubspot">
+      <div className="admin-settings__head">
+        <h2 className="t-h2" id="settings-hubspot">
+          HubSpot (clients&apos; own account)
+        </h2>
+        <span className="admin-settings__status">
+          <span className="c-3 t-body-sm">Configuration</span>
+          <Chip tint={status?.configured ? "success" : "neutral"}>
+            {status ? (status.configured ? "Configured, not verified by HubSpot" : "Not configured") : "Unknown"}
+          </Chip>
+        </span>
+      </div>
+      <p className="c-2 t-body-sm">
+        The HubSpot application that lets a client connect its own HubSpot account. The clients copy no key: HubSpot asks for
+        their permission on its own page. Stored is not verified: nothing is checked against HubSpot until a client connects.
+      </p>
+      <CredentialGroup store={store} fields={HUBSPOT_FIELDS} canEdit={canEdit} />
+      {status && status.missing.length > 0 ? (
+        <p className="admin-alert admin-alert--info" role="status">
+          Still missing: {status.missing.join(", ")}.
+        </p>
+      ) : null}
+      {status?.redirect_uri ? (
+        <p className="c-3 t-body-sm">
+          Redirect URL to register in the HubSpot app: <code>{status.redirect_uri}</code>
+        </p>
+      ) : (
+        <p className="c-3 t-body-sm">
+          Set the public base URL of the platform (SALES_AGENT_PUBLIC_BASE_URL, https) to get the redirect URL to register in the
+          HubSpot app.
+        </p>
+      )}
+      {status ? (
+        <p className="c-3 t-body-sm">
+          The HubSpot app must declare these scopes: <code>{status.scopes.join(" ")}</code>.
+        </p>
+      ) : null}
     </Glass>
   );
 }

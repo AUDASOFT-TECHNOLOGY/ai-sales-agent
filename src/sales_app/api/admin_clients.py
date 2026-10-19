@@ -1402,6 +1402,11 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             raise HTTPException(409, "this client has not chosen HubSpot as its source")
         settings = body.model_dump(mode="json", exclude_none=True)
         index = _lane_hubspot_index(base_document)
+        if index is not None and "writeback" not in settings:
+            # What the client chose to copy back is not the Admin's to wipe by saving the mapping.
+            held = (base_document["sources"][index].get("settings") or {}).get("writeback")
+            if held:
+                settings["writeback"] = thaw_document(held)
         if index is not None:
             # One HubSpot account per client: the mapping is that of the lane source that uses it,
             # and every other source and lane stays as it is.

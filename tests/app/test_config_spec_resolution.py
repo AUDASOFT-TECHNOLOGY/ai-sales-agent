@@ -159,7 +159,6 @@ ACCEPTED = {
 
 # Configurations the legacy pipeline refuses: (client.yaml, stored document).
 REFUSED = {
-    "placeholders": (yaml_fixture("legacy_with_placeholders.yaml"), None),
     "unknown_key": ({**minimal(), "surprise": 1}, None),
     "bad_timezone": (minimal(timezone="Mars/Base"), None),
     "bad_mode": (minimal(mode="yolo"), None),
@@ -210,6 +209,13 @@ class TestSameVerdictAsTheLegacyPipeline:
         assert legacy.config is None and legacy.errors
         assert new.spec is None and new.errors
         assert set(new.errors) == set(legacy.errors)
+
+    def test_placeholders_mean_awaiting_configuration_not_refused(self, tmp_path):
+        # A new account holds placeholders for its model, Brain and Sheet: it can sign in and
+        # configure itself, so it is left without an agent (disabled), not reported as an error.
+        legacy, new = both(tmp_path, yaml_fixture("legacy_with_placeholders.yaml"), None)
+        assert legacy.config is None and legacy.disabled and legacy.errors == ()
+        assert new.spec is None and new.errors == ()
 
     def test_the_client_id_must_equal_the_directory_name(self, tmp_path):
         legacy, new = both(tmp_path, {**yaml_fixture("legacy_complete.yaml"), "client_id": "other"})

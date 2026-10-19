@@ -23,7 +23,9 @@ from sales_app.api.admin_email_activation import create_admin_email_activation_r
 from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_llm_pricing import create_admin_llm_pricing_router
 from sales_app.api.admin_plans import create_admin_plans_router
+from sales_app.api.admin_lanes import create_admin_lanes_router
 from sales_app.api.admin_send_cap import create_admin_send_cap_router
+from sales_app.api.admin_writeback import create_admin_writeback_router
 from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
@@ -35,6 +37,7 @@ from sales_app.api.client_payments import create_client_payments_router
 from sales_app.api.client_prospects import create_client_prospects_router
 from sales_app.api.client_reporting import create_client_reporting_router
 from sales_app.api.client_resources import create_client_resources_router
+from sales_app.api.client_hubspot_oauth import create_client_hubspot_oauth_router
 from sales_app.api.client_sheets_oauth import create_client_sheets_oauth_router
 from sales_app.api.client_source import (
     SheetsProbeFactory,
@@ -111,6 +114,8 @@ def create_app(
     app.include_router(create_admin_llm_pricing_router(application))
     app.include_router(create_admin_plans_router(application))
     app.include_router(create_admin_send_cap_router(application))
+    app.include_router(create_admin_writeback_router(application))
+    app.include_router(create_admin_lanes_router(application))
     app.include_router(create_admin_billing_router(application))
     app.include_router(create_payments_router(application))
     app.include_router(create_admin_channels_router(application))
@@ -130,6 +135,9 @@ def create_app(
     sheets_oauth_router = create_client_sheets_oauth_router(application)
     if sheets_oauth_router is not None:
         app.include_router(sheets_oauth_router)
+    hubspot_oauth_router = create_client_hubspot_oauth_router(application)
+    if hubspot_oauth_router is not None:
+        app.include_router(hubspot_oauth_router)
     app.include_router(create_client_channel_router(application, bot_probe))
     gmail_router = create_application_gmail_router(application)
     if gmail_router is not None:

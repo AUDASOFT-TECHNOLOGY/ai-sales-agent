@@ -61,6 +61,9 @@ from sales_app.secret_wiring import open_secrets
 from sales_app.send_cap import SendCapStore, SendLimits
 from sales_app.settings import Settings
 from sales_app.sheets_wiring import SheetsAccessService
+from sales_app.hubspot_wiring import HubSpotAccessService
+from sales_app.writeback_switch import WritebackSwitch
+from sales_app.hubspot_wiring import install as install_hubspot_access
 from sales_app.sheets_wiring import install as install_sheets_access
 from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
 from sales_app.sourcing.ports import OperationalStore
@@ -142,6 +145,9 @@ class Application:
     # Google Sheets by the client's own Google authorisation (OAuth), same platform application as
     # Gmail, grants in the client's scope of the secret store. See `sales_app.sheets_wiring`.
     sheets_access: SheetsAccessService | None = None
+    hubspot_access: HubSpotAccessService | None = None
+    # The Admin's master switch for write-back (see `sales_app.writeback_switch`).
+    writeback_switch: WritebackSwitch | None = None
     # The documents and links clients attach to their products and the search over their text; None
     # without a database (the Client API says so). See `sales_app.resources`.
     product_resources: ResourceService | None = None
@@ -353,6 +359,13 @@ def _assemble(
         secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
     )
     install_sheets_access(sheets_access)
+    hubspot_access = HubSpotAccessService(
+        secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
+    )
+    install_hubspot_access(hubspot_access)
+    writeback_switch = WritebackSwitch(
+        secrets, audit, default=settings.writeback_enabled, now=clock.now
+    )
     product_resources, knowledge = _resources(account_stores, clock)
     builders = builders or default_builders(
         settings,
@@ -361,7 +374,7 @@ def _assemble(
         consent=lambda client_id: open_consent_registry(
             settings, account_stores.engine if account_stores else None, secrets, audit, client_id
         ),
-        writeback=_writeback_support(settings, account_stores),
+        writeback=_writeback_support(writeback_switch, account_stores),
         llm_usage=_llm_usage_stores(account_stores),
         knowledge=knowledge.for_client if knowledge is not None else None,
         send_guards=send_limits.guard if send_limits is not None else None,
@@ -420,6 +433,7 @@ def _assemble(
     credentials.set_on_change(manager.notify_change)
     channel_policy = ChannelPolicyService(secrets, audit, now=clock.now)
     channel_policy.set_on_change(manager.notify_change)
+    writeback_switch.set_on_change(manager.notify_change)
 
     daily_reports = build_report_service(
         account_stores.engine if account_stores is not None else None,
@@ -469,6 +483,8 @@ def _assemble(
         send_limits=send_limits,
         gmail=gmail,
         sheets_access=sheets_access,
+        hubspot_access=hubspot_access,
+        writeback_switch=writeback_switch,
         invoices=_invoice_store(account_stores),
         payment_provider=_payment_provider_resolver(secrets),
         daily_reports=daily_reports,
@@ -558,13 +574,13 @@ def _llm_usage_stores(
 
 
 def _writeback_support(
-    settings: Settings, account_stores: AccountStores | None
+    switch: WritebackSwitch, account_stores: AccountStores | None
 ) -> WritebackSupport:
-    """Write-back as this deployment offers it: off unless `SALES_AGENT_WRITEBACK_ENABLED`, and its
+    """Write-back as the platform offers it: the Admin's switch (default: the deployment's), and its
     ledger in the database (without one, a source that asks for write-back is refused)."""
     engine = account_stores.engine if account_stores is not None else None
     return WritebackSupport(
-        enabled=settings.writeback_enabled,
+        enabled=switch.enabled,
         open_ledger=sql_ledgers(engine) if engine is not None else None,
         policies=default_policies(),
     )

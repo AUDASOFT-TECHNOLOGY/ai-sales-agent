@@ -21,6 +21,7 @@ WRITEBACK_FIELDS = frozenset(
         ProspectField.LAST_INBOUND_AT,
         ProspectField.FOLLOW_UP_COUNT,
         ProspectField.NEXT_ACTION,
+        ProspectField.SUMMARY,
     }
 )
 assert not WRITEBACK_FIELDS & SOURCE_ONLY_FIELDS

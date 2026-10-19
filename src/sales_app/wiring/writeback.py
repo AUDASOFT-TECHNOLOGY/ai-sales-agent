@@ -55,9 +55,16 @@ PolicyOf = Callable[[Mapping[str, Any]], tuple[Collection[ProspectField], bool]]
 class WritebackSupport:
     """What a deployment offers for write-back. `enabled` is the deployment's own decision."""
 
-    enabled: bool = False
+    enabled: bool | Callable[[], bool] = False  # a function: the Admin can change it live
     open_ledger: Callable[[str], WriteBackLedger] | None = None  # one client's ledger
     policies: Mapping[str, PolicyOf] = field(default_factory=dict)
+
+
+def writeback_is_on(support: WritebackSupport | None) -> bool:
+    """Whether the deployment lets results be copied back right now."""
+    if support is None:
+        return False
+    return bool(support.enabled() if callable(support.enabled) else support.enabled)
 
 
 def default_policies() -> dict[str, PolicyOf]:
@@ -199,7 +206,7 @@ def build_client_writeback(
     its source, no ledger to keep the attempts in) are words for `RuntimeBuildError`: a source that
     asked to be written back never silently is not.
     """
-    if support is None or not support.enabled or config.effective_mode is ApprovalMode.DRY_RUN:
+    if not writeback_is_on(support) or config.effective_mode is ApprovalMode.DRY_RUN:
         return None, []
     problems: list[str] = []
     wanted: dict[str, WriteBackPolicy] = {}

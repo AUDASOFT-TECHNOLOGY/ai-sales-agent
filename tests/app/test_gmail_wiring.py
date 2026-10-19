@@ -306,6 +306,10 @@ def test_admin_status_is_honest_configured_is_not_verified(world):
     assert after["configured"] is True and after["missing"] == []
     assert after["verified"] is False  # nothing was asked of Google
     assert after["redirect_uri"] == "https://revansa.example/client/v1/channel/google/callback"
+    # the same Google client also serves "Connect Google Sheets": its callback must be shown too
+    assert after["sheets_redirect_uri"] == (
+        "https://revansa.example/client/v1/sheets-access/callback"
+    )
     assert "Stored is not verified" in after["note"]
     listing = root.get(ADMIN_INT).text
     for secret in (CLIENT_ID, CLIENT_SECRET, STATE_KEY):

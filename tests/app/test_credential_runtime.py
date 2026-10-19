@@ -715,7 +715,7 @@ class TestAdminApi:
 
         from sales_app.api.admin_clients import _new_client_yaml
 
-        raw = _new_client_yaml("gamma", "Gamma", "openai", "m")
+        raw = _new_client_yaml("gamma", "Gamma", "openai", "m", True)
         assert raw["whatsapp"] == {"provider": "whatsapp"}
         assert "TOKEN" not in yaml.safe_dump(raw)
 
