@@ -67,3 +67,54 @@ infrastructure), and in which currency?
 **Today.** The finance summary exposes `profitability.status = "not_connected"`. The extension point
 is `sales_app.finance.service.CostSource`; it will be wired to the provider costs of lot 2C. No cost
 is estimated.
+
+## Channels and integrations
+
+### 7. WhatsApp provider: Meta Cloud API direct, Twilio or Bird
+
+**Decision to take.** The specification (§8.4) plans Twilio or Bird; the code talks to Meta's Cloud API
+directly (Embedded Signup, `sales_integrations/whatsapp/graph.py`).
+
+**Options.** Keep Meta direct (no intermediary cost, Revansa owns the Meta app review and the webhooks);
+Twilio or Bird (their onboarding, their coexistence support, their per-message fee). Criteria from the
+specification: account compatibility, coexistence with the phone app, several numbers per client, costs,
+partnership terms.
+
+**Can continue without it.** Everything except the provider adapter: templates, 24-hour window,
+delivery statuses, consent, costs (`meta_whatsapp / message_sent` tariff is an Admin parameter).
+
+**Stays configurable.** The channel is behind `MessagingChannel`; a Twilio or Bird adapter would be a
+new module beside `whatsapp/channel.py`. Not built, because the choice is open.
+
+### 8. Telegram method
+
+**Decision to take.** Validate the user-account method (MTProto, `telegram/telethon_client.py`, with the
+consent gate) with the Product Owner and test it on a real account before calling it operational (§8.3).
+
+### 9. WhatsApp and Telegram in the plan quota
+
+**Question.** Only e-mail is metered against the plan's daily quota today. Counting WhatsApp or Telegram
+sends needs a cap for every client that uses them.
+
+### 10. Conversions and credits
+
+**Question.** No conversion event is recorded, so the dashboards show conversions as "not tracked". What
+counts as a conversion (a confirmed payment, a booked appointment, a source status)? Likewise there is
+no rule that converts a message into plan credits, so credits consumed are "unavailable".
+
+## Platform
+
+### 11. Data retention, export and deletion (§17.2)
+No policy. Only the Meta data-deletion webhook exists.
+
+### 12. Several users per client (§3.4)
+Not built. A client has one login. Needs a users table linked to the client with roles; isolation by
+client id must stay the only boundary.
+
+### 13. Consent and compliance per market (§17.2)
+The consent registry exists; the rules that apply per country are not specified.
+
+### 14. Self-service SaaS (lot 8, §13.5)
+Landing page, sign-up, plan choice, online subscription payment and guided onboarding are **not**
+implemented in this mission: the specification lists them as priority 4 and does not specify them
+enough (payment provider, plans offer, legal pages).
