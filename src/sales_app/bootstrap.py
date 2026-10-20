@@ -14,8 +14,6 @@ from sales_app.admin_auth import AdminAuthService, AdminSessionStore, AdminUserS
 from sales_app.agent_state import AgentStateStore, InMemoryAgentStateStore
 from sales_app.audit_log import AuditService, InMemoryAuditLog
 from sales_app.billing import InvoiceStore
-from sales_app.notification_wiring import job_result_hook, wire_reauth
-from sales_app.notifications import InMemoryNotificationStore, NotificationService
 from sales_app.channel_policy import ChannelPolicyService
 from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore
@@ -37,6 +35,8 @@ from sales_app.inbox import PositionStore
 from sales_app.llm_pricing import LLMPricingStore
 from sales_app.llm_usage import LLMUsageStore
 from sales_app.metrics import MetricsReader
+from sales_app.notification_wiring import job_result_hook, wire_reauth
+from sales_app.notifications import InMemoryNotificationStore, NotificationService
 from sales_app.parsers import ParserTable, build_parsers
 from sales_app.payment_confirmation import PAYMENT_WEBHOOK_SECRET
 from sales_app.payment_provider import PaymentProvider, SignedWebhookProvider
@@ -48,10 +48,13 @@ from sales_app.persistence.mail_cursor_rows import SqlMailCursorStore
 from sales_app.persistence.metrics_rows import SqlMetricsRows
 from sales_app.persistence.operational_rows import SqlOperationalRows
 from sales_app.persistence.plan_rows import SqlPlanStore
+from sales_app.persistence.provider_cost_rows import SqlCostStore
 from sales_app.persistence.read_model_rows import SqlProspectReadModel
 from sales_app.persistence.resource_rows import SqlResourceStore
 from sales_app.persistence.send_cap_rows import SqlSendCapStore, SqlSendCounter
 from sales_app.plans import PlanStore, current_daily_quota
+from sales_app.provider_costs import CostService
+from sales_app.quotas import QuotaService
 from sales_app.read_model import ProspectReadModel
 from sales_app.registry import ClientRegistry
 from sales_app.report_wiring import build_report_service
@@ -184,6 +187,10 @@ class Application:
     # See `sales_app.read_model` and `sales_app.metrics`.
     read_models: Callable[[str], ProspectReadModel] | None = None
     metrics_readers: Callable[[str], MetricsReader] | None = None
+    # Usage against the plan's quota (with the alerts at 80% / 100%) and the technical costs by
+    # provider; None without a database. See `sales_app.quotas` and `sales_app.provider_costs`.
+    quotas: QuotaService | None = None
+    costs: CostService | None = None
 
     def client_wiring(self, client_id: str) -> tuple[dict[str, Any] | None, str | None]:
         """A client's operator wiring: its record first, its `client.yaml` as the fallback."""
@@ -381,6 +388,10 @@ def _assemble(
     plans = _plan_store(account_stores)
     audit_service, notification_service = _audit_and_notifications(account_stores, clock)
     send_caps, send_limits = _send_limits(account_stores, plans, clock)
+    quotas = None
+    if send_limits is not None:
+        quotas = QuotaService(send_limits, notification_service, clock, plans)
+        send_limits.attach_observer(quotas.observe)  # before any guard is built
     # Resolved at each use from the Admin's credentials: no restart when they change.
     shared = _shared_state(account_stores)
     gmail = gmail_service or GmailMailService(
@@ -562,6 +573,8 @@ def _assemble(
         secret_audit=audit,
         read_models=_read_models(account_stores),
         metrics_readers=_metrics_readers(account_stores),
+        quotas=quotas,
+        costs=_cost_service(account_stores, clock),
     )
 
 
@@ -767,3 +780,10 @@ def describe_modes(application: Application) -> list[dict[str, Any]]:
         for entry in application.registry.health()
         if entry.get("status") != "disabled"
     ]
+
+
+def _cost_service(account_stores: AccountStores | None, clock: Clock) -> CostService | None:
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None
+    return CostService(SqlCostStore(engine), _llm_pricing_store(account_stores), now=clock.now)

@@ -51,6 +51,11 @@ _ACTIONS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("PUT", r"^/settings/writeback$", "settings.writeback_set"),
         ("PUT", r"^/settings/llm/pricing$", "settings.llm_pricing_set"),
         ("DELETE", r"^/settings/llm/pricing/.*$", "settings.llm_pricing_remove"),
+        ("PUT", r"^/settings/costs/rates$", "settings.cost_rate_set"),
+        ("DELETE", r"^/settings/costs/rates/.*$", "settings.cost_rate_remove"),
+        ("POST", r"^/costs/entries$", "costs.entry_add"),
+        ("DELETE", r"^/costs/entries/.*$", "costs.entry_remove"),
+        ("POST", r"^/costs/materialize$", "costs.materialize"),
         ("POST", r"^/settings/openai/models$", "settings.llm_model_add"),
         ("PUT", r"^/settings/openai/models/\{model_id\}$", "settings.llm_model_update"),
         ("DELETE", r"^/settings/openai/models/\{model_id\}$", "settings.llm_model_remove"),
@@ -67,7 +72,7 @@ _ACTIONS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
 # Routes whose body holds no credential by nature and is useful as the "after" of the entry.
 _BODY_ALLOWED = re.compile(
     r"^/(clients(/\{client_id\}(/(llm|source|plan|send-cap|channels))?)?|plans(/\{plan_id\})?"
-    r"|invoices/.*|settings/(channels|writeback|llm/pricing))$"
+    r"|invoices/.*|settings/(channels|writeback|llm/pricing|costs/rates)|costs/(entries|materialize))$"
 )
 _SKIPPED = re.compile(r"^/(auth/|notifications)")  # reading a bell is not an operation
 

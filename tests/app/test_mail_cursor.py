@@ -112,6 +112,8 @@ class TestMigration0010:
             "audit_log",
             "notifications",
             "op_prospect_index",
+            "cost_rates",
+            "provider_costs",
         }
         assert after - {"alembic_version"} == set(metadata.tables) - later
 

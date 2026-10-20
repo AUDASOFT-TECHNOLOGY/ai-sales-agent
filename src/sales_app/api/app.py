@@ -19,11 +19,10 @@ from fastapi.responses import PlainTextResponse
 from sales_app.api.admin import create_admin_router
 from sales_app.api.admin_agents import create_admin_agents_router
 from sales_app.api.admin_audit import create_admin_audit_router
-from sales_app.api.audit_middleware import AuditMiddleware
-from sales_app.api.client_notifications import create_client_notifications_router
 from sales_app.api.admin_billing import create_admin_billing_router
 from sales_app.api.admin_channels import create_admin_channels_router
 from sales_app.api.admin_clients import create_admin_clients_router
+from sales_app.api.admin_costs import create_admin_costs_router
 from sales_app.api.admin_email_activation import create_admin_email_activation_router
 from sales_app.api.admin_hubspot import create_admin_hubspot_router
 from sales_app.api.admin_integrations import create_admin_integrations_router
@@ -33,6 +32,7 @@ from sales_app.api.admin_plans import create_admin_plans_router
 from sales_app.api.admin_send_cap import create_admin_send_cap_router
 from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.api.admin_whatsapp import create_admin_whatsapp_router
+from sales_app.api.audit_middleware import AuditMiddleware
 from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
 from sales_app.api.client_approvals import create_client_approvals_router
@@ -41,6 +41,7 @@ from sales_app.api.client_gmail import create_application_gmail_router
 from sales_app.api.client_hubspot_oauth import create_client_hubspot_oauth_router
 from sales_app.api.client_lanes import create_client_lanes_router
 from sales_app.api.client_mailbox import create_client_mailbox_router
+from sales_app.api.client_notifications import create_client_notifications_router
 from sales_app.api.client_payments import create_client_payments_router
 from sales_app.api.client_prospects import create_client_prospects_router
 from sales_app.api.client_reporting import create_client_reporting_router
@@ -51,6 +52,7 @@ from sales_app.api.client_source import (
     create_client_source_router,
     default_sheets_probe,
 )
+from sales_app.api.client_usage import create_client_usage_router
 from sales_app.api.client_whatsapp import create_client_whatsapp_router
 from sales_app.api.payments import create_payments_router
 from sales_app.bootstrap import Application
@@ -123,6 +125,8 @@ def create_app(
     app.include_router(create_admin_agents_router(application))
     app.include_router(create_admin_settings_router(application))
     app.include_router(create_admin_llm_pricing_router(application))
+    app.include_router(create_admin_costs_router(application))
+    app.include_router(create_client_usage_router(application))
     app.include_router(create_admin_plans_router(application))
     app.include_router(create_admin_send_cap_router(application))
     app.include_router(create_admin_lanes_router(application))

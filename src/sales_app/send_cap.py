@@ -78,6 +78,10 @@ def utc_day(at: datetime) -> date:
     return at.astimezone(UTC).date()
 
 
+# (client id, channel, UTC day, effective limit, refused): called after each reservation attempt.
+QuotaObserver = Callable[[str, str, date, int, bool], None]
+
+
 class SendCounter(Protocol):
     """Atomic count of the sends of one client, on one channel, on one UTC day."""
 
@@ -90,6 +94,12 @@ class SendCounter(Protocol):
         ...
 
     def used(self, client_id: str, channel: str, day: date) -> int: ...
+
+    def usage_between(
+        self, client_id: str, start: date, end: date
+    ) -> dict[tuple[str, date], int]:
+        """Counts per (channel, day) for days in [start, end)."""
+        ...
 
 
 class SendCapStore(Protocol):
@@ -124,6 +134,7 @@ class DailySendGuard:
         limit: Callable[[], int | None],
         clock: Clock,
         counter: SendCounter,
+        observer: "QuotaObserver | None" = None,
     ) -> None:
         if not client_id or not channel:
             raise ValueError("a send guard needs a client id and a channel")
@@ -132,6 +143,7 @@ class DailySendGuard:
         self._limit = limit
         self._clock = clock
         self._counter = counter
+        self._observer = observer
 
     def __repr__(self) -> str:
         return f"DailySendGuard(client={self._client_id!r}, channel={self._channel!r})"
@@ -143,11 +155,22 @@ class DailySendGuard:
                 return Refusal(CAP_NOT_CONFIGURED)
             day = utc_day(self._clock.now())
             if not self._counter.try_increment(self._client_id, self._channel, day, limit):
+                self._observe(day, limit, refused=True)
                 return Refusal(CAP_REACHED)
         except Exception as error:  # noqa: BLE001 - a store down, whatever its type: refuse, never send
             log.warning("send cap check failed: %s", type(error).__name__)
             return Refusal(CAP_UNAVAILABLE)
+        self._observe(day, limit, refused=False)
         return Reservation(day)
+
+    def _observe(self, day: date, limit: int, *, refused: bool) -> None:
+        """Tell the quota observer (alerts at 80% / 100%). It never changes the guard's answer."""
+        if self._observer is None:
+            return
+        try:
+            self._observer(self._client_id, self._channel, day, limit, refused)
+        except Exception as error:  # noqa: BLE001 - an alert that fails never blocks or allows a send
+            log.warning("quota observer failed: %s", type(error).__name__)
 
     def release(self, reservation: Reservation) -> None:
         """Give a place back. If the store is down the place stays used: that is the safe side."""
@@ -255,7 +278,9 @@ class SendLimits:
         counter: SendCounter,
         clock: Clock,
         plan_quota: Callable[[str], int | None] | None = None,
+        observer: QuotaObserver | None = None,
     ) -> None:
+        self._observer = observer
         self._caps = caps
         self._counter = counter
         self._clock = clock
@@ -263,6 +288,10 @@ class SendLimits:
 
     def __repr__(self) -> str:
         return "SendLimits()"
+
+    def attach_observer(self, observer: QuotaObserver) -> None:
+        """Guards made after this call report each attempt to `observer` (quota alerts)."""
+        self._observer = observer
 
     def cap_of(self, client_id: str) -> EffectiveCap:
         """Raises whatever the stores raise: the callers turn it into a refusal / "unavailable"."""
@@ -274,8 +303,17 @@ class SendLimits:
 
     def guard(self, client_id: str, channel: str) -> DailySendGuard:
         return DailySendGuard(
-            client_id, channel, lambda: self.effective(client_id), self._clock, self._counter
+            client_id,
+            channel,
+            lambda: self.effective(client_id),
+            self._clock,
+            self._counter,
+            self._observer,
         )
+
+    def usage_between(self, client_id: str, start: date, end: date) -> dict[tuple[str, date], int]:
+        """Real consumption per (channel, UTC day) for days in [start, end)."""
+        return self._counter.usage_between(client_id, start, end)
 
     def used(self, client_id: str, channel: str, day: date) -> int:
         return self._counter.used(client_id, channel, day)
@@ -338,6 +376,16 @@ class InMemorySendCounter:
     def used(self, client_id: str, channel: str, day: date) -> int:
         with self._lock:
             return self._counts.get((client_id, channel, day), 0)
+
+    def usage_between(
+        self, client_id: str, start: date, end: date
+    ) -> dict[tuple[str, date], int]:
+        with self._lock:
+            return {
+                (channel, day): used
+                for (cid, channel, day), used in self._counts.items()
+                if cid == client_id and start <= day < end and used > 0
+            }
 
 
 class InMemorySendCapStore:

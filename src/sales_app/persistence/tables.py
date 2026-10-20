@@ -784,3 +784,44 @@ notifications = Table(
     UniqueConstraint("dedupe_key", name="uq_notifications_dedupe"),
     Index("ix_notifications_audience", "audience", "client_id", "created_at"),
 )
+
+
+# ---- technical costs by provider (migration 0023, `sales_app.provider_costs`) ---------------------
+# The Admin's cost parameters: a unit price per provider and key (e.g. meta_whatsapp / message_sent).
+# No row: the price is not provided, the cost is "unavailable" and never invented.
+cost_rates = Table(
+    "cost_rates",
+    metadata,
+    Column("provider", String(32), primary_key=True),
+    Column("rate_key", String(64), primary_key=True),
+    Column("unit", String(32), nullable=False),
+    Column("unit_price", Numeric(18, 6), nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+    Column("updated_by", String(255), nullable=False),
+)
+
+# One cost line of a provider for a day or a month (`period_date` is the first day of the period).
+# `basis` says how it is known: measured, estimated, unavailable (amount NULL). `client_id` NULL: a
+# platform cost (infra) not attributed to one client; it has no foreign key on purpose.
+provider_costs = Table(
+    "provider_costs",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), nullable=True),
+    Column("provider", String(32), nullable=False),
+    Column("category", String(64), nullable=False),
+    Column("period_date", Date, nullable=False),
+    Column("period_kind", String(8), nullable=False),  # day | month
+    Column("quantity", Numeric(24, 6)),
+    Column("unit", String(32), nullable=False),
+    Column("unit_price", Numeric(18, 6)),
+    Column("amount", Numeric(18, 6)),
+    Column("currency", String(3)),
+    Column("basis", String(16), nullable=False),
+    Column("source", String(64), nullable=False),
+    Column("recorded_at", UtcDateTime, nullable=False),
+    Column("recorded_by", String(255), nullable=False),
+    Index("ix_provider_costs_period", "period_date", "provider"),
+    Index("ix_provider_costs_client", "client_id", "period_date"),
+)

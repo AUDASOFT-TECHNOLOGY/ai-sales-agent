@@ -87,6 +87,19 @@ class SqlSendCounter:
         return int(row[0]) if row else 0
 
 
+    def usage_between(
+        self, client_id: str, start: date, end: date
+    ) -> dict[tuple[str, date], int]:
+        query = select(counter.c.channel, counter.c.day, counter.c.used).where(
+            counter.c.client_id == client_id, counter.c.day >= start, counter.c.day < end
+        )
+        try:
+            with self._engine.connect() as connection:
+                return {(r[0], r[1]): int(r[2]) for r in connection.execute(query) if r[2] > 0}
+        except SQLAlchemyError:
+            raise StoreUnavailableError(_UNAVAILABLE) from None
+
+
 class SqlSendCapStore:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
