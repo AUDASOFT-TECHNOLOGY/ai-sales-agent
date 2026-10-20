@@ -12,7 +12,10 @@ from typing import Any
 
 from sales_app.admin_auth import AdminAuthService, AdminSessionStore, AdminUserStore
 from sales_app.agent_state import AgentStateStore, InMemoryAgentStateStore
+from sales_app.audit_log import AuditService, InMemoryAuditLog
 from sales_app.billing import InvoiceStore
+from sales_app.notification_wiring import job_result_hook, wire_reauth
+from sales_app.notifications import InMemoryNotificationStore, NotificationService
 from sales_app.channel_policy import ChannelPolicyService
 from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore
@@ -162,6 +165,16 @@ class Application:
     # Identity, status and engine of each client, in the database; None without one (the historical
     # `client.yaml` files then decide, as before). See `sales_app.client_records`.
     client_records: ClientRecordStore | None = None
+    # The central audit log of sensitive Admin operations and the notifications by role. In the
+    # database when there is one, in memory otherwise (lost on restart). See `sales_app.audit_log`
+    # and `sales_app.notifications`; neither ever raises into the operation that calls it.
+    audit: AuditService = field(default_factory=lambda: AuditService(InMemoryAuditLog()))
+    notifications: NotificationService = field(
+        default_factory=lambda: NotificationService(InMemoryNotificationStore())
+    )
+    # The specialised register of credential changes (kept as is; the Admin reads it through
+    # `GET /admin/v1/audit/secrets`).
+    secret_audit: SecretAudit | None = None
 
     def client_wiring(self, client_id: str) -> tuple[dict[str, Any] | None, str | None]:
         """A client's operator wiring: its record first, its `client.yaml` as the fallback."""
@@ -357,6 +370,7 @@ def _assemble(
     check_consent_mode(settings, account_stores.engine if account_stores is not None else None)
     credentials = CredentialService(secrets, audit, now=clock.now)
     plans = _plan_store(account_stores)
+    audit_service, notification_service = _audit_and_notifications(account_stores, clock)
     send_caps, send_limits = _send_limits(account_stores, plans, clock)
     # Resolved at each use from the Admin's credentials: no restart when they change.
     shared = _shared_state(account_stores)
@@ -388,6 +402,14 @@ def _assemble(
         pending=shared.pending("hubspot"),
     )
     install_hubspot_access(hubspot_access)
+    wire_reauth(
+        notification_service,
+        gmail=gmail,
+        sheets=sheets_access,
+        hubspot=hubspot_access,
+        whatsapp=whatsapp,
+        telegram=telegram_accounts,
+    )
     product_resources, knowledge = _resources(account_stores, clock)
     builders = builders or default_builders(
         settings,
@@ -497,6 +519,7 @@ def _assemble(
             mail_cursors=_mail_cursor_stores(account_stores),
             reports=daily_reports,
             leases=shared.leases,
+            on_job_result=job_result_hook(notification_service),
         ),
         parsers=parsers,
         clock=clock,
@@ -525,6 +548,28 @@ def _assemble(
         product_resources=product_resources,
         knowledge=knowledge,
         client_records=client_records,
+        audit=audit_service,
+        notifications=notification_service,
+        secret_audit=audit,
+    )
+
+
+def _audit_and_notifications(
+    account_stores: AccountStores | None, clock: Clock
+) -> tuple[AuditService, NotificationService]:
+    """The central audit log and the notifications: in the database when there is one."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return (
+            AuditService(InMemoryAuditLog(), now=clock.now),
+            NotificationService(InMemoryNotificationStore(), now=clock.now),
+        )
+    from sales_app.persistence.audit_rows import SqlAuditLog
+    from sales_app.persistence.notification_rows import SqlNotificationStore
+
+    return (
+        AuditService(SqlAuditLog(engine), now=clock.now),
+        NotificationService(SqlNotificationStore(engine), now=clock.now),
     )
 
 

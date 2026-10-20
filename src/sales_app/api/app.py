@@ -18,6 +18,9 @@ from fastapi.responses import PlainTextResponse
 
 from sales_app.api.admin import create_admin_router
 from sales_app.api.admin_agents import create_admin_agents_router
+from sales_app.api.admin_audit import create_admin_audit_router
+from sales_app.api.audit_middleware import AuditMiddleware
+from sales_app.api.client_notifications import create_client_notifications_router
 from sales_app.api.admin_billing import create_admin_billing_router
 from sales_app.api.admin_channels import create_admin_channels_router
 from sales_app.api.admin_clients import create_admin_clients_router
@@ -112,7 +115,10 @@ def create_app(
                 log.warning("jobs still running after %ss; exiting anyway", SHUTDOWN_GRACE_SECONDS)
 
     app = FastAPI(title="AI Sales Agent Core", lifespan=lifespan)
+    app.add_middleware(AuditMiddleware, application=application)  # the central audit log
     app.include_router(create_admin_router(application))
+    app.include_router(create_admin_audit_router(application))
+    app.include_router(create_client_notifications_router(application))
     app.include_router(create_admin_clients_router(application))
     app.include_router(create_admin_agents_router(application))
     app.include_router(create_admin_settings_router(application))

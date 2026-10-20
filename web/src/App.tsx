@@ -4,6 +4,7 @@ import { AdminAuthProvider } from "./admin/AdminAuthContext";
 import { AdminLoginPage } from "./admin/AdminLoginPage";
 import { AdminRoute } from "./admin/AdminRoute";
 import { AdminShell } from "./admin/AdminShell";
+import { AdminAuditPage } from "./admin/pages/AdminAuditPage";
 import { AdminBillingPage } from "./admin/pages/AdminBillingPage";
 import { AdminClientDetailPage } from "./admin/pages/AdminClientDetailPage";
 import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
@@ -60,6 +61,7 @@ export function App() {
               <Route path="clients" element={<AdminClientsPage />} />
               <Route path="clients/:clientId" element={<AdminClientDetailPage />} />
               <Route path="billing" element={<AdminBillingPage />} />
+              <Route path="audit" element={<AdminAuditPage />} />
               <Route path="settings" element={<AdminSettingsPage />} />
               <Route path="*" element={<Navigate to="/admin" replace />} />
             </Route>

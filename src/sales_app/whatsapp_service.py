@@ -76,6 +76,8 @@ from sales_integrations.whatsapp import (
 )
 from sales_integrations.whatsapp.channel import DEFAULT_API_VERSION
 
+from sales_app.notifications import tell as _tell
+
 log = logging.getLogger(__name__)
 
 NOT_CONNECTED = "not_connected"
@@ -475,6 +477,7 @@ class WhatsAppService:
             }
             self._secrets.set(scope, WHATSAPP_CONNECTION, json.dumps(snapshot), by=_ACTOR)
             self._secrets.delete(scope, WHATSAPP_REAUTH_REQUIRED)
+            _tell(self.on_connected, client_id)
         except SecretStoreError:
             if previous:
                 self._secrets.set(scope, WHATSAPP_PHONE_NUMBER_ID, previous, by=_ACTOR, unique=True)
@@ -571,11 +574,18 @@ class WhatsAppService:
             self._client_value(client_id, WHATSAPP_WABA_ID),
         )
 
+    # Set by the composition root: told when a client's authorisation must be renewed / is renewed
+    # (notifications). Never raises into the caller.
+    on_reauth: Callable[[str], None] | None = None
+    on_connected: Callable[[str], None] | None = None
+
     def mark_reauth_required(self, client_id: str) -> None:
         try:
             self._secrets.set(client_scope(client_id), WHATSAPP_REAUTH_REQUIRED, "1", by=_ACTOR)
         except SecretStoreError:
             log.warning("could not record that a WhatsApp authorisation must be renewed")
+            return
+        _tell(self.on_reauth, client_id)
 
     # ---- disconnection -----------------------------------------------------------------------------
 

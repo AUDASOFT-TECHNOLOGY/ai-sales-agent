@@ -583,6 +583,13 @@ def create_client_channel_router(
             raise HTTPException(503, "request storage is temporarily unavailable") from None
         except ActivationConflictError as conflict:
             raise HTTPException(409, str(conflict)) from None
+        application.notifications.notify(
+            "email_mailbox_request",
+            "admin",
+            client_id,
+            title=f"{client_id} asks for its email mailbox to be activated",
+            dedupe_key="email_activation",
+        )
         with contextlib.suppress(Exception):  # the Admin's runtime status says how it ended
             if application.registry.get_config(client_id) is not None:
                 application.runtime_manager.refresh_client(client_id)

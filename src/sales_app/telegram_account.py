@@ -51,6 +51,8 @@ from sales_integrations.telegram.account import (
 )
 from sales_integrations.telegram.telethon_client import TelethonAccount, telethon_available
 
+from sales_app.notifications import tell as _tell
+
 log = logging.getLogger(__name__)
 
 _ACTOR = "system:telegram-account"
@@ -200,8 +202,11 @@ class TelegramAccountService:
         except SecretStoreError:
             log.warning("could not record the state of a Telegram account")
 
+    on_reauth: Callable[[str], None] | None = None  # set by the composition root (notifications)
+
     def mark_reauth_required(self, client_id: str) -> None:
         self._mark(client_id, TELEGRAM_USER_REAUTH)
+        _tell(self.on_reauth, client_id)
 
     def mark_limited(self, client_id: str) -> None:
         self._mark(client_id, TELEGRAM_USER_LIMITED)

@@ -360,7 +360,7 @@ class TestMigration:
         upgrade_database(engine, "0004")
         assert current_revision(engine) == "0004"
         assert (
-            head_revision() == "0017"
+            head_revision() >= "0017"
         )  # the write-back ledger, the LLM usage and prices, the mailbox positions and the send cap come after
         assert OP_TABLES <= set(inspect(engine).get_table_names())
         assert OP_TABLES <= set(metadata.tables)

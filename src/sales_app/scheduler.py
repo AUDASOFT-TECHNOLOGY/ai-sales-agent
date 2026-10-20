@@ -105,7 +105,9 @@ class Scheduler:
         reports: ReportSupport | None = None,
         report_every_minutes: int = REPORT_EVERY_MINUTES,
         leases: LeaseSupport | None = None,
+        on_job_result: Callable[[JobResult], None] | None = None,
     ) -> None:
+        self._on_job_result = on_job_result  # told how each write-back / report run ended
         self._registry = registry
         self._clock = clock
         self._may_run = may_run  # the client's own switch; None: nothing to ask
@@ -318,6 +320,15 @@ class Scheduler:
             leases.release(runtime.client_id, name)
 
     def _execute_leased(self, runtime: ClientRuntime, job: Job, now: datetime) -> JobResult:
+        result = self._execute_job(runtime, job, now)
+        if self._on_job_result is not None and job in (Job.SYNC, Job.REPORT):
+            try:  # notifications: never a reason for a job to fail
+                self._on_job_result(result)
+            except Exception:  # noqa: BLE001
+                log.error("a job-result hook failed")
+        return result
+
+    def _execute_job(self, runtime: ClientRuntime, job: Job, now: datetime) -> JobResult:
         logger = client_logger(__name__, runtime.client_id)
         try:
             with runtime.lease() as engine:  # one Engine for the whole job, even across a refresh

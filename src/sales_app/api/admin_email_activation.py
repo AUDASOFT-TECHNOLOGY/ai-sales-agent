@@ -253,7 +253,9 @@ def create_admin_email_activation_router(
     def start(client_id: str, admin: AdminUser = Depends(require_owner)) -> ActivationItem:
         """`pending` to `in_progress`."""
         reach(admin, client_id)
-        return item(client_id, guarded(lambda: service().start(client_id, actor=admin.username)))
+        record = guarded(lambda: service().start(client_id, actor=admin.username))
+        application.notifications.resolve("admin", client_id, "email_activation")
+        return item(client_id, record)
 
     @router.post(
         "/clients/{client_id}/email-activation/reject",
@@ -267,6 +269,7 @@ def create_admin_email_activation_router(
         reach(admin, client_id)
         body = await _read_body(request, RejectRequest)
         record = guarded(lambda: service().reject(client_id, body.reason, actor=admin.username))
+        application.notifications.resolve("admin", client_id, "email_activation")
         return item(client_id, record)
 
     @router.post(

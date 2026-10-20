@@ -103,6 +103,15 @@ class TestMigration0010:
             "secrets",
             "secret_audit",
             "consent_events",
+            # 0018 (WhatsApp), 0020 (multi-process), 0021 (audit, notifications) and later.
+            "wa_contact_windows",
+            "wa_deliveries",
+            "wa_templates",
+            "oauth_pending_consents",
+            "job_leases",
+            "audit_log",
+            "notifications",
+            "op_prospect_index",
         }
         assert after - {"alembic_version"} == set(metadata.tables) - later
 

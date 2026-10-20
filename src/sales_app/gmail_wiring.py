@@ -76,6 +76,8 @@ from sales_integrations.google_oauth import (
 from sales_integrations.mail import open_imap, open_smtp
 from sales_integrations.mail.mailbox import OBSERVE
 
+from sales_app.notifications import tell as _tell
+
 log = logging.getLogger(__name__)
 
 CALLBACK_PATH = "/client/v1/channel/google/callback"
@@ -266,16 +268,24 @@ class SecretStoreGrantStore:
                     self._now().astimezone(UTC).isoformat(),
                     by=self._actor,
                 )
+            _tell(self.on_connected, client_id)
         except DuplicateSecretError:
             raise AddressAlreadyConnectedError from None
         except SecretStoreError:
             raise GoogleTransientError("the authorisation cannot be kept") from None
+
+    # Set by the composition root: told when a grant must be renewed / has been renewed
+    # (notifications). A hook that fails never fails the grant.
+    on_reauth: Callable[[str], None] | None = None
+    on_connected: Callable[[str], None] | None = None
 
     def mark_reauth_required(self, client_id: str) -> None:
         try:
             self._secrets.set(client_scope(client_id), self._keys.reauth, "1", by=self._actor)
         except SecretStoreError:
             log.warning("could not record that a Gmail authorisation must be renewed")
+            return
+        _tell(self.on_reauth, client_id)
 
     def delete(self, client_id: str) -> None:
         scope = client_scope(client_id)

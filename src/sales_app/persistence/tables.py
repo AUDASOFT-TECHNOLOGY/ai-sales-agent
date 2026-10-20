@@ -686,3 +686,45 @@ job_leases = Table(
     Column("acquired_at", UtcDateTime, nullable=False),
     Column("expires_at", UtcDateTime, nullable=False),
 )
+
+# The central audit log (`sales_app.audit_log`): append-only. `before` / `after` are redacted before
+# they get here; no secret is ever kept. `client_id` has no foreign key on purpose: the history of a
+# client must outlive any change to its record.
+audit_log = Table(
+    "audit_log",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("at", UtcDateTime, nullable=False),
+    Column("actor", String(128), nullable=False),
+    Column("actor_role", String(32), nullable=False),
+    Column("client_id", String(64), nullable=True),
+    Column("action", String(96), nullable=False),
+    Column("target", String(256), nullable=False),
+    Column("outcome", String(16), nullable=False),
+    Column("before", JSON().with_variant(JSONB(), "postgresql"), nullable=True),
+    Column("after", JSON().with_variant(JSONB(), "postgresql"), nullable=True),
+    Index("ix_audit_log_at", "at"),
+    Index("ix_audit_log_client", "client_id", "at"),
+    Index("ix_audit_log_action", "action", "at"),
+)
+
+# Notifications by role (`sales_app.notifications`). `dedupe_key` is unique (it already carries the
+# audience and the client): one open notification per event.
+notifications = Table(
+    "notifications",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("audience", String(8), nullable=False),
+    Column("client_id", String(64), nullable=True),
+    Column("kind", String(48), nullable=False),
+    Column("severity", String(8), nullable=False),
+    Column("title", String(160), nullable=False),
+    Column("message", String(400), nullable=False),
+    Column("suggested_action", String(300), nullable=False),
+    Column("dedupe_key", String(255), nullable=False),
+    Column("read_at", UtcDateTime, nullable=True),
+    Column("resolved_at", UtcDateTime, nullable=True),
+    UniqueConstraint("dedupe_key", name="uq_notifications_dedupe"),
+    Index("ix_notifications_audience", "audience", "client_id", "created_at"),
+)
