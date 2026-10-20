@@ -15,6 +15,7 @@ import "./styles/shell.css";
 import "./styles/screens.css";
 import "./styles/calm.css";
 import "./styles/admin.css";
+import "./styles/dashboard.css";
 import "./styles/client.css";
 import "./styles/client-theme.css";
 import { App } from "./App";

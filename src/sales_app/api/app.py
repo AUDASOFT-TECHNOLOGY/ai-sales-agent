@@ -25,6 +25,7 @@ from sales_app.api.client_billing import create_client_billing_router
 from sales_app.api.admin_channels import create_admin_channels_router
 from sales_app.api.admin_clients import create_admin_clients_router
 from sales_app.api.admin_costs import create_admin_costs_router
+from sales_app.api.admin_dashboard import create_admin_dashboard_router
 from sales_app.api.admin_email_activation import create_admin_email_activation_router
 from sales_app.api.admin_hubspot import create_admin_hubspot_router
 from sales_app.api.admin_integrations import create_admin_integrations_router
@@ -39,6 +40,7 @@ from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
 from sales_app.api.client_approvals import create_client_approvals_router
 from sales_app.api.client_channel import create_client_channel_router
+from sales_app.api.client_dashboard import create_client_dashboard_router
 from sales_app.api.client_gmail import create_application_gmail_router
 from sales_app.api.client_hubspot_oauth import create_client_hubspot_oauth_router
 from sales_app.api.client_lanes import create_client_lanes_router
@@ -140,6 +142,7 @@ def create_app(
     app.include_router(create_admin_hubspot_router(application))
     app.include_router(create_admin_billing_router(application))
     app.include_router(create_admin_finance_router(application))
+    app.include_router(create_admin_dashboard_router(application))
     app.include_router(create_payments_router(application))
     app.include_router(create_admin_channels_router(application))
     app.include_router(
@@ -156,6 +159,7 @@ def create_app(
     app.include_router(create_client_approvals_router(application))
     app.include_router(create_client_payments_router(application))
     app.include_router(create_client_billing_router(application))
+    app.include_router(create_client_dashboard_router(application))
     app.include_router(create_client_resources_router(application))
     app.include_router(create_client_prospects_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))

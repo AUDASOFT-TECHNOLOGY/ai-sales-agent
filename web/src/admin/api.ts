@@ -850,3 +850,13 @@ export function adminSettleInvoice(invoiceId: number, status: "PAID" | "FOR_FREE
     body: JSON.stringify(reason ? { status, reason } : { status }),
   });
 }
+
+/** The aggregated dashboard (`GET /admin/v1/dashboard`): real figures only, each with its availability. */
+export function adminDashboard(filters: { from?: string; to?: string; client_id?: string } = {}): Promise<import("../dashboard/types").AdminDashboard> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) query.set(key, value);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return request(`/dashboard${suffix}`);
+}

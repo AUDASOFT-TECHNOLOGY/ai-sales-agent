@@ -1,0 +1,188 @@
+/* Dashboards (Admin and Client): chart tokens and layout. Colours are the Okabe-Ito set (safe for
+   the common colour-vision deficiencies); identity also rides on markers, dashes and labels. */
+:root {
+  --dv-billed: #56b4e9;
+  --dv-collected: #009e73;
+  --dv-free: #e69f00;
+  --dv-discounted: #cc79a7;
+  --dv-cost: #d55e00;
+  --dv-a: #0072b2;
+  --dv-b: #e69f00;
+  --dv-c: #009e73;
+  --dv-d: #cc79a7;
+  --dv-e: #d55e00;
+  --dv-f: #56b4e9;
+  --dv-surface: #0e1224;
+}
+[data-app="client"] {
+  --dv-billed: #0072b2;
+  --dv-collected: #007a5a;
+  --dv-free: #b36b00;
+  --dv-discounted: #a24d82;
+  --dv-cost: #b34700;
+  --dv-surface: #ffffff;
+}
+
+.dv-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+  margin-block-start: var(--space-8, 32px);
+}
+.dv-section h2,
+.dv-section h3 {
+  margin: 0;
+}
+.dv-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4, 16px);
+  align-items: flex-end;
+}
+.dv-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dv-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: var(--space-4, 16px);
+}
+.dv-card {
+  padding: var(--space-5, 20px);
+  min-width: 0;
+}
+.dv-chart {
+  min-width: 0;
+}
+.dv-chart__title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+.dv-chart__desc {
+  margin: 0 0 8px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.dv-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.dv-grid {
+  stroke: currentColor;
+  opacity: 0.12;
+}
+.dv-axis {
+  fill: var(--text-3);
+  font-size: 11px;
+}
+.dv-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.dv-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dv-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.dv-note--na {
+  border: 1px dashed var(--line-2, currentColor);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.dv-table summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-2);
+  margin-block-start: 6px;
+}
+.dv-table table,
+.dv-data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.dv-table th,
+.dv-table td,
+.dv-data th,
+.dv-data td {
+  text-align: start;
+  padding: 4px 8px;
+  border-block-end: 1px solid var(--line-1, rgb(128 128 128 / 0.2));
+  font-variant-numeric: tabular-nums;
+}
+.dv-scroll {
+  overflow-x: auto;
+}
+.dv-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.dv-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid currentColor;
+  color: var(--text-2);
+}
+.dv-badge--estimated {
+  color: var(--attention-text, #b36b00);
+}
+.dv-badge--not_tracked {
+  color: var(--text-3);
+  border-style: dashed;
+}
+.dv-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-inline-end: 6px;
+}
+.dv-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3, 12px);
+}
+.dv-kpi {
+  padding: var(--space-4, 16px);
+  min-width: 0;
+}
+.dv-kpi__label {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.dv-kpi__value {
+  margin: 4px 0;
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.dv-kpi__value--na {
+  color: var(--text-3);
+}
+.dv-kpi__note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}

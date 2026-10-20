@@ -13,6 +13,7 @@ import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
 import { ClientApprovalsPage } from "./client/ClientApprovalsPage";
 import { ClientInvoicesPage } from "./client/billing/ClientInvoicesPage";
 import { ClientAuthProvider } from "./client/ClientAuthContext";
+import { ClientDashboardPage } from "./client/dashboard/ClientDashboardPage";
 import { ClientHomePage } from "./client/ClientHomePage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
 import { ClientProfilePage } from "./client/ClientProfilePage";
@@ -120,7 +121,7 @@ export function App() {
                 {/* Addresses of the previous menu keep working. */}
                 <Route path="agent" element={<Navigate to="/home" replace />} />
                 <Route path="setup" element={<Navigate to="/home" replace />} />
-                <Route path="dashboard" element={<Navigate to="/home" replace />} />
+                <Route path="dashboard" element={<ClientDashboardPage />} />
                 <Route path="results" element={<Navigate to="/home" replace />} />
                 <Route path="history" element={<Navigate to="/home" replace />} />
                 <Route path="notifications" element={<Navigate to="/home" replace />} />
