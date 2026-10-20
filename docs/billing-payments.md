@@ -13,7 +13,17 @@ Revansa never collects money. An invoice becomes `PAID` in one of two ways, and 
 - `PENDING` -> `PAID` (manual or electronic) or `FOR_FREE` (manual only).
 - `PENDING` -> `FAILED` when a verified notification reports the payment failed. A `FAILED` invoice can
   still be paid later, electronically or by hand.
-- `PAID` and `FOR_FREE` are final. An invoice paid electronically cannot be marked manually (409
+- `PENDING`/`FAILED` -> `DISCOUNTED_100` (manual, owner only; spec 13.3, 13.4): a 100% discount, distinct
+  from `FOR_FREE` and from `PAID`. Body: `{"status": "DISCOUNTED_100", "reason": "..."}` (reason
+  optional). The invoice keeps `amount` = the billed amount before discount and records
+  `amount_after_discount` (0), `discount_amount`, `free_amount`, `discount_percent` (100) and
+  `discount_reason`; who and when are `status_changed_by`/`status_changed_at` plus a `payment_events`
+  row (`event_status` `DISCOUNTED_100`, `manual:<id>`). Migration `0019` is additive (existing invoices
+  read as no discount; a legacy `FOR_FREE` reports its `free_amount` as the whole amount).
+- **Collected means `PAID` only** (`collected` in the API, `Invoice.is_collected`): `FOR_FREE` and a
+  discount are decisions, never a payment received, and have no payment origin. A paid invoice is
+  never discounted (409), and a webhook payment on a discounted invoice is refused as `already_settled`.
+- `PAID`, `FOR_FREE` and `DISCOUNTED_100` are final. An invoice paid electronically cannot be marked manually (409
   "this invoice was paid electronically and cannot be changed"). A genuine payment arriving for an
   invoice the Admin already settled is refused and traced (outcome `already_settled`); it changes
   nothing.

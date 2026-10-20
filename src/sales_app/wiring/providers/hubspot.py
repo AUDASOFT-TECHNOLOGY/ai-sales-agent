@@ -7,7 +7,9 @@ consent registry (`sales_app.wiring.runtime`). It is read-only unless the operat
 turned write-back on, Revansa copies a few of its own results into properties the operator named
 (`docs/writeback-hubspot.md`).
 
-One credential, the client's own: its Private App access token. It is a secret of the client's
+One credential, the client's own: normally its OAuth authorisation (`hubspot.oauth_grant`, spec 7.1);
+the legacy Private App access token (`hubspot.access_token`) is kept only for compatibility, is never
+proposed to a client, and is set by an Admin if at all. It is a secret of the client's
 scope, never shown again, and no two clients may hold the same one (that would be one HubSpot
 account serving two clients). It is read here, to build the connector, and nowhere else that runs an
 agent; it never reaches a log, an error or a response.
@@ -565,7 +567,7 @@ def _oauth_token(client_id: str) -> Callable[[], str]:
 
 
 def _credential(config: ClientConfig) -> str | Callable[[], str]:
-    """The client's own HubSpot authorisation when it holds one, else the Private App token."""
+    """The client's own HubSpot authorisation when it holds one, else the legacy Private App token (compatibility)."""
     if HUBSPOT_OAUTH_GRANT in config.secrets and config.secrets.get(HUBSPOT_OAUTH_GRANT) == "1":
         return _oauth_token(config.client_id)
     if HUBSPOT_ACCESS_TOKEN in config.secrets:

@@ -111,6 +111,9 @@ GMAIL_OAUTH_STATE_KEY = "gmail.oauth_state_key"  # signs the OAuth `state`; at l
 GMAIL_REFRESH_TOKEN = "gmail.refresh_token"
 GMAIL_ACCOUNT_ADDRESS = "gmail.account_address"
 GMAIL_REAUTH_REQUIRED = "gmail.reauth_required"
+# When the mailbox was connected (ISO 8601, UTC; client scope, same rules): where the first read of the
+# mailbox starts, so a reply that arrives before the first poll is not lost (spec 8.2).
+GMAIL_CONNECTED_AT = "gmail.connected_at"
 
 # One client's Google Sheets grant (client scope): the OAuth consent that lets Revansa read and write
 # the client's own spreadsheet. Written only by the OAuth callback, never through the Admin credentials
@@ -120,10 +123,6 @@ SHEETS_REFRESH_TOKEN = "sheets.refresh_token"
 SHEETS_ACCOUNT_ADDRESS = "sheets.account_address"
 SHEETS_REAUTH_REQUIRED = "sheets.reauth_required"
 SHEETS_OAUTH_GRANT = "sheets.oauth_grant"
-
-# The platform's write-back switch (global, not a credential, never in the Admin catalog): "true" or
-# "false"; absent means the deployment default. See `sales_app.writeback_switch`.
-WRITEBACK_ENABLED = "writeback.enabled"
 
 # The platform's HubSpot application (a "public app" in a HubSpot developer account; global, Admin only,
 # write-only): what lets each client connect its own HubSpot account by OAuth.

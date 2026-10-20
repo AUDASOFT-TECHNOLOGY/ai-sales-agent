@@ -162,7 +162,7 @@ class GmailJourney(Journey):
                 settings.secrets_dir, self.secrets, self.audit, cid
             ),
             writeback=WritebackSupport(
-                enabled=True, open_ledger=sql_ledgers(engine), policies=default_policies()
+                open_ledger=sql_ledgers(engine), policies=default_policies()
             ),
             llm_usage=lambda cid: SqlLLMUsageStore(engine, cid),
             gmail=self.gmail,
@@ -673,3 +673,15 @@ def test_the_service_is_closed_when_not_configured():
     assert GmailMailService(
         secrets=store, clock=None, public_base_url=lambda: "https://r.example"
     ).configured()
+
+
+def test_the_grant_remembers_when_the_mailbox_was_connected_for_the_first_read(tmp_path):
+    from datetime import UTC, datetime
+
+    moment = datetime(2026, 3, 1, 10, 30, tzinfo=UTC)
+    store = SecretStoreGrantStore(build_secret_store(tmp_path, generate_master_key()), now=lambda: moment)
+    store.save("alpha", "1//SECRET-refresh-xyz", ALPHA_ADDRESS)
+    assert store.load("alpha").connected_at == moment
+    assert store.load("beta") is None
+    store.delete("alpha")
+    assert store.load("alpha") is None

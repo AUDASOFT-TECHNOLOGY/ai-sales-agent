@@ -73,7 +73,6 @@ from sales_app.whatsapp_state import InMemoryWhatsAppState, WhatsAppState
 from sales_app.wiring import IntegrationBuilders, default_builders
 from sales_app.wiring.providers import ProviderRegistry, default_registry
 from sales_app.wiring.writeback import WritebackSupport, default_policies, sql_ledgers
-from sales_app.writeback_switch import WritebackSwitch
 from sales_core.approval import ApprovalMode
 from sales_core.ports import Clock
 from sales_integrations.system import SystemClock
@@ -155,8 +154,6 @@ class Application:
     # Gmail, grants in the client's scope of the secret store. See `sales_app.sheets_wiring`.
     sheets_access: SheetsAccessService | None = None
     hubspot_access: HubSpotAccessService | None = None
-    # The Admin's master switch for write-back (see `sales_app.writeback_switch`).
-    writeback_switch: WritebackSwitch | None = None
     # The documents and links clients attach to their products and the search over their text; None
     # without a database (the Client API says so). See `sales_app.resources`.
     product_resources: ResourceService | None = None
@@ -379,9 +376,6 @@ def _assemble(
         secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
     )
     install_hubspot_access(hubspot_access)
-    writeback_switch = WritebackSwitch(
-        secrets, audit, default=settings.writeback_enabled, now=clock.now
-    )
     product_resources, knowledge = _resources(account_stores, clock)
     builders = builders or default_builders(
         settings,
@@ -390,7 +384,7 @@ def _assemble(
         consent=lambda client_id: open_consent_registry(
             settings, account_stores.engine if account_stores else None, secrets, audit, client_id
         ),
-        writeback=_writeback_support(writeback_switch, account_stores),
+        writeback=_writeback_support(account_stores),
         llm_usage=_llm_usage_stores(account_stores),
         knowledge=knowledge.for_client if knowledge is not None else None,
         send_guards=send_limits.guard if send_limits is not None else None,
@@ -460,7 +454,6 @@ def _assemble(
     )
     channel_policy = ChannelPolicyService(secrets, audit, now=clock.now)
     channel_policy.set_on_change(manager.notify_change)
-    writeback_switch.set_on_change(manager.notify_change)
 
     daily_reports = build_report_service(
         account_stores.engine if account_stores is not None else None,
@@ -513,7 +506,6 @@ def _assemble(
         telegram_accounts=telegram_accounts,
         sheets_access=sheets_access,
         hubspot_access=hubspot_access,
-        writeback_switch=writeback_switch,
         invoices=_invoice_store(account_stores),
         payment_provider=_payment_provider_resolver(secrets),
         daily_reports=daily_reports,
@@ -621,14 +613,11 @@ def _llm_usage_stores(
     return lambda client_id: SqlLLMUsageStore(engine, client_id)
 
 
-def _writeback_support(
-    switch: WritebackSwitch, account_stores: AccountStores | None
-) -> WritebackSupport:
-    """Write-back as the platform offers it: the Admin's switch (default: the deployment's), and its
-    ledger in the database (without one, a source that asks for write-back is refused)."""
+def _writeback_support(account_stores: AccountStores | None) -> WritebackSupport:
+    """Write-back as the platform offers it: always on, with its ledger in the database (without
+    one, a source that asks for write-back is refused)."""
     engine = account_stores.engine if account_stores is not None else None
     return WritebackSupport(
-        enabled=switch.enabled,
         open_ledger=sql_ledgers(engine) if engine is not None else None,
         policies=default_policies(),
     )

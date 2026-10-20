@@ -54,6 +54,30 @@ Mail goes through the existing adapter with XOAUTH2: SMTP `smtp.gmail.com:587` (
 design to IMAP/SMTP (`MAIL_SCOPE`); a later Gmail REST implementation replaces it, together with
 the two wrappers.
 
+### Why the scope cannot be narrowed (technical constraint, spec 12.3)
+
+Gmail accepts XOAUTH2 on IMAP/SMTP **only** with the full-access scope `https://mail.google.com/`:
+no narrower scope (`gmail.send`, `gmail.readonly`, `gmail.modify`) is accepted by `imap.gmail.com` or
+`smtp.gmail.com`. The code reads replies over IMAP and sends over SMTP, so the scope cannot be reduced
+without replacing both with the Gmail REST API (`users.messages.send` with `gmail.send`, and
+`users.messages.list/get` with `gmail.readonly`, which is itself a restricted scope). That replacement
+touches the sending and reading adapters, the cursor (REST uses history ids, not UIDs) and the tests,
+so it is not a modest change and was **not done**. Consequences to state honestly to a Client and to
+Google: the app asks for a scope that can read and delete the whole mailbox even though Revansa only
+reads headers of non-prospect mail (`observe` mode never writes, marks nothing read, and reads a body
+only for a known prospect), and it needs the restricted-scope verification and security assessment
+described below.
+
+### First read of a freshly connected mailbox (spec 8.2)
+
+The time of the connection is kept with the grant (`gmail.connected_at`, client scope, encrypted
+store). Until the mailbox has a saved reading position, the first read looks only at messages the
+server received **since that moment** (`SEARCH SINCE`, then an exact `INTERNALDATE` check), and still
+only for senders that are known prospects. A reply that arrives between the connection and the first
+poll is therefore delivered, while the mail that was in the mailbox before is never opened. A grant made
+before this change has no connection time: its first read starts at the end of the mailbox, as before.
+Not validated against a real Gmail account: the tests use an IMAP double.
+
 ## Google Cloud prerequisites (done once by the platform operator, never by a Client)
 
 1. Create a Google Cloud project and configure the OAuth consent screen (external).

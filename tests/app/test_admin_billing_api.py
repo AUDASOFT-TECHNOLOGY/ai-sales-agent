@@ -194,6 +194,39 @@ class TestSettle:
         assert body["status_changed_at"] is not None
         assert client.get(f"{BASE}/{invoice_id}").json()["status"] == status
 
+    def test_an_owner_applies_a_100_percent_discount_distinct_from_paid_and_free(self, fx):  # noqa: F811
+        client, invoice_id = self.one(fx)
+        billed = client.get(f"{BASE}/{invoice_id}").json()["amount"]
+        response = client.put(
+            f"{BASE}/{invoice_id}/status",
+            json={"status": "DISCOUNTED_100", "reason": "launch offer"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "DISCOUNTED_100" and body["collected"] is False
+        assert body["amount"] == billed  # billed amount, before discount
+        assert float(body["amount_after_discount"]) == 0 and body["discount_percent"] == 100
+        assert body["discount_amount"] == billed and body["free_amount"] == billed
+        assert body["discount_reason"] == "launch offer"
+        assert body["status_changed_by"] == "root" and body["status_changed_at"] is not None
+        events = client.get(f"/admin/v1/billing/payment-events?invoice_id={invoice_id}").json()["events"]
+        assert [(e["event_status"], e["actor"]) for e in events] == [("DISCOUNTED_100", "root")]
+        # never modified again, and a payment is not collected on it
+        for status in ("PAID", "FOR_FREE", "DISCOUNTED_100"):
+            assert (
+                client.put(f"{BASE}/{invoice_id}/status", json={"status": status}).status_code == 409
+            )
+        assert client.get(f"{BASE}/{invoice_id}").json()["status"] == "DISCOUNTED_100"
+
+    def test_a_paid_invoice_is_never_discounted_and_only_an_owner_discounts(self, fx):  # noqa: F811
+        client, invoice_id = self.one(fx)
+        client.put(f"{BASE}/{invoice_id}/status", json={"status": "PAID"})
+        body = {"status": "DISCOUNTED_100"}
+        assert client.put(f"{BASE}/{invoice_id}/status", json=body).status_code == 409
+        paid = client.get(f"{BASE}/{invoice_id}").json()
+        assert paid["status"] == "PAID" and paid["discount_percent"] == 0 and paid["collected"] is True
+        assert as_alice(fx).put(f"{BASE}/{invoice_id}/status", json=body).status_code == 403
+
     def test_a_settled_invoice_cannot_be_changed_again(self, fx):  # noqa: F811
         client, invoice_id = self.one(fx)
         client.put(f"{BASE}/{invoice_id}/status", json={"status": "PAID"})

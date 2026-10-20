@@ -71,8 +71,8 @@ def raw_with_sheets(cid, sources, *, writeback=WRITEBACK, mode=None):
 class WritebackDeployment(Deployment):
     """Sheets sources over in-memory spreadsheets, and the deployment's write-back switch."""
 
-    def __init__(self, root, engine, clients, secrets, *, apis, enabled=True, **kwargs):
-        self.apis, self.enabled = apis, enabled  # (client, source id) -> FakeSheetsApi
+    def __init__(self, root, engine, clients, secrets, *, apis, supported=True, **kwargs):
+        self.apis, self.supported = apis, supported  # (client, source id) -> FakeSheetsApi
         super().__init__(root, engine, clients, secrets, **kwargs)
 
     def builders(self):
@@ -89,10 +89,11 @@ class WritebackDeployment(Deployment):
             super().builders(),
             source_instances={"google_sheets": build_source},
             writeback=WritebackSupport(
-                enabled=self.enabled,
                 open_ledger=sql_ledgers(self.engine),
                 policies=default_policies(),
-            ),
+            )
+            if self.supported
+            else None,
         )
 
     def revansa(self, cid, public_id, **schedule):
@@ -142,10 +143,10 @@ def cell(api, row, header):
 # ---- off unless asked, twice ---------------------------------------------------------------------------
 
 
-def test_the_deployments_switch_keeps_every_source_untouched_even_with_a_block(deploy_sheets):
+def test_a_deployment_without_write_back_support_keeps_every_source_untouched_even_with_a_block(deploy_sheets):
     api = sheet(("p1", "Ada", PHONE))
     d = deploy_sheets(
-        {"alpha": raw_with_sheets("alpha", ["sa"])}, {("alpha", "sa"): api}, enabled=False
+        {"alpha": raw_with_sheets("alpha", ["sa"])}, {("alpha", "sa"): api}, supported=False
     )
     d.revansa("alpha", "sa:p1", follow_up_count=3)
     runtime = d.runtime("alpha")
@@ -164,13 +165,11 @@ def test_a_source_without_a_block_is_never_switched_on_by_the_deployment(deploy_
     assert Job.SYNC not in d.due("alpha")
 
 
-def test_the_deployment_default_is_on_but_nothing_is_written_without_a_support_or_a_block():
-    """The deployment default is ON (a forgotten flag is not a safety); a bare support, builders
-    without one, and any source without its own `writeback` block still write nothing."""
+def test_there_is_no_write_back_switch_and_builders_without_a_support_write_nothing():
+    """Write-back is permanent (no flag, no Admin switch); builders without a support write nothing."""
     from sales_app.settings import Settings
 
-    assert Settings().writeback_enabled is True
-    assert WritebackSupport().enabled is False
+    assert not hasattr(Settings(), "writeback_enabled")
     from sales_app.wiring import default_builders
 
     assert default_builders(Settings()).writeback is None

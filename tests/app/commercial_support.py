@@ -234,7 +234,6 @@ class Journey:
         return make_settings(
             self.root,
             database_url=self.url,
-            writeback_enabled=True,
             secrets_dir=self.tmp_path / "_secrets",
         )
 
@@ -247,7 +246,7 @@ class Journey:
                 settings.secrets_dir, self.secrets, self.audit, cid
             ),
             writeback=WritebackSupport(
-                enabled=True, open_ledger=sql_ledgers(engine), policies=default_policies()
+                open_ledger=sql_ledgers(engine), policies=default_policies()
             ),
             llm_usage=lambda cid: SqlLLMUsageStore(engine, cid),
         )

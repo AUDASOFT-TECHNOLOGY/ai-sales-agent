@@ -19,6 +19,7 @@ from sales_app.billing import (
     InvoiceLine,
     InvoiceNotFoundError,
     InvoiceStatus,
+    MANUAL_STATUSES,
     InvoiceStatusError,
     PaymentOrigin,
     PaymentOutcome,
@@ -26,6 +27,7 @@ from sales_app.billing import (
     PaymentResult,
     check_settle,
     decide,
+    discount_100,
     manual_record,
     parse_reference,
     webhook_record,
@@ -69,6 +71,11 @@ def _invoice(row, lines) -> Invoice:
         payment_origin=PaymentOrigin(row.payment_origin) if row.payment_origin else None,
         payment_transaction_id=row.payment_transaction_id,
         payment_event_id=row.payment_event_id,
+        discount_percent=row.discount_percent or 0,
+        amount_after_discount=row.amount_after_discount,
+        discount_amount=row.discount_amount,
+        free_amount=row.free_amount,
+        discount_reason=row.discount_reason,
     )
 
 
@@ -167,11 +174,26 @@ class SqlInvoiceStore:
             raise StoreUnavailableError(_UNAVAILABLE) from None
         return found[0] if found else None
 
-    def settle(self, invoice_id: int, status: InvoiceStatus, *, at: datetime, by: str) -> Invoice:
+    def settle(
+        self,
+        invoice_id: int,
+        status: InvoiceStatus,
+        *,
+        at: datetime,
+        by: str,
+        reason: str | None = None,
+    ) -> Invoice:
         try:
             with self._engine.begin() as connection:
                 changed = 0
-                if status in (InvoiceStatus.PAID, InvoiceStatus.FOR_FREE):
+                if status in MANUAL_STATUSES:
+                    extra: dict[str, object] = {}
+                    if status is InvoiceStatus.DISCOUNTED_100:
+                        current = connection.execute(
+                            select(invoices).where(invoices.c.invoice_id == invoice_id)
+                        ).first()
+                        if current is not None:
+                            extra = discount_100(_invoice(current, []), reason)
                     changed = connection.execute(
                         update(invoices)
                         .where(
@@ -185,6 +207,7 @@ class SqlInvoiceStore:
                             status_changed_at=at,
                             status_changed_by=by,
                             payment_origin=PaymentOrigin.MANUAL.value,
+                            **extra,
                         )
                     ).rowcount
                 if changed == 0:

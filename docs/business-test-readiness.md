@@ -18,7 +18,7 @@ cd web && npm install && npm run dev                             # UI on http://
 
 - The Vite dev server proxies `/admin/v1` and `/client/v1` to `127.0.0.1:8000` (see
   `web/vite.config.ts`), so the browser stays on one origin.
-- The write-back to Google Sheets / HubSpot is **off** unless `SALES_AGENT_WRITEBACK_ENABLED=true`.
+- The write-back to Google Sheets / HubSpot is **permanent** (spec 6.3, 6.4): no flag, no Admin or Client switch. A source is written only when its client mapped columns/properties and a database keeps the ledger.
 - Public webhooks (Telegram, payments) need a public https address: `docs/telegram-channel.md`.
 
 ## 2. External services to configure by hand
@@ -30,7 +30,7 @@ cd web && npm install && npm run dev                             # UI on http://
 | Dedicated mailbox | Create the mailbox at the provider (OVH) by hand using the Sender Name the client confirmed; Admin enters SMTP/IMAP settings, verifies, then activates | Admin → Email activation |
 | Gmail (client-owned) | Create a Google OAuth app (Web application; Gmail API enabled; consent screen with the restricted scope `https://mail.google.com/`; test users listed while unverified, 100 max; redirect `{SALES_AGENT_PUBLIC_BASE_URL}/client/v1/channel/google/callback`). Enter client id / secret / state key in Admin → Settings → Gmail; set the client's send cap. Google's verification + security assessment are required before arbitrary accounts can connect (`docs/google-oauth-channel.md`) | Google Cloud, then Admin → Settings |
 | Google Sheets | Service account shared on the client's sheet | `docs/sheet-schema.md` |
-| HubSpot | Private App token (`crm.objects.contacts.read`; `.write` and `crm.schemas.contacts.read` only for write-back) | Client → Source |
+| HubSpot | The client connects its own account by OAuth (spec 7.1); the Admin stores the HubSpot app id / secret / state key (scopes `crm.objects.contacts.read`; `.write` and `crm.schemas.contacts.read` for write-back). The Private App token is legacy, Admin-only, never offered to a client | Client → Source; Admin → Settings |
 | Payment provider | None integrated. A signed webhook (`POST /api/payments/webhook`, HMAC) is implemented; set `payments.webhook_secret`. A real PSP needs an adapter or a relay (`docs/billing-payments.md`) | Admin → Settings |
 | WhatsApp | Meta credentials alone prove nothing: the channel stays "waiting / not verified" until Meta validates the number (`docs/whatsapp-channel.md`) | Admin |
 

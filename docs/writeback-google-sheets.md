@@ -19,9 +19,9 @@ columns of the client's own spreadsheet, so the client sees them where they work
 Names, phone numbers, e-mail addresses, the language and every column the client added are never
 written. No column is ever created.
 
-## Turning it on (three steps, all deliberate)
+## What it takes (three steps, all deliberate)
 
-1. The deployment: `SALES_AGENT_WRITEBACK_ENABLED=true` (default `false`). Needs the SQL database:
+1. The deployment: nothing to switch on (write-back is permanent). Needs the SQL database:
    the attempts are kept in `op_writeback_ledger` (migration 0005).
 2. The source, in its settings: the client chooses the columns in `PUT /client/v1/lanes/{lane}/sync` (Results button), or the operator writes them:
 

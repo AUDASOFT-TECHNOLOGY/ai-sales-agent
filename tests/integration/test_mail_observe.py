@@ -548,3 +548,78 @@ class TestConsumeIsUnchanged:
         from sales_integrations.mail.mailbox import _imap_date
 
         assert _imap_date(datetime(2026, 3, 4, 23, 30, tzinfo=UTC)) == "04-Mar-2026"
+
+
+# ---- a mailbox connected at a known moment ----------------------------------------------------------
+
+
+class TestFirstReadFromTheConnection:
+    """Spec 8.2: a reply that arrives between the connection and the first poll is not lost, and the
+    older mail of the mailbox is still never read."""
+
+    CONNECTED = NOW + timedelta(hours=2)
+
+    def _server(self):
+        s = ImapServerDouble()
+        # History from before the connection, same day included: none of it is ours.
+        s.deliver(reply(message_id="old1@mail.x"), date=NOW)
+        s.deliver(reply("friend@private.example", "private", message_id="old2@mail.x"), date=NOW)
+        return s
+
+    def test_a_reply_that_arrived_before_the_first_poll_is_delivered(self, store):
+        server = self._server()
+        server.deliver(reply("bea@example.com", "first reply", message_id="n1@mail.x"),
+                       date=self.CONNECTED + timedelta(minutes=5))
+        mailbox = reader(server, store, read_from=self.CONNECTED)
+        items = mailbox.fetch(50, accept=accept)
+        for item in items:
+            mailbox.acknowledge(item.handle)
+        mailbox.close()
+        assert [i.message.sender for i in items] == ["bea@example.com"]
+        assert [i.message.text for i in items] == ["first reply"]
+
+    def test_history_from_before_the_connection_is_never_read(self, store):
+        server = self._server()
+        server.deliver(reply("bea@example.com", "new", message_id="n1@mail.x"),
+                       date=self.CONNECTED + timedelta(minutes=1))
+        mailbox = reader(server, store, read_from=self.CONNECTED)
+        mailbox.fetch(50, accept=accept)
+        mailbox.close()
+        assert server.bodies_served == [3]  # only the message received after the connection
+        assert 1 not in server.headers_served and 2 not in server.headers_served
+
+    def test_only_known_prospects_count_and_the_position_then_moves_on(self, store):
+        server = self._server()
+        server.deliver(reply("stranger@elsewhere.example", "x", message_id="s@mail.x"),
+                       date=self.CONNECTED + timedelta(minutes=1))
+        server.deliver(reply("alex@example.com", "y", message_id="a@mail.x"),
+                       date=self.CONNECTED + timedelta(minutes=2))
+        assert poll_from(server, store, self.CONNECTED) == ["alex@example.com"]
+        assert poll_from(server, store, self.CONNECTED) == []  # delivered once
+        saved = position(store, mailbox_digest("imap.example.org", OWN, "INBOX"))
+        assert saved.next_uid == server.next_uid
+
+    def test_with_nothing_new_the_position_is_set_at_the_end(self, store):
+        server = self._server()
+        assert poll_from(server, store, self.CONNECTED) == []
+        saved = position(store, mailbox_digest("imap.example.org", OWN, "INBOX"))
+        assert saved is not None and saved.next_uid == server.next_uid
+        server.deliver(reply("alex@example.com", "later", message_id="l@mail.x"),
+                       date=self.CONNECTED + timedelta(hours=1))
+        assert poll_from(server, store, self.CONNECTED) == ["alex@example.com"]
+
+    def test_without_a_connection_moment_the_first_read_is_still_the_end(self, store):
+        server = self._server()
+        assert poll(server, store) == []
+        assert server.commands("FETCH") == []
+
+
+def poll_from(server, store, moment):
+    mailbox = reader(server, store, read_from=moment)
+    try:
+        items = mailbox.fetch(50, accept=accept)
+        for item in items:
+            mailbox.acknowledge(item.handle)
+        return [i.message.sender for i in items]
+    finally:
+        mailbox.close()

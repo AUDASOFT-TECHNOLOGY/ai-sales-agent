@@ -357,3 +357,37 @@ def test_an_unreachable_database_is_a_fixed_sentence():
     ):
         with pytest.raises(StoreUnavailableError):
             call()
+
+
+def test_a_100_percent_discount_is_its_own_status_and_never_a_collection(store):
+    pending = store.create(invoice("alpha"))
+    done = store.settle(
+        pending.invoice_id, InvoiceStatus.DISCOUNTED_100, at=NOW, by="root", reason="  goodwill "
+    )
+    assert done.status is InvoiceStatus.DISCOUNTED_100
+    assert done.status not in (InvoiceStatus.PAID, InvoiceStatus.FOR_FREE)
+    assert not done.is_collected
+    assert done.amount == pending.amount  # the billed amount, before discount, is kept
+    assert done.amount_after_discount == 0 and done.discount_percent == 100
+    assert done.discount_amount == pending.amount and done.free_amount == pending.amount
+    assert done.discount_reason == "goodwill"
+    assert (done.status_changed_by, done.status_changed_at) == ("root", NOW)
+    assert [r.event_status for r in store.payment_events(done.invoice_id)] == ["DISCOUNTED_100"]
+    # final: nothing changes it afterwards
+    for target in (InvoiceStatus.PAID, InvoiceStatus.FOR_FREE, InvoiceStatus.DISCOUNTED_100):
+        with pytest.raises(InvoiceStatusError):
+            store.settle(done.invoice_id, target, at=NOW, by="other")
+    assert store.get(done.invoice_id).status is InvoiceStatus.DISCOUNTED_100
+
+
+def test_for_free_is_not_a_collection_either_and_has_no_discount(store):
+    free = store.settle(store.create(invoice("beta")).invoice_id, InvoiceStatus.FOR_FREE, at=NOW, by="root")
+    assert not free.is_collected and free.discount_percent == 0 and free.free_total == free.amount
+
+
+def test_a_paid_invoice_cannot_be_discounted(store):
+    paid = store.settle(store.create(invoice("gamma")).invoice_id, InvoiceStatus.PAID, at=NOW, by="root")
+    with pytest.raises(InvoiceStatusError):
+        store.settle(paid.invoice_id, InvoiceStatus.DISCOUNTED_100, at=NOW, by="root")
+    assert store.get(paid.invoice_id).discount_percent == 0
+    assert store.get(paid.invoice_id).is_collected

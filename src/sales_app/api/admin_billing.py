@@ -3,8 +3,9 @@
 Any admin reads the invoices of the clients they can reach (a client outside their scope does not
 appear, and its invoice is a 404). Only an owner generates invoices or settles them. Generating a
 month builds, for every client that was on a plan that month, one invoice from the terms recorded in
-its plan assignments; an invoice that already exists is never rebuilt. Marking an invoice PAID or
-FOR_FREE is the Admin's declaration, once (origin `manual`, traced); an invoice already paid by a
+its plan assignments; an invoice that already exists is never rebuilt. Marking an invoice PAID,
+FOR_FREE or DISCOUNTED_100 (a 100% discount: billed amount kept, amount after discount 0, amounts
+discounted and free recorded, who and when traced, optional reason) is the owner's declaration, once (origin `manual`, traced); an invoice already paid by a
 verified electronic confirmation (`POST /api/payments/webhook`, see `sales_app.payment_confirmation`)
 refuses it with a 409. `overdue` is computed: unpaid (PENDING/FAILED) `DUE_DAYS` after its month.
 
@@ -15,7 +16,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from sales_app.admin_auth import AdminRole, AdminUser
 from sales_app.api.admin import make_current_admin_dependency, require_role
@@ -64,6 +65,12 @@ class InvoiceResponse(BaseModel):
     payment_origin: str | None  # "manual" | "electronic" | None while unpaid / free
     payment_transaction_id: str | None
     payment_event_id: str | None
+    discount_percent: int  # 0 unless discounted
+    amount_after_discount: str | None  # `amount` is the billed amount before any discount
+    discount_amount: str | None
+    free_amount: str | None  # given free (the whole amount for FOR_FREE and DISCOUNTED_100)
+    discount_reason: str | None
+    collected: bool  # money received: only PAID; FOR_FREE and a discount never are
     due_at: datetime
     overdue: bool
 
@@ -108,7 +115,12 @@ class GenerateResponse(BaseModel):
 
 
 class SettleBody(BaseModel):
-    status: InvoiceStatus  # PAID or FOR_FREE
+    status: InvoiceStatus  # PAID, FOR_FREE or DISCOUNTED_100
+    reason: str | None = Field(default=None, max_length=255)  # kept with a discount
+
+
+def _money(value) -> str | None:
+    return None if value is None else format(value, "f")
 
 
 def _response(invoice: Invoice, now: datetime) -> InvoiceResponse:
@@ -141,6 +153,12 @@ def _response(invoice: Invoice, now: datetime) -> InvoiceResponse:
         payment_origin=invoice.payment_origin.value if invoice.payment_origin else None,
         payment_transaction_id=invoice.payment_transaction_id,
         payment_event_id=invoice.payment_event_id,
+        discount_percent=invoice.discount_percent,
+        amount_after_discount=_money(invoice.amount_after_discount),
+        discount_amount=_money(invoice.discount_amount),
+        free_amount=_money(invoice.free_total),
+        discount_reason=invoice.discount_reason,
+        collected=invoice.is_collected,
         due_at=invoice.due_at,
         overdue=invoice.is_overdue(now),
     )
@@ -302,7 +320,11 @@ def create_admin_billing_router(application: Application) -> APIRouter:
         try:
             settled = await run_in_threadpool(
                 lambda: store.settle(
-                    invoice_id, body.status, at=application.clock.now(), by=admin.username
+                    invoice_id,
+                    body.status,
+                    at=application.clock.now(),
+                    by=admin.username,
+                    reason=body.reason,
                 )
             )
         except InvoiceNotFoundError:

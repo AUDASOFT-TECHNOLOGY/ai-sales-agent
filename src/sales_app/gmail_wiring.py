@@ -26,6 +26,7 @@ by contrast, survives restarts.
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -35,6 +36,7 @@ from sales_app.config.email_settings import (
 )
 from sales_app.config.secrets import (
     GMAIL_ACCOUNT_ADDRESS,
+    GMAIL_CONNECTED_AT,
     GMAIL_OAUTH_CLIENT_ID,
     GMAIL_OAUTH_CLIENT_SECRET,
     GMAIL_OAUTH_STATE_KEY,
@@ -182,6 +184,19 @@ class GrantKeys:
     refresh_token: str = GMAIL_REFRESH_TOKEN
     address: str = GMAIL_ACCOUNT_ADDRESS
     reauth: str = GMAIL_REAUTH_REQUIRED
+    connected_at: str | None = None  # Gmail only: when the grant was made
+
+
+def _moment(text: str | None) -> datetime | None:
+    """A stored moment (ISO 8601), or None when absent or not readable (then the first read starts
+    at the end of the mailbox, as it always did)."""
+    if not text:
+        return None
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 class SecretStoreGrantStore:
@@ -197,9 +212,11 @@ class SecretStoreGrantStore:
         *,
         unique_address: bool = True,
         actor: str = _ACTOR,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         self._secrets = secrets
-        self._keys = keys or GrantKeys()
+        self._keys = keys or GrantKeys(connected_at=GMAIL_CONNECTED_AT)
+        self._now = now or (lambda: datetime.now(UTC))
         self._unique = unique_address
         self._actor = actor
 
@@ -212,11 +229,16 @@ class SecretStoreGrantStore:
             token = self._secrets.get(scope, self._keys.refresh_token)
             address = self._secrets.get(scope, self._keys.address)
             reauth = self._secrets.get(scope, self._keys.reauth)
+            since = (
+                self._secrets.get(scope, self._keys.connected_at)
+                if self._keys.connected_at
+                else None
+            )
         except SecretStoreError:
             raise GoogleTransientError("the stored authorisation cannot be read") from None
         if not token or not address:
             return None
-        return GoogleGrant(token, address, reauth == "1")
+        return GoogleGrant(token, address, reauth == "1", _moment(since))
 
     def save(self, client_id: str, refresh_token: str, address: str) -> None:
         scope = client_scope(client_id)
@@ -237,6 +259,13 @@ class SecretStoreGrantStore:
                     self._secrets.delete(scope, self._keys.address)
                 raise
             self._secrets.delete(scope, self._keys.reauth)
+            if self._keys.connected_at:
+                self._secrets.set(
+                    scope,
+                    self._keys.connected_at,
+                    self._now().astimezone(UTC).isoformat(),
+                    by=self._actor,
+                )
         except DuplicateSecretError:
             raise AddressAlreadyConnectedError from None
         except SecretStoreError:
@@ -250,7 +279,14 @@ class SecretStoreGrantStore:
 
     def delete(self, client_id: str) -> None:
         scope = client_scope(client_id)
-        for key in (self._keys.refresh_token, self._keys.address, self._keys.reauth):
+        for key in (
+            self._keys.refresh_token,
+            self._keys.address,
+            self._keys.reauth,
+            self._keys.connected_at,
+        ):
+            if not key:
+                continue
             try:
                 self._secrets.delete(scope, key)
             except SecretStoreError:
@@ -482,6 +518,7 @@ class GmailMailService:
             read_mode=OBSERVE,
             clock=self._clock,
             imap_factory=self._imap,
+            read_from=grant.connected_at,
         )
 
 

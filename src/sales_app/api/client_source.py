@@ -10,9 +10,10 @@ session cookie, so no id supplied by the browser can reach another client's sour
   the settings moved; it is validated by the same rules as every publication (422) and **nothing is
   written** if it is not valid. A client changes only the source and its spreadsheet and tab: never
   the model, the mode, the quota, the store's tabs or anything of WhatsApp/Meta.
-- **No credential is the client's to give.** The access a CRM source needs (today the HubSpot Private
-  App token) is connected by the platform; the client is only told whether it is in place
-  (`access`: `ready` or `waiting_platform`). There is no route here to write or remove it.
+- **No credential is the client's to give.** The normal way to give HubSpot access is the
+  client's own OAuth authorisation (`client_hubspot_oauth`, spec 7.1); the legacy Private App token is
+  never offered to a client. The client is only told whether access is in place (`access`: `ready` or
+  `waiting_platform`). There is no route here to write or remove a credential.
 - **The test** (`POST /client/v1/source/test`) makes one real, read-only call to the chosen source.
   A success proves the access works at that moment and nothing more; a failure is a fixed sentence.
 
@@ -475,7 +476,7 @@ def create_client_source_router(
 
     def hubspot_token(client_id: str) -> str | None:
         """The access token a HubSpot check uses: the client's own authorisation (a fresh access
-        token), else the stored Private App token. None: nothing to read with."""
+        token), else the legacy Private App token an Admin may have stored (compatibility only). None: nothing to read with."""
         access = application.hubspot_access
         if access is not None and oauth_state(application, client_id, hubspot.KEY) in (
             "connected",

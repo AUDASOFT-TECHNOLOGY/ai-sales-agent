@@ -4,10 +4,12 @@ write-back package.
 Only this module imports `sales_app.sourcing.writeback` (an architecture test keeps that list). The
 runtime and the scheduler see a `ClientWriteback` that runs and answers with counters.
 
-**Off by default, twice.** A deployment must turn it on (`SALES_AGENT_WRITEBACK_ENABLED`, off until
-the mechanism has been validated against a real Google Sheet), and then each source must carry its
-own `writeback` block naming the columns (see the Google Sheets provider). Nothing here enables a
-source that does not ask. A client in the global `DRY_RUN` mode gets no write-back at all: no
+**Always on, never a switch.** Write-back is part of Revansa (spec 6.3, 6.4, 17.1): there is no
+Admin or Client switch and no deployment flag. What keeps it safe is technical and not exposed: each
+source must carry its own `writeback` block naming the columns (see the Google Sheets provider),
+the attempts are kept in a durable ledger (idempotence), and a source that is not authorised, not
+verified or failing is a visible error, never a silent skip. Nothing here enables a source that
+does not ask. A client in the global `DRY_RUN` mode gets no write-back at all: no
 syncer is built, so the source is neither read nor written. (The syncer's own `dry_run` is another
 thing: a simulation that reads and plans but does not write; it is not used here.)
 
@@ -53,18 +55,10 @@ PolicyOf = Callable[[Mapping[str, Any]], tuple[Collection[ProspectField], bool]]
 
 @dataclass(frozen=True, slots=True)
 class WritebackSupport:
-    """What a deployment offers for write-back. `enabled` is the deployment's own decision."""
+    """What a deployment offers for write-back: the ledger and the providers' policies."""
 
-    enabled: bool | Callable[[], bool] = False  # a function: the Admin can change it live
     open_ledger: Callable[[str], WriteBackLedger] | None = None  # one client's ledger
     policies: Mapping[str, PolicyOf] = field(default_factory=dict)
-
-
-def writeback_is_on(support: WritebackSupport | None) -> bool:
-    """Whether the deployment lets results be copied back right now."""
-    if support is None:
-        return False
-    return bool(support.enabled() if callable(support.enabled) else support.enabled)
 
 
 def default_policies() -> dict[str, PolicyOf]:
@@ -201,12 +195,12 @@ def build_client_writeback(
 ) -> tuple[ClientWriteback | None, list[str]]:
     """The client's write-back, or None when there is none to run, and the problems found.
 
-    None, with no problem, when the deployment has not turned write-back on, when the client is in
+    None, with no problem, when the deployment offers no write-back support, when the client is in
     the global `DRY_RUN` mode, or when no source asks for it. Problems (a block that does not fit
     its source, no ledger to keep the attempts in) are words for `RuntimeBuildError`: a source that
     asked to be written back never silently is not.
     """
-    if not writeback_is_on(support) or config.effective_mode is ApprovalMode.DRY_RUN:
+    if support is None or config.effective_mode is ApprovalMode.DRY_RUN:
         return None, []
     problems: list[str] = []
     wanted: dict[str, WriteBackPolicy] = {}

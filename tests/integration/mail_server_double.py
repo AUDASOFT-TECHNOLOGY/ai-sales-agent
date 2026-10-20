@@ -131,6 +131,9 @@ class ImapServerDouble:
         if uid not in self.messages:
             return "OK", [None]
         raw = self.messages[uid]["raw"]
+        if spec == "(INTERNALDATE)":
+            stamp = self.messages[uid]["date"].astimezone(UTC).strftime("%d-%b-%Y %H:%M:%S +0000")
+            return "OK", [f'{uid} (UID {uid} INTERNALDATE "{stamp}")'.encode()]
         if "BODY.PEEK[HEADER.FIELDS" in spec:
             wanted = re.search(r"HEADER\.FIELDS \(([^)]*)\)", spec).group(1).split()
             headers = BytesParser(policy=DEFAULT_POLICY).parsebytes(raw, headersonly=True)

@@ -123,7 +123,7 @@ export function SyncCard({ laneId, laneName, onClose, onChanged }: { laneId: str
       ) : (
         <>
           <p className="rv-card__sub">{t(sheets ? "rv.sync.help.sheets" : "rv.sync.help.hubspot")}</p>
-          {sync.state !== "off" ? <Note tone={sync.state === "configured" ? "success" : "warn"}>{t(`rv.sync.note.${sync.state}` as MessageKey)}</Note> : null}
+          {sync.state !== "off" ? <Note tone="success">{t("rv.sync.note.configured")}</Note> : null}
           {failure ? <FailureNote failure={failure} /> : null}
           {problem ? <Note tone="danger">{t(problem)}</Note> : null}
           {done ? <Note tone="success">{t("rv.sync.saved")}</Note> : null}
@@ -165,11 +165,6 @@ export function SyncCard({ laneId, laneName, onClose, onChanged }: { laneId: str
         {sync.supported ? (
           <Button variant="primary" onClick={() => void save()} loading={busy}>
             {t("rv.common.save")}
-          </Button>
-        ) : null}
-        {sync.supported && sync.state !== "off" ? (
-          <Button onClick={() => void run({ expected_version: sync.version, enabled: false })} disabled={busy}>
-            {t("rv.sync.stop")}
           </Button>
         ) : null}
         <Button variant="ghost" onClick={onClose} disabled={busy}>

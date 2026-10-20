@@ -10,8 +10,9 @@ HubSpot's endpoints (`hubspot_oauth`), its own callback and its own records:
   in that client's scope alone (`hubspot.*` keys, not in the Admin catalog, never returned);
 - an access token (30 minutes) is requested when needed and never kept beyond its life, per client.
 
-The Private App token the Admin could enter before still works as a fallback for a client that has
-no grant of its own.
+OAuth is the one normal path (spec 7.1). The legacy Private App token (`hubspot.access_token`) is not
+offered to a client in any screen or client route; it stays readable only so that a client already
+running on one keeps working, and an Admin can still set or remove it. New clients connect by OAuth.
 """
 
 from collections.abc import Callable

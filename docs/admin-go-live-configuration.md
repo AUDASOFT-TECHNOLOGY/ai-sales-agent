@@ -17,7 +17,6 @@ SMTP setting; "stored" never means "verified".
 | `SALES_AGENT_SECRETS_KEY` | Master key of the credential store (`sales-agent secrets generate-key`). Losing it loses every stored credential: back it up apart from the database. |
 | `SALES_AGENT_PUBLIC_BASE_URL` | `https://<your domain>`, no trailing path. Needed for every OAuth redirect and for the Telegram/WhatsApp webhooks. |
 | `SALES_AGENT_ADMIN_COOKIE_SECURE` | Leave `true` (default) behind HTTPS. |
-| `SALES_AGENT_WRITEBACK_ENABLED` | Default `true`; `false` starts the deployment with write-back off. The Admin's switch (below) overrides it. |
 
 Create the first Admin: `sales-agent admin create --username <you> --role owner`. No development
 account exists in production.
@@ -59,12 +58,11 @@ One Google Cloud "Web application" OAuth client serves both features.
   the properties must exist in the HubSpot account first (types in `docs/writeback-hubspot.md`).
 - Test: connect a test HubSpot account, run the source test in the Client's Sources page.
 
-## 4. Write-back (Admin → Settings → Write-back, owner only)
+## 4. Write-back (permanent)
 
-- Default **on** (deployment default). The Admin can switch it off/on or return to "follow the
-  deployment"; the decision is stored in the database credential store, audited (who, when), and applies
-  to every running client at once without a restart.
-- Switching it on writes nothing by itself. A source is written only if its Client named the
+- Write-back is a permanent part of Revansa (spec 6.3, 6.4, 17.1): there is no switch, neither for the
+  Admin nor for the Client, and no deployment flag (`SALES_AGENT_WRITEBACK_ENABLED` is gone and ignored).
+- It writes nothing by itself. A source is written only if its Client named the
   columns/properties one by one, the client is on lanes, the client is not in dry-run, and the database
   keeps the attempts (ledger). Names, phones, e-mail addresses and the do-not-contact property are
   never written; a cell/property is overwritten only when empty or when Revansa wrote it.

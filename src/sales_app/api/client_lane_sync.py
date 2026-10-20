@@ -8,11 +8,10 @@ this is the client choosing *where, in its own spreadsheet or HubSpot, a copy is
 - HubSpot: a contact property, named one by one, for each result copied, and the HubSpot words for
   the statuses (the lead status property and what each of its values means to Revansa).
 
-Nothing is on by default and nothing is guessed: no block, no write. The client can only name
-existing columns/properties; the rules (what is never overwritten, no column created, no identity
-property written) are the providers' and are checked when the settings are saved. The deployment has
-a master switch (`SALES_AGENT_WRITEBACK_ENABLED`): a block saved while it is off is kept and says so;
-it writes nothing until the platform turns it on.
+Write-back is a permanent part of Revansa (spec 6.3, 6.4): there is no on/off switch, neither the
+platform's nor the client's. Nothing is guessed: a source with no mapping has nothing to write to. The
+client can only name existing columns/properties; the rules (what is never overwritten, no column
+created, no identity property written) are the providers' and are checked when the settings are saved.
 """
 
 from collections.abc import Mapping
@@ -39,7 +38,7 @@ PropertyKey = Literal[
     "summary",
 ]
 
-SyncState = Literal["off", "waiting_platform", "configured"]
+SyncState = Literal["off", "configured"]
 
 # What can be copied, in the words shown to the client.
 RESULTS: tuple[tuple[str, str], ...] = (
@@ -75,12 +74,11 @@ class HubSpotSync(BaseModel):
 
 
 class UpdateSyncRequest(BaseModel):
-    """`enabled: false` removes the write-back (and nothing else). Only one provider's block."""
+    """The mapping of one provider (one block only). Write-back itself has no switch."""
 
     model_config = ConfigDict(extra="forbid")
 
     expected_version: int | None
-    enabled: bool = True
     google_sheets: SheetsSync | None = None
     hubspot: HubSpotSync | None = None
 
@@ -97,7 +95,6 @@ class SyncResponse(BaseModel):
     supported: bool  # False: this source cannot receive results
     state: SyncState
     message: str
-    deployment_enabled: bool  # False: the platform has not turned write-back on
     results: list[ResultOption]
     google_sheets: SheetsSync | None = None
     hubspot: HubSpotSync | None = None
@@ -150,15 +147,9 @@ def hubspot_view(settings: Mapping[str, Any]) -> HubSpotSync:
     )
 
 
-def state_of(*, has_block: bool, deployment_enabled: bool) -> tuple[SyncState, str]:
+def state_of(*, has_block: bool) -> tuple[SyncState, str]:
     if not has_block:
         return "off", "Nothing is copied back: choose where the results should appear."
-    if not deployment_enabled:
-        return (
-            "waiting_platform",
-            "Your choices are saved. Revansa has not switched copying on yet; nothing is written "
-            "until it does.",
-        )
     return (
         "configured",
         "Revansa copies the results you chose. Test your connection to check they can be written.",

@@ -1,21 +1,14 @@
-# Write-back: how it is switched on, who decides, what is still unproven
+# Write-back: permanent, what stays guarded, what is still unproven
 
-## Why it was off, and what changed
+## Decision (spec 6.3, 6.4, 17.1)
 
-`SALES_AGENT_WRITEBACK_ENABLED` was introduced with write-back (commit 86ad7c3, "off by default") as a
-safety "until validated against a real Google Sheet". That validation never happened, so nobody ever had
-a reason to set it, the default stayed `false`, and no deployment file or Admin screen mentioned it:
-the feature was announced but silently inert.
-
-Now:
-
-- The deployment default is **on** (`Settings.writeback_enabled = True`). `.env.example` documents it;
-  set `SALES_AGENT_WRITEBACK_ENABLED=false` to start a deployment with it off. `.env` was not touched.
-- The switch is the **Admin's** (Admin > Settings > Write-back, `GET/PUT /admin/v1/settings/writeback`,
-  owner only). Its decision overrides the deployment default, is stored in the credential store,
-  audited, applied to every running client at once (no restart) and shown with who decided.
-  "Follow the deployment" removes the decision.
-- The client's screen says when copying is not switched on (state "saved, not active yet").
+Write-back is a permanent part of Revansa. The former switch is removed: no
+`SALES_AGENT_WRITEBACK_ENABLED` setting (an old value in the environment is ignored), no
+`writeback.enabled` platform setting, no `GET/PUT /admin/v1/settings/writeback`, no Admin card, and
+no Client option to stop it (`enabled` was removed from `PUT /client/v1/lanes/{lane}/sync`, which now
+only sets the mapping; the sync states are `off` = no mapping yet, `configured`). Idempotence is kept
+(`op_writeback_ledger`), and the technical guards below stay, unexposed: a source that is not
+authorised, not verified or failing is a visible error on the pass, not a silent skip.
 
 ## What stays guarded (unchanged)
 

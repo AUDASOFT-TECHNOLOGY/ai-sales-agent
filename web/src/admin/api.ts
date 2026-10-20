@@ -484,24 +484,6 @@ export function adminHubSpotPlatformStatus(): Promise<HubSpotPlatformStatus> {
   return request<HubSpotPlatformStatus>("/settings/integrations/hubspot/status");
 }
 
-// The platform's write-back switch (see src/sales_app/api/admin_writeback.py).
-export interface WritebackSwitch {
-  enabled: boolean;
-  decided_by: "admin" | "deployment";
-  deployment_default: boolean;
-  needs_database: boolean;
-  note: string;
-}
-
-export function adminGetWriteback(): Promise<WritebackSwitch> {
-  return request<WritebackSwitch>("/settings/writeback");
-}
-
-/** `null` follows the deployment default again. */
-export function adminSetWriteback(enabled: boolean | null): Promise<WritebackSwitch> {
-  return request<WritebackSwitch>("/settings/writeback", { method: "PUT", body: JSON.stringify({ enabled }) });
-}
-
 // A client's sources, from the Admin's side.
 export interface ClientSourceSettings {
   provider: string;
@@ -749,10 +731,10 @@ export function adminRemoveSendCap(clientId: string): Promise<SendCap> {
 
 // ---- monthly invoices (src/sales_app/api/admin_billing.py) ----------------------------------------
 // Amounts are decimal strings. An invoice carries its own copy of the plan terms it was built from,
-// so it never changes when a plan does. PAID / FOR_FREE are the Admin's declaration (once, owner
-// only): no payment is collected or checked.
+// so it never changes when a plan does. PAID / FOR_FREE / DISCOUNTED_100 are the Admin's declaration (once,
+// owner only): no payment is collected or checked, and only PAID counts as collected.
 
-export type InvoiceStatus = "PENDING" | "PAID" | "FOR_FREE" | "FAILED";
+export type InvoiceStatus = "PENDING" | "PAID" | "FOR_FREE" | "DISCOUNTED_100" | "FAILED";
 /** How an invoice was paid: declared by an Admin, or confirmed by a verified payment notification. */
 export type PaymentOrigin = "manual" | "electronic";
 
@@ -784,6 +766,15 @@ export interface Invoice {
   payment_origin?: PaymentOrigin | null;
   payment_transaction_id?: string | null;
   payment_event_id?: string | null;
+  /** `amount` is the billed amount before any discount. */
+  discount_percent?: number;
+  amount_after_discount?: string | null;
+  discount_amount?: string | null;
+  /** Given free (FOR_FREE and DISCOUNTED_100). */
+  free_amount?: string | null;
+  discount_reason?: string | null;
+  /** Money received: only PAID. */
+  collected?: boolean;
   /** Computed by the server: unpaid (PENDING/FAILED) 15 days after the end of its month. */
   due_at?: string;
   overdue?: boolean;
@@ -818,6 +809,9 @@ export function adminGenerateInvoices(period: string): Promise<GenerateInvoicesR
   return request<GenerateInvoicesResult>("/billing/invoices/generate", { method: "POST", body: JSON.stringify({ period }) });
 }
 
-export function adminSettleInvoice(invoiceId: number, status: "PAID" | "FOR_FREE"): Promise<Invoice> {
-  return request<Invoice>(`/billing/invoices/${invoiceId}/status`, { method: "PUT", body: JSON.stringify({ status }) });
+export function adminSettleInvoice(invoiceId: number, status: "PAID" | "FOR_FREE" | "DISCOUNTED_100", reason?: string): Promise<Invoice> {
+  return request<Invoice>(`/billing/invoices/${invoiceId}/status`, {
+    method: "PUT",
+    body: JSON.stringify(reason ? { status, reason } : { status }),
+  });
 }

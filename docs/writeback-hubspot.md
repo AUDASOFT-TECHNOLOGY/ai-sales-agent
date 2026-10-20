@@ -27,9 +27,9 @@ The status is written in the CRM's own word: the **inverse of the validated `sta
 contact marked do-not-contact in HubSpot (`do_not_contact_property`) reads as opted out and is never
 written to.
 
-## Turning it on (three steps, all deliberate)
+## What it takes (three steps, all deliberate)
 
-1. The deployment: `SALES_AGENT_WRITEBACK_ENABLED=true` (default `false`). Needs the SQL database.
+1. The deployment: nothing to switch on (write-back is permanent). Needs the SQL database.
 2. The source, in the operator's settings (the client cannot set it; the client configures nothing
    technical). Only for a source of a client's lanes (`sources:`), not for the legacy single `source`:
 
@@ -153,11 +153,14 @@ scopes, and the five properties created by hand with the right types:
   `src/sales_app/hubspot_wiring.py`): refresh token encrypted in the client's scope, access token
   (30 min) renewed per request, `reauth_required` on revocation. The Admin enters the HubSpot app's
   client id / secret / state key in Settings (global, write-only) and registers the redirect URL and
-  scopes shown there (`crm.objects.contacts.read`, `.write`, `crm.schemas.contacts.read`). The Private
-  App token remains a fallback for a client with no grant. Only one HubSpot account per client.
+  scopes shown there (`crm.objects.contacts.read`, `.write`, `crm.schemas.contacts.read`). OAuth is the
+  only path offered to a client (spec 7.1). The legacy Private App token (`hubspot.access_token`) is
+  no longer proposed in any Client screen or route; the backend still reads it, and an Admin can still
+  set it, only so that a client already running on one keeps working (compatibility, not a normal path). Only one HubSpot account per client.
 - **Settings.** The client chooses the properties in
   `PUT /client/v1/lanes/{lane}/sync`.
-  Same route for Google Sheets columns. `SALES_AGENT_WRITEBACK_ENABLED` stays the platform's master
-  switch: while off, the saved choice writes nothing and the client is told so.
+  Same route for Google Sheets columns. There is no master switch any more (spec 6.3, 6.4, 17.1):
+  write-back is permanent, and a source with no mapping has nothing to write. The client cannot switch
+  it off either; it can only change the mapping.
 - **Not done:** conversation text is not sent to HubSpot (no notes/engagements), only the properties
   above. Nothing here was tried against a real HubSpot account.

@@ -27,7 +27,6 @@ from sales_app.api.admin_llm_pricing import create_admin_llm_pricing_router
 from sales_app.api.admin_plans import create_admin_plans_router
 from sales_app.api.admin_lanes import create_admin_lanes_router
 from sales_app.api.admin_send_cap import create_admin_send_cap_router
-from sales_app.api.admin_writeback import create_admin_writeback_router
 from sales_app.api.admin_settings import create_admin_settings_router
 from sales_app.api.admin_whatsapp import create_admin_whatsapp_router
 from sales_app.api.client import create_client_router
@@ -118,7 +117,6 @@ def create_app(
     app.include_router(create_admin_llm_pricing_router(application))
     app.include_router(create_admin_plans_router(application))
     app.include_router(create_admin_send_cap_router(application))
-    app.include_router(create_admin_writeback_router(application))
     app.include_router(create_admin_lanes_router(application))
     app.include_router(create_admin_billing_router(application))
     app.include_router(create_payments_router(application))

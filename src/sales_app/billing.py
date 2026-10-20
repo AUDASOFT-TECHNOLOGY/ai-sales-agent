@@ -23,8 +23,12 @@ refusal + database unique key on client and period).
 **Statuses.** A new invoice is `PENDING`. It becomes `PAID` either by the Admin's declaration
 (origin `manual`, with who and when) or by a verified payment confirmation (origin `electronic`, with
 the provider's transaction id and event id; see `sales_app.payment_confirmation`). `FOR_FREE` is
-always a manual decision. A failed electronic payment makes it `FAILED`, which can still be paid
-later (electronically or manually). `PAID` and `FOR_FREE` are final; an invoice paid electronically
+always a manual decision. `DISCOUNTED_100` (spec 13.3, 13.4) is a distinct, manual, owner-only decision:
+the invoice is kept at its billed amount (`amount`, before discount) and records the amount after the
+discount (0), the amount discounted and the amount given free, with who and when (`status_changed_by`/
+`_at` and the traced `payment_events` row). Neither `FOR_FREE` nor a discount is ever a payment
+received: only `PAID` counts as collected (`Invoice.is_collected`). A failed electronic payment makes it `FAILED`, which can still be paid
+later (electronically or manually). `PAID`, `FOR_FREE` and `DISCOUNTED_100` are final; an invoice paid electronically
 can no longer be marked manually. *Overdue* is not a stored status: it is computed (`is_overdue`) for
 an invoice still `PENDING` or `FAILED` `DUE_DAYS` after the end of its month, so it never goes stale.
 Only a month that has ended can be invoiced.
@@ -51,6 +55,7 @@ class InvoiceStatus(StrEnum):
     PENDING = "PENDING"
     PAID = "PAID"
     FOR_FREE = "FOR_FREE"
+    DISCOUNTED_100 = "DISCOUNTED_100"  # 100% discount: billed amount kept, nothing to pay, not collected
     FAILED = "FAILED"  # an electronic payment was reported failed; can still be paid
 
 
@@ -126,6 +131,24 @@ class Invoice:
     payment_origin: PaymentOrigin | None = None
     payment_transaction_id: str | None = None
     payment_event_id: str | None = None
+    # A discount (only `DISCOUNTED_100` today). `amount` stays the billed amount before discount.
+    discount_percent: int = 0
+    amount_after_discount: Decimal | None = None
+    discount_amount: Decimal | None = None
+    free_amount: Decimal | None = None
+    discount_reason: str | None = None
+
+    @property
+    def is_collected(self) -> bool:
+        """Money received. `FOR_FREE` and a discount are decisions, never a collection."""
+        return self.status is InvoiceStatus.PAID
+
+    @property
+    def free_total(self) -> Decimal | None:
+        """What was given free: the recorded amount, or the whole invoice for a legacy `FOR_FREE`."""
+        if self.free_amount is not None:
+            return self.free_amount
+        return self.amount if self.status is InvoiceStatus.FOR_FREE else None
 
     @property
     def number(self) -> str:
@@ -175,7 +198,7 @@ class PaymentRecord:
     amount: Decimal | None
     currency: str | None
     transaction_id: str | None
-    event_status: str  # succeeded | failed | PAID | FOR_FREE
+    event_status: str  # succeeded | failed | PAID | FOR_FREE | DISCOUNTED_100
     outcome: str
     actor: str
     received_at: datetime
@@ -302,10 +325,19 @@ class InvoiceStore(Protocol):
 
     def get(self, invoice_id: int) -> Invoice | None: ...
 
-    def settle(self, invoice_id: int, status: InvoiceStatus, *, at: datetime, by: str) -> Invoice:
-        """Manual settlement: PENDING (or FAILED) becomes PAID or FOR_FREE, once, origin `manual`,
-        and the decision is traced. `InvoiceNotFoundError`; `InvoiceStatusError` if it is settled
-        already (a payment confirmed electronically included) or `status` is not PAID/FOR_FREE."""
+    def settle(
+        self,
+        invoice_id: int,
+        status: InvoiceStatus,
+        *,
+        at: datetime,
+        by: str,
+        reason: str | None = None,
+    ) -> Invoice:
+        """Manual settlement: PENDING (or FAILED) becomes PAID, FOR_FREE or DISCOUNTED_100, once,
+        origin `manual`, and the decision is traced. `InvoiceNotFoundError`; `InvoiceStatusError` if
+        it is settled already (a payment confirmed electronically included) or `status` is not one
+        of those. `reason` is kept with a discount only."""
         ...
 
     def process_payment(self, event: PaymentEvent, *, at: datetime, by: str) -> PaymentResult:
@@ -318,13 +350,28 @@ class InvoiceStore(Protocol):
         ...
 
 
+MANUAL_STATUSES = (InvoiceStatus.PAID, InvoiceStatus.FOR_FREE, InvoiceStatus.DISCOUNTED_100)
+
+
+def discount_100(invoice: Invoice, reason: str | None) -> dict[str, object]:
+    """The fields a 100% discount sets: billed amount untouched, nothing left to pay, the whole billed
+    amount discounted and given free."""
+    return {
+        "discount_percent": 100,
+        "amount_after_discount": Decimal("0.00"),
+        "discount_amount": invoice.amount,
+        "free_amount": invoice.amount,
+        "discount_reason": (reason or "").strip()[:255] or None,
+    }
+
+
 def check_settle(invoice: Invoice, status: InvoiceStatus) -> None:
-    if status not in (InvoiceStatus.PAID, InvoiceStatus.FOR_FREE):
-        raise InvoiceStatusError("an invoice can only be marked PAID or FOR_FREE")
+    if status not in MANUAL_STATUSES:
+        raise InvoiceStatusError("an invoice can only be marked PAID, FOR_FREE or DISCOUNTED_100")
     if invoice.status is InvoiceStatus.PAID and invoice.payment_origin is PaymentOrigin.ELECTRONIC:
         raise InvoiceStatusError("this invoice was paid electronically and cannot be changed")
     if invoice.status not in (InvoiceStatus.PENDING, InvoiceStatus.FAILED):
-        raise InvoiceStatusError("only an unpaid invoice can be marked PAID or FOR_FREE")
+        raise InvoiceStatusError("only an unpaid invoice can be settled")
 
 
 class InMemoryInvoiceStore:
@@ -355,7 +402,15 @@ class InMemoryInvoiceStore:
         with self._lock:
             return self._invoices.get(invoice_id)
 
-    def settle(self, invoice_id: int, status: InvoiceStatus, *, at: datetime, by: str) -> Invoice:
+    def settle(
+        self,
+        invoice_id: int,
+        status: InvoiceStatus,
+        *,
+        at: datetime,
+        by: str,
+        reason: str | None = None,
+    ) -> Invoice:
         with self._lock:
             invoice = self._invoices.get(invoice_id)
             if invoice is None:
@@ -367,6 +422,7 @@ class InMemoryInvoiceStore:
                 status_changed_at=at,
                 status_changed_by=by,
                 payment_origin=PaymentOrigin.MANUAL,
+                **(discount_100(invoice, reason) if status is InvoiceStatus.DISCOUNTED_100 else {}),
             )
             self._invoices[invoice_id] = settled
             self._records.append(manual_record(settled, status, at=at, by=by))

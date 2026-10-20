@@ -28,9 +28,7 @@ import {
   adminDeleteOpenAIModel,
   adminListOpenAIModels,
   adminEmailServiceStatus,
-  adminGetWriteback,
   adminGmailPlatformStatus,
-  adminSetWriteback,
   adminHubSpotPlatformStatus,
   adminSetEmailForNewClients,
   adminTestEmailImap,
@@ -42,7 +40,6 @@ import {
   type Credential,
   type EmailServiceStatus,
   type GmailPlatformStatus,
-  type WritebackSwitch,
   type HubSpotPlatformStatus,
   type OpenAIModel,
 } from "../api";
@@ -114,7 +111,6 @@ export function AdminSettingsPage() {
       <EmailSection canEdit={canEdit} />
       <GmailSection canEdit={canEdit} />
       <HubSpotSection canEdit={canEdit} />
-      <WritebackSection canEdit={canEdit} />
       <MuseSparkSection />
     </div>
   );
@@ -418,72 +414,6 @@ function GmailSection({ canEdit }: { canEdit: boolean }) {
         Reading and sending mail uses a restricted Google scope: until Google has verified the application, only the test users
         you list in Google Cloud (at most 100) can connect.
       </p>
-    </Glass>
-  );
-}
-
-// ---- Write-back (results copied into the clients' own sheets and HubSpot) -----------------------
-
-function WritebackSection({ canEdit }: { canEdit: boolean }) {
-  const [state, setState] = useState<WritebackSwitch | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    adminGetWriteback()
-      .then(setState)
-      .catch(() => setState(null));
-  }, []);
-  async function change(value: boolean | null) {
-    setBusy(true);
-    setError(null);
-    try {
-      setState(await adminSetWriteback(value));
-    } catch {
-      setError("Could not change the write-back switch.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Glass level={1} className="admin-settings__card" aria-labelledby="settings-writeback">
-      <div className="admin-settings__head">
-        <h2 className="t-h2" id="settings-writeback">
-          Write-back (results in the clients&apos; sources)
-        </h2>
-        <span className="admin-settings__status">
-          <span className="c-3 t-body-sm">State</span>
-          <Chip tint={state?.enabled ? "success" : "neutral"}>{state ? (state.enabled ? "On" : "Off") : "Unknown"}</Chip>
-        </span>
-      </div>
-      <p className="c-2 t-body-sm">
-        Master switch for copying Revansa&apos;s results (status, last contact, follow-ups) into a client&apos;s Google Sheet or HubSpot.
-        Turning it on writes nothing by itself: a source is written only when its client named the columns or properties, and never
-        a name, phone number or e-mail address.
-      </p>
-      {state ? (
-        <p className="c-3 t-body-sm" data-testid="writeback-state">
-          {state.note} Decided by: {state.decided_by === "admin" ? "an administrator" : "the deployment (SALES_AGENT_WRITEBACK_ENABLED)"}.
-          {state.needs_database ? " No database is configured: no source can be written back." : ""}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="admin-alert admin-alert--danger" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <div className="row">
-        <Button size="sm" loading={busy} onClick={() => void change(true)} disabled={!canEdit || state?.enabled === true} disabledReason={!canEdit ? "Only an owner can change it." : undefined}>
-          Turn on
-        </Button>
-        <Button size="sm" loading={busy} onClick={() => void change(false)} disabled={!canEdit || state?.enabled === false} disabledReason={!canEdit ? "Only an owner can change it." : undefined}>
-          Turn off
-        </Button>
-        {state?.decided_by === "admin" ? (
-          <Button size="sm" variant="ghost" loading={busy} onClick={() => void change(null)} disabled={!canEdit}>
-            Follow the deployment
-          </Button>
-        ) : null}
-      </div>
     </Glass>
   );
 }

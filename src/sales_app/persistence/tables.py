@@ -353,8 +353,9 @@ client_plan_assignments = Table(
 
 # Monthly invoices. One per client and period (the database refuses a second). An invoice carries its
 # own copy of every line (plan name, price, currency, credits, quota, days, amount), so editing a plan
-# afterwards changes nothing already invoiced. `status` is PENDING, PAID or FOR_FREE: a declaration by
-# the Admin, never a payment received.
+# afterwards changes nothing already invoiced. `status` is PENDING, FAILED, PAID, FOR_FREE or
+# DISCOUNTED_100: FOR_FREE and the discount are declarations by the Admin, never a payment received.
+# `amount` is always the billed amount before any discount; the discount columns are 0/NULL otherwise.
 invoices = Table(
     "invoices",
     metadata,
@@ -373,6 +374,11 @@ invoices = Table(
     Column("payment_origin", String(16)),
     Column("payment_transaction_id", String(128)),
     Column("payment_event_id", String(128)),
+    Column("discount_percent", Integer, nullable=False, server_default="0"),
+    Column("amount_after_discount", Numeric(18, 2)),
+    Column("discount_amount", Numeric(18, 2)),
+    Column("free_amount", Numeric(18, 2)),
+    Column("discount_reason", String(255)),
     UniqueConstraint("client_id", "period", name="uq_invoices_client_period"),
     Index("ix_invoices_period", "period", "client_id"),
     Index("uq_invoices_transaction", "payment_transaction_id", unique=True),

@@ -57,16 +57,6 @@ def put(client, lane_id="main", **body):
     return client.put(sync_url(lane_id), json={"expected_version": version(client), **body})
 
 
-def switch_on(world, enabled=True):  # noqa: F811
-    world.application.writeback_switch.set(enabled, actor="test")
-
-
-@pytest.fixture(autouse=True)
-def platform_switch_off(world):  # noqa: F811
-    """The tests start from a platform that has not switched copying on (the Admin's decision)."""
-    switch_on(world, False)
-
-
 # ---- Google Sheets ------------------------------------------------------------------------------
 
 
@@ -77,31 +67,22 @@ def test_nothing_is_copied_until_the_client_names_columns(alpha):
     assert {r["key"] for r in body["results"]} >= {"status", "last_contacted_at", "next_action_type"}
 
 
-def test_columns_are_saved_in_the_source_and_say_nothing_is_written_while_the_platform_is_off(
-    world, alpha
-):
+def test_columns_are_saved_in_the_source_and_copying_is_permanent(world, alpha):
     response = put(alpha, google_sheets={"columns": SHEET_COLUMNS})
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["state"] == "waiting_platform" and body["deployment_enabled"] is False
+    assert body["state"] == "configured" and "deployment_enabled" not in body
     assert body["google_sheets"]["columns"] == SHEET_COLUMNS
     stored = next(s for s in document_of(world)["sources"] if s["id"] == "x_one")
     assert stored["settings"]["writeback"] == {"columns": SHEET_COLUMNS}
     assert stored["settings"]["spreadsheet_id"] == "sheet-alpha-1"
 
 
-def test_once_the_platform_switches_copying_on_the_choice_is_configured(world, alpha):
+def test_the_client_has_no_way_to_switch_copying_off(world, alpha):
     put(alpha, google_sheets={"columns": SHEET_COLUMNS})
-    switch_on(world)
-    assert alpha.get(sync_url()).json()["state"] == "configured"
-
-
-def test_disabling_removes_only_the_block(world, alpha):
-    put(alpha, google_sheets={"columns": SHEET_COLUMNS})
-    response = put(alpha, enabled=False)
-    assert response.status_code == 200 and response.json()["state"] == "off"
+    assert put(alpha, enabled=False).status_code == 422  # no such option any more
     stored = next(s for s in document_of(world)["sources"] if s["id"] == "x_one")
-    assert stored["settings"] == {"spreadsheet_id": "sheet-alpha-1"}
+    assert stored["settings"]["writeback"] == {"columns": SHEET_COLUMNS}
 
 
 @pytest.mark.parametrize(
@@ -166,7 +147,7 @@ def test_one_clients_choice_never_reaches_another(world, alpha, beta):
 
 def test_an_unknown_lane_is_a_404_and_needs_a_session(world, alpha):
     assert alpha.get(sync_url("nope")).status_code == 404
-    assert put(alpha, "nope", enabled=False).status_code == 404
+    assert put(alpha, "nope", google_sheets={"columns": SHEET_COLUMNS}).status_code == 404
     anonymous = world.admin()
     anonymous.cookies.clear()
     assert anonymous.get(sync_url()).status_code == 401
@@ -193,7 +174,7 @@ def test_hubspot_properties_and_status_are_saved_as_the_providers_block(world, a
         },
     )
     assert response.status_code == 200, response.text
-    assert response.json()["state"] == "waiting_platform"
+    assert response.json()["state"] == "configured"
     stored = next(s for s in document_of(world)["sources"] if s["id"] == "x_crm")
     assert stored["settings"]["writeback"] == {
         "status": True,

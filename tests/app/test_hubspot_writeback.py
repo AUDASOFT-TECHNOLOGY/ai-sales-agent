@@ -770,7 +770,7 @@ def test_a_property_that_does_not_fit_makes_the_source_not_ready_and_nothing_is_
     hub.add("1")
     env.revansa("1", S.CLOSED)
     support = WritebackSupport(
-        enabled=True, open_ledger=lambda cid: env.ledger, policies=default_policies()
+        open_ledger=lambda cid: env.ledger, policies=default_policies()
     )
     runner, issues = writeback_for(env, support)
     summary = runner.run()
@@ -821,7 +821,6 @@ def writeback_for(
     )
     if extra_policies:
         support = WritebackSupport(
-            enabled=support.enabled,
             open_ledger=support.open_ledger,
             policies={**support.policies, **extra_policies},
         )
@@ -840,26 +839,23 @@ def ledgers_in_memory(env):
     return lambda client: env.ledger
 
 
-def test_with_the_deployment_flag_off_nothing_is_built_read_or_written(hubs):
+def test_with_no_write_back_support_nothing_is_built_read_or_written(hubs):
     env = Env(hubs)
     env.hub.add("1")
     env.revansa("1", S.CLOSED)
-    support = WritebackSupport(
-        enabled=False, open_ledger=ledgers_in_memory(env), policies=default_policies()
-    )
-    runner, problems = writeback_for(env, support)
+    runner, problems = writeback_for(env, None)
     assert runner is None and problems == []
     assert env.hub.requests == []
 
 
-def test_with_the_deployment_flag_on_the_source_that_asks_is_written_and_the_summary_has_counts_only(
+def test_the_source_that_asks_is_written_and_the_summary_has_counts_only(
     hubs,
 ):
     env = Env(hubs)
     env.hub.add("1")
     env.revansa("1", S.CLOSED, follow_up_count=2)
     support = WritebackSupport(
-        enabled=True, open_ledger=ledgers_in_memory(env), policies=default_policies()
+        open_ledger=ledgers_in_memory(env), policies=default_policies()
     )
     runner, problems = writeback_for(env, support)
     assert problems == [] and runner.source_ids == ("hs_a",)
@@ -874,7 +870,7 @@ def test_a_client_in_dry_run_is_never_written(hubs):
     env.hub.add("1")
     env.revansa("1", S.CLOSED)
     support = WritebackSupport(
-        enabled=True, open_ledger=ledgers_in_memory(env), policies=default_policies()
+        open_ledger=ledgers_in_memory(env), policies=default_policies()
     )
     runner, problems = writeback_for(env, support, mode=ApprovalMode.DRY_RUN)
     assert runner is None and problems == [] and env.hub.requests == []
@@ -883,7 +879,7 @@ def test_a_client_in_dry_run_is_never_written(hubs):
 def test_a_source_without_a_block_asks_for_nothing(hubs):
     env = Env(hubs, raw={"status_mapping": settings()["status_mapping"]})
     support = WritebackSupport(
-        enabled=True, open_ledger=ledgers_in_memory(env), policies=default_policies()
+        open_ledger=ledgers_in_memory(env), policies=default_policies()
     )
     config = SimpleNamespace(
         client_id=A,
@@ -905,7 +901,7 @@ def test_a_source_without_a_block_asks_for_nothing(hubs):
 def test_an_ambiguous_mapping_is_a_configuration_problem_not_a_silent_skip(hubs):
     env = Env(hubs)
     support = WritebackSupport(
-        enabled=True, open_ledger=ledgers_in_memory(env), policies=default_policies()
+        open_ledger=ledgers_in_memory(env), policies=default_policies()
     )
     bad = settings(status_mapping={**settings()["status_mapping"], "LOST": "closed"})
     config = SimpleNamespace(
@@ -948,7 +944,7 @@ def test_a_hubspot_source_and_another_source_of_the_same_client_do_not_interfere
     )
     sheet.verify_issues.append("a chosen column is gone")  # the other source is not ready
     support = WritebackSupport(
-        enabled=True, open_ledger=ledgers_in_memory(env), policies=default_policies()
+        open_ledger=ledgers_in_memory(env), policies=default_policies()
     )
     runner, problems = writeback_for(
         env,

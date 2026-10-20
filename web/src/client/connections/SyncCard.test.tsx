@@ -16,7 +16,6 @@ function sync(over: Record<string, unknown> = {}) {
     supported: true,
     state: "off",
     message: "",
-    deployment_enabled: false,
     results: RESULTS,
     google_sheets: null,
     hubspot: null,
@@ -62,7 +61,7 @@ describe("SyncCard", () => {
   it("saves the columns the client names, one by one, and nothing else", async () => {
     const calls = stub({
       "GET /lanes/main/sync": () => json(sync()),
-      "PUT /lanes/main/sync": () => json(sync({ state: "waiting_platform", google_sheets: { columns: { status: "Statut" } } })),
+      "PUT /lanes/main/sync": () => json(sync({ state: "configured", google_sheets: { columns: { status: "Statut" } } })),
     });
     renderCard();
     const status = await screen.findByLabelText("Status");
@@ -73,7 +72,7 @@ describe("SyncCard", () => {
       expected_version: 3,
       google_sheets: { columns: { status: "Statut" }, propagate_opt_out: false },
     });
-    expect(await screen.findByText(/not written until it does|nothing is written/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Saved\.$/)).toBeInTheDocument();
   });
 
   it("refuses to save nothing, and a next action without its due date", async () => {
@@ -88,14 +87,13 @@ describe("SyncCard", () => {
     expect(calls.filter((c) => c.key.startsWith("PUT"))).toHaveLength(0);
   });
 
-  it("can stop the copy without touching anything else", async () => {
-    const calls = stub({
+  it("offers no way to switch the copy off: write-back is permanent", async () => {
+    stub({
       "GET /lanes/main/sync": () => json(sync({ state: "configured", google_sheets: { columns: { status: "Statut" } } })),
-      "PUT /lanes/main/sync": () => json(sync()),
     });
     renderCard();
-    await userEvent.click(await screen.findByRole("button", { name: /stop copying/i }));
-    await waitFor(() => expect(calls.find((c) => c.key.startsWith("PUT"))?.body).toEqual({ expected_version: 3, enabled: false }));
+    await screen.findByRole("button", { name: /^save$/i });
+    expect(screen.queryByRole("button", { name: /stop copying|arr.ter/i })).toBeNull();
   });
 
   it("asks HubSpot clients for property names only, never for a status column or the meaning of statuses", async () => {
@@ -107,7 +105,7 @@ describe("SyncCard", () => {
             hubspot: { status: false, properties: {} },
           }),
         ),
-      "PUT /lanes/main/sync": () => json(sync({ source: "hubspot", state: "waiting_platform", hubspot: { status: false, properties: { last_contacted_at: "revansa_last" } } })),
+      "PUT /lanes/main/sync": () => json(sync({ source: "hubspot", state: "configured", hubspot: { status: false, properties: { last_contacted_at: "revansa_last" } } })),
     });
     renderCard();
     await userEvent.type(await screen.findByLabelText("Date of the last message sent"), "revansa_last");

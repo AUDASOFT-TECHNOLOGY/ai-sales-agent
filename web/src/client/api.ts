@@ -452,7 +452,7 @@ export function clientUpdateLane(id: string, body: LaneUpdate): Promise<Lane> {
 
 /* ── The results copied back into a lane's source (see src/sales_app/api/client_lane_sync.py) ──
  * Nothing is copied until the client names, one by one, the existing column or property of each
- * result. "waiting_platform": saved, but the platform has not switched copying on (nothing is written). */
+ * result. Copying is permanent: there is no switch, only the mapping. */
 
 export type SyncResultKey = "status" | "last_contacted_at" | "last_inbound_at" | "follow_up_count" | "next_action_type" | "next_action_due_at" | "summary";
 
@@ -472,9 +472,8 @@ export interface LaneSync {
   lane: string;
   source: string;
   supported: boolean;
-  state: "off" | "waiting_platform" | "configured";
+  state: "off" | "configured";
   message: string;
-  deployment_enabled: boolean;
   results: Array<{ key: SyncResultKey; label: string }>;
   google_sheets: SheetsSync | null;
   hubspot: HubSpotSync | null;
@@ -482,7 +481,6 @@ export interface LaneSync {
 
 export interface LaneSyncUpdate {
   expected_version: number | null;
-  enabled?: boolean;
   google_sheets?: SheetsSync;
   hubspot?: HubSpotSync;
 }

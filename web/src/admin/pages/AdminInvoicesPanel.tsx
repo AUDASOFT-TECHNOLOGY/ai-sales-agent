@@ -29,8 +29,8 @@ import {
 // Mirrors require_owner on POST /billing/invoices/generate and PUT /billing/invoices/:id/status.
 const CAN_EDIT_INVOICES_ROLES = new Set(["owner"]);
 
-const STATUS_LABEL: Record<InvoiceStatus, string> = { PENDING: "Pending", PAID: "Paid", FOR_FREE: "For free", FAILED: "Failed" };
-const STATUS_TINT = { PENDING: "attention", PAID: "success", FOR_FREE: "neutral", FAILED: "danger" } as const;
+const STATUS_LABEL: Record<InvoiceStatus, string> = { PENDING: "Pending", PAID: "Paid", FOR_FREE: "For free", DISCOUNTED_100: "Discounted 100%", FAILED: "Failed" };
+const STATUS_TINT = { PENDING: "attention", PAID: "success", FOR_FREE: "neutral", DISCOUNTED_100: "neutral", FAILED: "danger" } as const;
 const ORIGIN_LABEL: Record<PaymentOrigin, string> = { manual: "Manual", electronic: "Electronic" };
 
 /** Unpaid invoices can be settled by hand; one paid electronically cannot (the server says 409). */
@@ -127,7 +127,7 @@ export function AdminInvoicesPanel() {
     }
   }
 
-  async function onSettle(invoice: Invoice, status: "PAID" | "FOR_FREE") {
+  async function onSettle(invoice: Invoice, status: "PAID" | "FOR_FREE" | "DISCOUNTED_100") {
     setSettling(invoice.invoice_id);
     setNotice(null);
     try {
@@ -258,7 +258,7 @@ export function AdminInvoicesPanel() {
                   <td>
                     <StatusChips invoice={i} />
                   </td>
-                  <td className="c-2">{i.payment_origin ? ORIGIN_LABEL[i.payment_origin] : "—"}</td>
+                  <td className="c-2">{i.status === "PAID" && i.payment_origin ? ORIGIN_LABEL[i.payment_origin] : "—"}</td>
                   <td className="admin-table__action">
                     <Button variant="ghost" size="sm" onClick={() => setViewing(i)} aria-label={`Details of ${i.number}`}>
                       Details
@@ -282,6 +282,15 @@ export function AdminInvoicesPanel() {
                           aria-label={`Mark ${i.number} for free`}
                         >
                           Mark FOR FREE
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          loading={settling === i.invoice_id}
+                          onClick={() => void onSettle(i, "DISCOUNTED_100")}
+                          aria-label={`Apply a 100% discount to ${i.number}`}
+                        >
+                          100% discount
                         </Button>
                       </>
                     ) : null}
@@ -364,7 +373,20 @@ function InvoiceModal({ invoice, clientName, onClose }: { invoice: Invoice; clie
           ? ` ${STATUS_LABEL[invoice.status]} on ${new Date(invoice.status_changed_at).toLocaleDateString()} by ${invoice.status_changed_by}.`
           : ""}
       </p>
-      {invoice.payment_origin ? (
+      {invoice.status === "DISCOUNTED_100" ? (
+        <div className="c-3 t-body-sm" data-testid="invoice-discount">
+          <p>
+            100% discount (not a payment): billed {invoice.amount} {invoice.currency}, after discount {invoice.amount_after_discount ?? "0.00"}{" "}
+            {invoice.currency}, discounted {invoice.discount_amount ?? invoice.amount} {invoice.currency}, free {invoice.free_amount ?? invoice.amount}{" "}
+            {invoice.currency}.
+          </p>
+          {invoice.discount_reason ? <p>Reason: {invoice.discount_reason}</p> : null}
+        </div>
+      ) : null}
+      {invoice.status === "FOR_FREE" ? (
+        <p className="c-3 t-body-sm">Given for free (not a payment): {invoice.free_amount ?? invoice.amount} {invoice.currency}.</p>
+      ) : null}
+      {invoice.status === "PAID" && invoice.payment_origin ? (
         <p className="c-3 t-body-sm">
           Payment origin: {ORIGIN_LABEL[invoice.payment_origin]}
           {invoice.payment_origin === "electronic" && invoice.payment_transaction_id

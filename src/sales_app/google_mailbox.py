@@ -102,6 +102,7 @@ class GoogleGrant:
     refresh_token: str = field(repr=False)
     address: str
     reauth_required: bool = False
+    connected_at: datetime | None = None  # when this grant was made (UTC); None: not known
 
     def __repr__(self) -> str:
         return "GoogleGrant()"
@@ -658,7 +659,9 @@ class OAuthMailInbox:
         read_mode: str = CONSUME,
         clock: Clock | None = None,
         imap_factory: Callable[[ImapSettings], Any] = open_imap,
+        read_from: datetime | None = None,
     ) -> None:
+        self._read_from = read_from  # when the mailbox was connected: the first read starts there
         self._tokens = tokens
         self._address = address
         self._folder = folder
@@ -730,6 +733,7 @@ class OAuthMailInbox:
             read_mode=self._read_mode,
             auth=XOAUTH2,
             access_token=token,
+            read_from=self._read_from if self._read_mode != CONSUME else None,
         )
         inner = ImapMailbox(settings, factory=self._factory, clock=self._clock)
         inner.use_cursor(self._cursors)

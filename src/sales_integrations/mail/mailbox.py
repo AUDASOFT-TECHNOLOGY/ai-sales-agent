@@ -14,8 +14,11 @@ each other.
 Revansa alone: unread means new, and what is stored is marked read. `observe` is for a mailbox
 that belongs to a person and holds their own mail: nothing is ever marked read, nothing is written
 (the folder is opened read-only and no `STORE` is ever sent), and "new" is a saved position (a UID
-and the UIDVALIDITY it belongs to, `sales_integrations.mail.cursor`) that starts at the end of the
-mailbox the first time it is read, so no history is touched. Only the headers that say who wrote
+and the UIDVALIDITY it belongs to, `sales_integrations.mail.cursor`). The first time it is read, the
+position starts at the end of the mailbox, so no history is touched, **unless the caller gives the
+moment the mailbox was connected** (`ImapSettings.read_from`): then only the messages that arrived
+since that moment are looked at (a reply that came between the connection and the first poll is not
+lost), still only from senders the caller accepts, so older mail stays untouched. Only the headers that say who wrote
 are read; the body of a message is read only when its sender is one the caller accepts (a prospect),
 so the text of anyone else's mail never leaves the server.
 """
@@ -90,6 +93,9 @@ class ImapSettings:
     read_mode: str = CONSUME  # "consume" (the historical way) or "observe" (see the module doc)
     auth: str = PASSWORD  # "password" (the historical way) or "xoauth2" (see `mail.auth`)
     access_token: str = field(default="", repr=False)  # given by the layer above, for "xoauth2"
+    # `observe` only: when the mailbox was connected. The first read then starts from this moment
+    # instead of the end of the mailbox (None: the end, as before).
+    read_from: datetime | None = None
 
     def __post_init__(self) -> None:
         check_credentials(self.auth, self.password, self.access_token)
@@ -300,19 +306,29 @@ class ImapMailbox:
                     return self._uidnext
                 return self._past_the_last(connection)
 
-            if saved is None:
+            not_before: datetime | None = None
+            criteria: tuple[str, ...]
+            if saved is None and self._settings.read_from is None:
                 # First time: everything already here is history, and none of it is ours.
                 first = MailCursor(self._uidvalidity, server_next_uid(), now)
                 self._save_position(first)
                 self._position = first
                 return []
-            if saved.uidvalidity != self._uidvalidity:
+            if saved is None:
+                # First time, for a mailbox connected at a known moment: what arrived since then
+                # counts (a reply may come before the first poll); what was there before does not.
+                assert self._settings.read_from is not None
+                not_before = self._settings.read_from
+                criteria = ("SINCE", _imap_date(not_before - timedelta(days=1)))
+                floor, empty_next = 1, server_next_uid()
+                self._position = None
+            elif saved.uidvalidity != self._uidvalidity:
                 # The server renumbered the folder: no UID kept means anything now. Start from the
                 # date of the last progress instead (a day earlier, as a date has no hour); the
                 # Engine de-duplicates what it had already stored.
                 self.revalidated = True
                 log.warning("a mailbox's UIDVALIDITY changed: reading again from the last date")
-                criteria: tuple[str, ...] = (
+                criteria = (
                     "SINCE",
                     _imap_date(saved.updated_at - timedelta(days=1)),
                 )
@@ -334,6 +350,11 @@ class ImapMailbox:
                 self._dirty = True
             fetched: list[FetchedMail] = []
             for uid in self._batch:
+                if not_before is not None:
+                    received = self._received_at(connection, uid)
+                    if received is None or received < not_before:
+                        self._done.add(uid)  # here before the connection: history, not ours
+                        continue
                 sender = self._screen(connection, uid)
                 if sender is None or not accept(Channel.EMAIL, sender):
                     self._done.add(uid)  # not a person's reply, or not a prospect: nothing to keep
@@ -422,6 +443,19 @@ class ImapMailbox:
         uids = [int(u) for u in (found[0] or b"").split()]
         return max(uids) + 1 if uids else 1
 
+    def _received_at(self, connection: ImapConnection, uid: int) -> datetime | None:
+        """When the server received message `uid` (its INTERNALDATE, nothing else is read)."""
+        status, data = connection.uid("FETCH", str(uid), "(INTERNALDATE)")
+        if status != "OK" or not data:
+            return None
+        for part in data:
+            blob = part[0] if isinstance(part, tuple) else part
+            if isinstance(blob, bytes):
+                found = _INTERNALDATE.search(blob.decode("ascii", "replace"))
+                if found:
+                    return _parse_internaldate(found)
+        return None
+
     def _screen(self, connection: ImapConnection, uid: int) -> str | None:
         """Who wrote message `uid`, read from its headers alone; None if it is not a person's
         message (the mailbox's own, automatic, unreadable) or has vanished."""
@@ -468,6 +502,25 @@ def _untagged_number(connection: ImapConnection, code: str) -> int | None:
         if found:
             return int(found.group(1))
     return None
+
+
+_INTERNALDATE = re.compile(
+    r'INTERNALDATE "\s*(\d{1,2})-([A-Za-z]{3})-(\d{4}) (\d{2}):(\d{2}):(\d{2}) ([+-])(\d{2})(\d{2})"'
+)
+
+
+def _parse_internaldate(found: "re.Match[str]") -> datetime | None:
+    day, month, year, hour, minute, second, sign, off_h, off_m = found.groups()
+    if month.title() not in _MONTHS:
+        return None
+    try:
+        local = datetime(
+            int(year), _MONTHS.index(month.title()) + 1, int(day), int(hour), int(minute), int(second)
+        )
+    except ValueError:
+        return None
+    offset = timedelta(hours=int(off_h), minutes=int(off_m))
+    return (local - offset if sign == "+" else local + offset).replace(tzinfo=UTC)
 
 
 def _imap_date(moment: datetime) -> str:

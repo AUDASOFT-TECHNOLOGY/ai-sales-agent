@@ -555,9 +555,7 @@ def create_client_lanes_router(application: Application) -> APIRouter:
         sheets = sheets_view(settings) if provider == google_sheets.KEY else None
         crm = hubspot_view(settings) if provider == hubspot.KEY else None
         has_block = isinstance(settings.get("writeback"), Mapping)
-        switch = application.writeback_switch
-        platform_on = switch.enabled() if switch is not None else False
-        state, message = state_of(has_block=has_block, deployment_enabled=platform_on)
+        state, message = state_of(has_block=has_block)
         if not supported:
             message = "This source cannot receive results."
         return SyncResponse(
@@ -567,7 +565,6 @@ def create_client_lanes_router(application: Application) -> APIRouter:
             supported=supported,
             state=state,
             message=message,
-            deployment_enabled=platform_on,
             results=[
                 ResultOption(key=key, label=label)
                 for key, label in RESULTS
@@ -610,9 +607,7 @@ def create_client_lanes_router(application: Application) -> APIRouter:
             if provider == google_sheets.KEY:
                 if body.hubspot is not None:
                     raise HTTPException(422, "hubspot settings belong to a HubSpot source")
-                if not body.enabled:
-                    settings.pop("writeback", None)
-                elif body.google_sheets is None:
+                if body.google_sheets is None:
                     raise HTTPException(422, "name the columns Revansa may fill")
                 else:
                     settings["writeback"] = sheets_block(body.google_sheets)
@@ -621,9 +616,7 @@ def create_client_lanes_router(application: Application) -> APIRouter:
                     raise HTTPException(
                         422, "google_sheets settings belong to a Google Sheets source"
                     )
-                if not body.enabled:
-                    settings.pop("writeback", None)
-                elif body.hubspot is None:
+                if body.hubspot is None:
                     raise HTTPException(422, "name the HubSpot properties Revansa may fill")
                 else:
                     changes = hubspot_changes(body.hubspot)

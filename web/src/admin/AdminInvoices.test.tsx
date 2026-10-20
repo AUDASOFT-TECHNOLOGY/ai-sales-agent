@@ -28,6 +28,10 @@ interface TestInvoice {
   payment_origin?: string | null;
   payment_transaction_id?: string | null;
   payment_event_id?: string | null;
+  amount_after_discount?: string | null;
+  discount_amount?: string | null;
+  free_amount?: string | null;
+  discount_percent?: number;
   overdue?: boolean;
   due_at?: string;
 }
@@ -216,6 +220,20 @@ describe("Billing: invoices", () => {
     const row = (await screen.findByRole("rowheader", { name: "INV-2026-04-alpha" })).closest("tr") as HTMLElement;
     await waitFor(() => expect(within(row).getByText("For free")).toBeInTheDocument());
     expect(JSON.parse(String(calls(fetchMock, "/status", "PUT")[0][1]?.body))).toEqual({ status: "FOR_FREE" });
+  });
+
+  it("lets an owner apply a 100% discount, shown as its own status and not as a payment", async () => {
+    const fetchMock = stubFetch({
+      settle: () =>
+        jsonResponse(200, invoice({ status: "DISCOUNTED_100", payment_origin: "manual", amount_after_discount: "0.00", discount_amount: "49.00", free_amount: "49.00", discount_percent: 100 })),
+    });
+    const user = await renderInvoices();
+    await user.click(await screen.findByRole("button", { name: "Apply a 100% discount to INV-2026-04-alpha" }));
+    const row = (await screen.findByRole("rowheader", { name: "INV-2026-04-alpha" })).closest("tr") as HTMLElement;
+    await waitFor(() => expect(within(row).getByText("Discounted 100%")).toBeInTheDocument());
+    expect(within(row).queryByText("Manual")).toBeNull(); // a discount has no payment origin
+    expect(within(row).queryByRole("button", { name: /Apply a 100%|Mark/ })).toBeNull();
+    expect(JSON.parse(String(calls(fetchMock, "/status", "PUT")[0][1]?.body))).toEqual({ status: "DISCOUNTED_100" });
   });
 
   it("shows the payment origin and does not offer 'Mark PAID' for an invoice paid electronically", async () => {
