@@ -14,6 +14,8 @@ from sales_app.admin_auth import AdminAuthService, AdminSessionStore, AdminUserS
 from sales_app.agent_state import AgentStateStore, InMemoryAgentStateStore
 from sales_app.audit_log import AuditService, InMemoryAuditLog
 from sales_app.billing import InvoiceStore
+from sales_app.billing_service import AutoBilling, BillingLoop
+from sales_app.finance.service import FinanceService
 from sales_app.channel_policy import ChannelPolicyService
 from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore
@@ -191,6 +193,11 @@ class Application:
     # provider; None without a database. See `sales_app.quotas` and `sales_app.provider_costs`.
     quotas: QuotaService | None = None
     costs: CostService | None = None
+    # Automatic monthly invoicing, run periodically under a database lease (see
+    # `sales_app.billing_service`), and the financial aggregations read by the Admin dashboards (see
+    # `sales_app.finance`). None without a database.
+    billing_loop: BillingLoop | None = None
+    finance: FinanceService | None = None
 
     def client_wiring(self, client_id: str) -> tuple[dict[str, Any] | None, str | None]:
         """A client's operator wiring: its record first, its `client.yaml` as the fallback."""
@@ -519,6 +526,7 @@ def _assemble(
         clock,
         limits=send_limits,
     )
+    invoices_store = _invoice_store(account_stores)
     return Application(
         settings=settings,
         registry=registry,
@@ -562,7 +570,7 @@ def _assemble(
         telegram_accounts=telegram_accounts,
         sheets_access=sheets_access,
         hubspot_access=hubspot_access,
-        invoices=_invoice_store(account_stores),
+        invoices=invoices_store,
         payment_provider=_payment_provider_resolver(secrets),
         daily_reports=daily_reports,
         product_resources=product_resources,
@@ -575,6 +583,10 @@ def _assemble(
         metrics_readers=_metrics_readers(account_stores),
         quotas=quotas,
         costs=_cost_service(account_stores, clock),
+        billing_loop=_billing_loop(
+            plans, invoices_store, notification_service, audit_service, clock, shared.leases
+        ),
+        finance=_finance(account_stores),
     )
 
 
@@ -640,6 +652,30 @@ def _operational_stores(
 def _invoice_store(account_stores: AccountStores | None) -> InvoiceStore | None:
     engine = account_stores.engine if account_stores is not None else None
     return SqlInvoiceStore(engine) if engine is not None else None
+
+
+def _billing_loop(
+    plans: PlanStore | None,
+    invoices: InvoiceStore | None,
+    notifications: NotificationService,
+    audit: AuditService,
+    clock: Clock,
+    leases: JobLeaseGuard | None,
+) -> BillingLoop | None:
+    if plans is None or invoices is None:
+        return None
+    return BillingLoop(
+        AutoBilling(plans, invoices, notifications, audit), clock.now, leases=leases
+    )
+
+
+def _finance(account_stores: AccountStores | None) -> FinanceService | None:
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None
+    from sales_app.persistence.finance_rows import SqlFinanceReader
+
+    return FinanceService(SqlFinanceReader(engine))
 
 
 def _payment_provider_resolver(secrets: SecretStore) -> Callable[[], PaymentProvider | None]:

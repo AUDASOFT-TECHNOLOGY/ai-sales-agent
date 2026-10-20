@@ -381,6 +381,7 @@ plans = Table(
     Column("created_at", UtcDateTime, nullable=False),
     Column("updated_at", UtcDateTime, nullable=False),
     Column("updated_by", String(255), nullable=False),
+    Column("billing_period", String(8), nullable=False, server_default="monthly"),
 )
 
 client_plan_assignments = Table(

@@ -11,6 +11,7 @@ import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
 import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
 import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
 import { ClientApprovalsPage } from "./client/ClientApprovalsPage";
+import { ClientInvoicesPage } from "./client/billing/ClientInvoicesPage";
 import { ClientAuthProvider } from "./client/ClientAuthContext";
 import { ClientHomePage } from "./client/ClientHomePage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
@@ -113,6 +114,7 @@ export function App() {
                 </Route>
 
                 <Route path="reports" element={<ClientReportingPage />} />
+                <Route path="billing" element={<ClientInvoicesPage />} />
                 <Route path="profile" element={<ClientProfilePage />} />
 
                 {/* Addresses of the previous menu keep working. */}

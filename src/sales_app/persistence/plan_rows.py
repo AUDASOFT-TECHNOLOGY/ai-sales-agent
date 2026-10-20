@@ -41,6 +41,7 @@ def _plan(row) -> Plan:
         created_at=row.created_at,
         updated_at=row.updated_at,
         updated_by=row.updated_by,
+        billing_period=row.billing_period or "monthly",
     )
 
 
@@ -221,6 +222,7 @@ def _values(plan: Plan) -> dict[str, object]:
         "active": plan.active,
         "updated_at": plan.updated_at,
         "updated_by": plan.updated_by,
+        "billing_period": plan.billing_period,
     }
 
 

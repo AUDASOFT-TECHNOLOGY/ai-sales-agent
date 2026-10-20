@@ -21,6 +21,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Protocol
 
 NAME_MAX = 80
+BILLING_PERIODS = ("monthly", "annual")
 MAX_PRICE = Decimal(1_000_000)
 MAX_CREDITS = 1_000_000_000
 MAX_DAILY_QUOTA = 100_000
@@ -53,6 +54,10 @@ class Plan:
     created_at: datetime
     updated_at: datetime
     updated_by: str
+    # How often the plan is billed. Only "monthly" is invoiced today; "annual" is stored so that the
+    # plan can be described, and the billing job reports it instead of guessing the terms
+    # (docs/open-decisions.md).
+    billing_period: str = "monthly"
 
 
 @dataclass(frozen=True, slots=True)

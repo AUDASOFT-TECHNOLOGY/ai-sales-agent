@@ -20,6 +20,8 @@ from sales_app.api.admin import create_admin_router
 from sales_app.api.admin_agents import create_admin_agents_router
 from sales_app.api.admin_audit import create_admin_audit_router
 from sales_app.api.admin_billing import create_admin_billing_router
+from sales_app.api.admin_finance import create_admin_finance_router
+from sales_app.api.client_billing import create_client_billing_router
 from sales_app.api.admin_channels import create_admin_channels_router
 from sales_app.api.admin_clients import create_admin_clients_router
 from sales_app.api.admin_costs import create_admin_costs_router
@@ -91,7 +93,10 @@ def create_app(
         stop = asyncio.Event()
         task = None
         verify = None
+        billing = None
         if run_scheduler:
+            if application.billing_loop is not None:
+                billing = asyncio.create_task(application.billing_loop.run(stop))
             task = asyncio.create_task(
                 application.scheduler.run(stop, application.settings.tick_seconds)
             )
@@ -109,6 +114,8 @@ def create_app(
                 await task
             if verify is not None:
                 await asyncio.gather(verify, return_exceptions=True)
+            if billing is not None:
+                await asyncio.gather(billing, return_exceptions=True)
             try:
                 await asyncio.wait_for(
                     asyncio.to_thread(application.close), timeout=SHUTDOWN_GRACE_SECONDS
@@ -132,6 +139,7 @@ def create_app(
     app.include_router(create_admin_lanes_router(application))
     app.include_router(create_admin_hubspot_router(application))
     app.include_router(create_admin_billing_router(application))
+    app.include_router(create_admin_finance_router(application))
     app.include_router(create_payments_router(application))
     app.include_router(create_admin_channels_router(application))
     app.include_router(
@@ -147,6 +155,7 @@ def create_app(
     app.include_router(create_client_agent_router(application))
     app.include_router(create_client_approvals_router(application))
     app.include_router(create_client_payments_router(application))
+    app.include_router(create_client_billing_router(application))
     app.include_router(create_client_resources_router(application))
     app.include_router(create_client_prospects_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))

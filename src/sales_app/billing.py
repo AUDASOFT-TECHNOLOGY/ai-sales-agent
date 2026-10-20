@@ -36,7 +36,7 @@ Only a month that has ended can be invoiced.
 
 import re
 import threading
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -235,6 +235,67 @@ def _day_owner(day_end: datetime, assignments: Iterable[PlanAssignment]) -> Plan
     return None
 
 
+class ProrationPolicy(Protocol):
+    """How a period is split between the plans a client was on, and what each part costs.
+
+    The commercial rule for a partial period (a client that joins, leaves or changes plan mid-month)
+    is NOT decided (docs/open-decisions.md). It lives behind this interface so that deciding it
+    changes one class, never the invoices already kept (each carries its own lines)."""
+
+    def lines(
+        self,
+        assignments: Sequence[PlanAssignment],
+        start: datetime,
+        end: datetime,
+    ) -> list[InvoiceLine]:
+        """The invoice lines for [start, end), in chronological order; none when no plan applied."""
+        ...
+
+
+class DailyProrata:
+    """The behaviour in force: each calendar day belongs to the assignment in force at the end of
+    that day; a plan's line is `price x days / days in the period`, rounded to the cent."""
+
+    def lines(
+        self,
+        assignments: Sequence[PlanAssignment],
+        start: datetime,
+        end: datetime,
+    ) -> list[InvoiceLine]:
+        days_in_period = (end - start).days
+        days: dict[tuple[str, datetime], int] = {}  # one entry per assignment (plan, start)
+        owners: dict[tuple[str, datetime], PlanAssignment] = {}
+        for offset in range(days_in_period):
+            day_end = start + timedelta(days=offset + 1) - timedelta(microseconds=1)
+            owner = _day_owner(day_end, assignments)
+            if owner is not None:
+                key = (owner.plan_id, owner.started_at)
+                days[key] = days.get(key, 0) + 1
+                owners[key] = owner
+        lines = []
+        for key in sorted(days, key=lambda k: k[1]):
+            a, n = owners[key], days[key]
+            lines.append(
+                InvoiceLine(
+                    plan_id=a.plan_id,
+                    plan_name=a.plan_name,
+                    monthly_price=a.monthly_price,
+                    currency=a.currency,
+                    included_credits=a.included_credits,
+                    daily_quota=a.daily_quota,
+                    days=n,
+                    days_in_period=days_in_period,
+                    amount=(a.monthly_price * n / days_in_period).quantize(
+                        _CENT, rounding=ROUND_HALF_UP
+                    ),
+                )
+            )
+        return lines
+
+
+DEFAULT_PRORATION: ProrationPolicy = DailyProrata()
+
+
 def build_invoice(
     client_id: str,
     period: str,
@@ -242,41 +303,16 @@ def build_invoice(
     *,
     now: datetime,
     created_by: str,
+    proration: ProrationPolicy = DEFAULT_PRORATION,
 ) -> Invoice | None:
     """The invoice of one client for a closed month; None if it had no plan day in it.
-    `MixedCurrenciesError` if its plans were in different currencies."""
+    `MixedCurrenciesError` if its plans were in different currencies. The split of a partial period
+    is the `proration` policy's (today `DailyProrata`)."""
     start, end = ensure_closed(period, now)
     mine = [a for a in assignments if a.client_id == client_id]
-    days_in_period = (end - start).days
-    days: dict[tuple[str, datetime], int] = {}  # one entry per assignment (plan, start)
-    owners: dict[tuple[str, datetime], PlanAssignment] = {}
-    for offset in range(days_in_period):
-        day_end = start + timedelta(days=offset + 1) - timedelta(microseconds=1)
-        owner = _day_owner(day_end, mine)
-        if owner is not None:
-            key = (owner.plan_id, owner.started_at)
-            days[key] = days.get(key, 0) + 1
-            owners[key] = owner
-    if not days:
+    lines = proration.lines(mine, start, end)
+    if not lines:
         return None
-    lines = []
-    for key in sorted(days, key=lambda k: k[1]):
-        a, n = owners[key], days[key]
-        lines.append(
-            InvoiceLine(
-                plan_id=a.plan_id,
-                plan_name=a.plan_name,
-                monthly_price=a.monthly_price,
-                currency=a.currency,
-                included_credits=a.included_credits,
-                daily_quota=a.daily_quota,
-                days=n,
-                days_in_period=days_in_period,
-                amount=(a.monthly_price * n / days_in_period).quantize(
-                    _CENT, rounding=ROUND_HALF_UP
-                ),
-            )
-        )
     currencies = {line.currency for line in lines}
     if len(currencies) > 1:
         raise MixedCurrenciesError(client_id)
