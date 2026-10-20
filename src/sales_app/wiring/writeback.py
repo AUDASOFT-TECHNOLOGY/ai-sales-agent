@@ -130,7 +130,7 @@ class ClientWriteback:
     def source_ids(self) -> tuple[str, ...]:
         return tuple(self._syncers)
 
-    def run(self) -> WritebackSummary:
+    def run(self, *, retry_held: bool = False) -> WritebackSummary:
         totals = dict.fromkeys(
             (
                 "planned",
@@ -152,7 +152,7 @@ class ClientWriteback:
                 errors.append(f"write-back {source_id}: the source is not ready")
                 continue
             try:
-                report: SyncReport = syncer.run_once()
+                report: SyncReport = syncer.run_once(retry_held=retry_held)
             except Exception as error:  # noqa: BLE001 - one source failing must never stop the others
                 # A fixed message and the type of what was raised, nothing of its content: it could
                 # carry a name, a contact or the value of a cell. The source is named by the sentence

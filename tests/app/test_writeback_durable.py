@@ -4,7 +4,11 @@ it is shared by every process of a client without a gap in its numbering, it kee
 and its table, added by migration 0005, can hold nothing personal.
 """
 
+import os
+import random
 import threading
+import time
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -115,24 +119,54 @@ def test_a_retry_after_a_restart_is_recorded_once_and_the_numbering_goes_on(tmp_
 # ---- two processes of one client ---------------------------------------------------------------------
 
 
-def test_two_writers_over_one_database_never_repeat_or_skip_a_number(engine):
-    ledgers = [open_ledger(engine), open_ledger(engine)]  # two processes: two separate locks
+@pytest.fixture
+def shared_engine(engine):
+    """The database two processes share. SQLite (default) serialises writers and can answer "locked"
+    under CPU load, which the test absorbs by trying again. If SALES_AGENT_TEST_DATABASE_URL names a
+    PostgreSQL database (already migrated, disposable), the same test runs on it with a client id
+    of its own, which it removes afterwards."""
+    url = os.environ.get("SALES_AGENT_TEST_DATABASE_URL", "").strip()
+    if not url:
+        yield engine, A
+        return
+    made = create_database_engine(url)
+    client = f"race-{uuid.uuid4().hex[:10]}"
+    try:
+        yield made, client
+    finally:
+        with made.begin() as connection:
+            connection.execute(
+                text("DELETE FROM op_writeback_ledger WHERE client_id = :c"), {"c": client}
+            )
+            connection.execute(text("DELETE FROM clients WHERE client_id = :c"), {"c": client})
+        made.dispose()
+
+
+def test_two_writers_over_one_database_never_repeat_or_skip_a_number(shared_engine):
+    engine, client = shared_engine
+    ledgers = [open_ledger(engine, client), open_ledger(engine, client)]  # two processes: two locks
+    failures: list[str] = []
 
     def work(worker):
         for n in range(15):
-            row = [attempt(f"w{worker}-{n}", pid=f"sheet_a:p{worker}")]
-            for _ in range(50):  # the ledger gives up visibly after a few lost races (CPU load on
-                try:  # SQLite); appending is idempotent by attempt id, so trying again is safe
+            row = [attempt(f"w{worker}-{n}", client=client, pid=f"sheet_a:p{worker}")]
+            deadline = time.monotonic() + 30
+            while True:  # the ledger gives up visibly after a few lost races (or "database is
+                try:  # locked" on SQLite); appending is idempotent by attempt id, so retrying is safe
                     ledgers[worker % 2].append(row)
                     break
                 except StoreError:
-                    continue
+                    if time.monotonic() > deadline:
+                        failures.append(f"w{worker}-{n}")
+                        break
+                    time.sleep(0.01 + random.random() * 0.03)
 
     threads = [threading.Thread(target=work, args=(w,)) for w in range(4)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
+    assert failures == []  # every attempt was recorded in the end, none given up on
     entries = ledgers[0].entries()
     assert [e.sequence for e in entries] == list(range(1, 61))
     assert len({e.attempt_id for e in entries}) == 60
@@ -212,7 +246,7 @@ class TestMigration:
         after = set(inspect(engine).get_table_names())
         assert after - before == {"op_writeback_ledger"}
         upgrade_database(engine)
-        assert head_revision() == current_revision(engine) == "0017"
+        assert head_revision() == current_revision(engine)
         assert set(inspect(engine).get_table_names()) - {"alembic_version"} == set(metadata.tables)
 
     def test_the_upgrade_keeps_what_was_there(self):

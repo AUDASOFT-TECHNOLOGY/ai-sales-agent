@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../../ui/Button";
 import { Textarea, TextInput } from "../../ui/Controls";
 import { useAdminAuth } from "../AdminAuthContext";
+import { HubSpotHealthPanel } from "./HubSpotHealthPanel";
 import { AdminApiError, adminAdoptLanes, adminGetClientSource, adminSaveClientSource, type ClientSourceSettings } from "../api";
 
 const STATUSES = ["new", "paused", "closed", "opted_out"];
@@ -145,6 +146,14 @@ export function AdminClientSourcesCard({ clientId }: { clientId: string }) {
       ) : (
         <p className="c-3 t-body-sm">The HubSpot statuses are set here once the client has a HubSpot source.</p>
       )}
+
+      {hubspot ? (
+        <HubSpotHealthPanel
+          clientId={clientId}
+          canEdit={canEdit}
+          draft={parsed.bad || Object.keys(parsed.mapping).length === 0 ? null : { ...(source.settings ?? {}), status_property: property.trim() || "hs_lead_status", status_mapping: parsed.mapping }}
+        />
+      ) : null}
 
       {message ? (
         <p className={`admin-alert admin-alert--${message.tone}`} role={message.tone === "danger" ? "alert" : "status"}>

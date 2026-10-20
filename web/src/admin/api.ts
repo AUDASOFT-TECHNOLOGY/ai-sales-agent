@@ -499,6 +499,41 @@ export function adminSaveClientSource(clientId: string, settings: Record<string,
   return request<ClientSourceSettings>(`/clients/${encodeURIComponent(clientId)}/source`, { method: "PUT", body: JSON.stringify(settings) });
 }
 
+export interface HubSpotHealth {
+  client_id: string;
+  uses_hubspot: boolean;
+  can_resume: boolean;
+  connection: {
+    state: "not_connected" | "connected" | "reauth_required" | "unavailable";
+    platform_configured: boolean;
+    message: string;
+    action: string;
+    steps: string[];
+    client_path: string | null;
+  } | null;
+  statuses: { configured: boolean; status_property: string | null; values: Record<string, string[]>; problem: string | null } | null;
+  writeback: {
+    ledger_available: boolean;
+    applied: number;
+    waiting: number;
+    failed: number;
+    overruled: number;
+    problems: Array<{ code: string; message: string; action: string }>;
+  } | null;
+}
+
+export function adminHubSpotHealth(clientId: string): Promise<HubSpotHealth> {
+  return request<HubSpotHealth>(`/clients/${encodeURIComponent(clientId)}/hubspot/health`);
+}
+
+export function adminCheckHubSpotMapping(clientId: string, settings: Record<string, unknown>): Promise<{ ok: boolean; problems: string[] }> {
+  return request(`/clients/${encodeURIComponent(clientId)}/hubspot/status-mapping/check`, { method: "POST", body: JSON.stringify(settings) });
+}
+
+export function adminResumeHubSpotSync(clientId: string): Promise<{ ran: boolean; message: string; counters: Record<string, number>; problems: string[] }> {
+  return request(`/clients/${encodeURIComponent(clientId)}/hubspot/resume-sync`, { method: "POST" });
+}
+
 export function adminAdoptLanes(clientId: string, confirmNewIds = false): Promise<{ lane: string; source: string; channel: string; version: number }> {
   return request(`/clients/${encodeURIComponent(clientId)}/lanes/adopt`, { method: "POST", body: JSON.stringify({ confirm_new_ids: confirmNewIds }) });
 }

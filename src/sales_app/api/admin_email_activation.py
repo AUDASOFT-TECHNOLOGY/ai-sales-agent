@@ -82,6 +82,19 @@ class RejectRequest(BaseModel):
     reason: str
 
 
+class SharingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shared: bool
+
+
+class SharingResponse(BaseModel):
+    """Whether this client may be shown the login of its mailbox. Never the login itself."""
+
+    client_id: str
+    shared: bool
+
+
 class ActivateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
@@ -279,6 +292,33 @@ def create_admin_email_activation_router(
         record = await run_in_threadpool(guarded, end)
         refresh(client_id)
         return item(client_id, record)
+
+    # ---- showing the client its login (the Admin's decision; off by default) ---------------
+
+    @router.get(
+        "/clients/{client_id}/email-activation/credentials-sharing", response_model=SharingResponse
+    )
+    def get_sharing(
+        client_id: str, admin: AdminUser = Depends(get_current_admin)
+    ) -> SharingResponse:
+        reach(admin, client_id)
+        return SharingResponse(
+            client_id=client_id, shared=guarded(lambda: service().credentials_shared(client_id))
+        )
+
+    @router.put(
+        "/clients/{client_id}/email-activation/credentials-sharing", response_model=SharingResponse
+    )
+    def put_sharing(
+        client_id: str, body: SharingRequest, admin: AdminUser = Depends(require_owner)
+    ) -> SharingResponse:
+        """Let this client read the login of its assigned mailbox (`shared`), or stop. The password
+        is still shown only on the client's explicit request, a few times an hour."""
+        reach(admin, client_id)
+        shared = guarded(
+            lambda: service().set_credentials_shared(client_id, body.shared, actor=admin.username)
+        )
+        return SharingResponse(client_id=client_id, shared=shared)
 
     # ---- activating -----------------------------------------------------------------------
 

@@ -62,6 +62,7 @@ from sales_app.secret_store import (
 from sales_app.secret_wiring import open_secrets
 from sales_app.send_cap import SendCapStore, SendLimits
 from sales_app.settings import Settings
+from sales_app.shared_state import JobLeaseGuard, SharedPendingAuthorizations
 from sales_app.sheets_wiring import SheetsAccessService
 from sales_app.sheets_wiring import install as install_sheets_access
 from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
@@ -358,22 +359,33 @@ def _assemble(
     plans = _plan_store(account_stores)
     send_caps, send_limits = _send_limits(account_stores, plans, clock)
     # Resolved at each use from the Admin's credentials: no restart when they change.
+    shared = _shared_state(account_stores)
     gmail = gmail_service or GmailMailService(
-        secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
+        secrets=secrets,
+        clock=clock,
+        public_base_url=lambda: settings.public_base_url,
+        pending=shared.pending("gmail"),
     )
     whatsapp = WhatsAppService(
         secrets=secrets,
         clock=clock,
         state=_whatsapp_state(account_stores),
         public_base_url=lambda: settings.public_base_url,
+        pending=shared.pending_rows,
     )
     telegram_accounts = TelegramAccountService(secrets=secrets, clock=clock)
     sheets_access = SheetsAccessService(
-        secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
+        secrets=secrets,
+        clock=clock,
+        public_base_url=lambda: settings.public_base_url,
+        pending=shared.pending("sheets"),
     )
     install_sheets_access(sheets_access)
     hubspot_access = HubSpotAccessService(
-        secrets=secrets, clock=clock, public_base_url=lambda: settings.public_base_url
+        secrets=secrets,
+        clock=clock,
+        public_base_url=lambda: settings.public_base_url,
+        pending=shared.pending("hubspot"),
     )
     install_hubspot_access(hubspot_access)
     product_resources, knowledge = _resources(account_stores, clock)
@@ -484,6 +496,7 @@ def _assemble(
             inbox=builders,
             mail_cursors=_mail_cursor_stores(account_stores),
             reports=daily_reports,
+            leases=shared.leases,
         ),
         parsers=parsers,
         clock=clock,
@@ -570,6 +583,30 @@ def _send_limits(
 def _llm_pricing_store(account_stores: AccountStores | None) -> LLMPricingStore | None:
     engine = account_stores.engine if account_stores is not None else None
     return SqlLLMPricingStore(engine) if engine is not None else None
+
+
+class _SharedState:
+    """What several processes share through the database: pending consents and job leases. Without a
+    database (one process, in-memory stores) there is nothing to share and every part is None."""
+
+    def __init__(self, engine: Any | None) -> None:
+        if engine is None:
+            self.pending_rows = None
+            self.leases = None
+            return
+        from sales_app.persistence.multiprocess_rows import SqlJobLeases, SqlPendingConsents
+
+        self.pending_rows = SqlPendingConsents(engine)
+        self.leases = JobLeaseGuard(SqlJobLeases(engine))
+
+    def pending(self, kind: str) -> SharedPendingAuthorizations | None:
+        if self.pending_rows is None:
+            return None
+        return SharedPendingAuthorizations(self.pending_rows, kind)
+
+
+def _shared_state(account_stores: AccountStores | None) -> _SharedState:
+    return _SharedState(account_stores.engine if account_stores is not None else None)
 
 
 def _whatsapp_state(account_stores: AccountStores | None) -> WhatsAppState:

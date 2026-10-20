@@ -208,6 +208,7 @@ class WhatsAppService:
         client_ids: Callable[[], Iterable[str]] = lambda: (),
         public_base_url: Callable[[], str | None] = lambda: None,
         changed: Callable[[str], None] = lambda client_id: None,
+        pending: Any = None,
     ) -> None:
         self._secrets = secrets
         self._clock = clock
@@ -217,6 +218,9 @@ class WhatsAppService:
         self._base = public_base_url
         self._changed = changed
         self._pending: dict[str, tuple[str, datetime]] = {}  # nonce -> (client, expires)
+        # The shared (database) register of pending sign-ups, when there is one: a callback may then
+        # land on another process than the one that started the sign-up. None: this process's memory.
+        self._shared = pending
         self._lock = threading.Lock()
 
     def __repr__(self) -> str:
@@ -286,9 +290,12 @@ class WhatsAppService:
         now = self._clock.now()
         nonce = token_secrets.token_urlsafe(18)
         expires = now + timedelta(seconds=STATE_TTL_SECONDS)
-        with self._lock:
-            self._pending = {n: v for n, v in self._pending.items() if v[1] > now}
-            self._pending[nonce] = (client_id, expires)
+        if self._shared is not None:
+            self._shared.put("whatsapp", nonce, client_id, "", expires)
+        else:
+            with self._lock:
+                self._pending = {n: v for n, v in self._pending.items() if v[1] > now}
+                self._pending[nonce] = (client_id, expires)
         payload = f"{client_id}.{nonce}.{int(expires.timestamp())}"
         mac = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
         return StartInfo(app_id, config_id, self._version(), f"{payload}.{mac}")
@@ -300,9 +307,16 @@ class WhatsAppService:
         payload, _, mac = state.rpartition(".")
         expected = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
         parts = payload.split(".")
-        with self._lock:  # single use: the first attempt consumes it, valid or not
-            nonce = parts[1] if len(parts) == 3 else ""
-            pending = self._pending.pop(nonce, None)
+        nonce = parts[1] if len(parts) == 3 else ""
+        if self._shared is not None:  # single use, atomically, whichever process asks first
+            try:
+                row = self._shared.take("whatsapp", nonce)
+            except Exception:  # noqa: BLE001 - a register that cannot answer proves nothing
+                row = None
+            pending = (row.client_id, row.expires_at) if row is not None else None
+        else:
+            with self._lock:  # single use: the first attempt consumes it, valid or not
+                pending = self._pending.pop(nonce, None)
         if (
             not hmac.compare_digest(mac.encode(), expected.encode())
             or len(parts) != 3
@@ -398,7 +412,10 @@ class WhatsAppService:
         """Before anything is done at Meta: a number belongs to one client. (The store's unique
         constraint is the atomic guard at the moment of saving.)"""
         for other in self._client_ids():
-            if other != client_id and self._client_value(other, WHATSAPP_PHONE_NUMBER_ID) == phone_id:
+            if (
+                other != client_id
+                and self._client_value(other, WHATSAPP_PHONE_NUMBER_ID) == phone_id
+            ):
                 raise WhatsAppConnectionError(IN_USE)
 
     def _register(

@@ -655,3 +655,34 @@ wa_templates = Table(
     Column("is_opening", Boolean, nullable=False),
     Column("updated_at", UtcDateTime, nullable=False),
 )
+
+
+# ---- multi-process resilience (migration 0020) ---------------------------------------------------
+# Consents under way (OAuth / Embedded Signup), kept in the database instead of one process's memory,
+# so the callback can land on another process than the one that started the consent. Single use (the
+# row is deleted by the statement that reads it) and with an expiry. `verifier` is the PKCE verifier of
+# a Google consent (useless without the authorisation code and the client's own browser session);
+# empty for the others. Never shown, never logged.
+oauth_pending_consents = Table(
+    "oauth_pending_consents",
+    metadata,
+    Column("kind", String(32), primary_key=True),  # gmail | sheets | hubspot | whatsapp
+    Column("session_id", String(128), primary_key=True),
+    Column("client_id", String(64), nullable=False),
+    Column("verifier", String(255), nullable=False),
+    Column("expires_at", UtcDateTime, nullable=False),
+    Column("created_at", UtcDateTime, nullable=False),
+    Index("ix_oauth_pending_expires", "expires_at"),
+)
+
+# One holder per (client, job): the scheduler of a process takes the lease before a job and frees it
+# after; a holder that dies loses it at `expires_at`. Holds no data.
+job_leases = Table(
+    "job_leases",
+    metadata,
+    Column("client_id", String(64), primary_key=True),
+    Column("job", String(32), primary_key=True),
+    Column("holder", String(64), nullable=False),
+    Column("acquired_at", UtcDateTime, nullable=False),
+    Column("expires_at", UtcDateTime, nullable=False),
+)

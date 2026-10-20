@@ -138,7 +138,12 @@ class WriteBackSyncer:
     def __repr__(self) -> str:
         return f"WriteBackSyncer(client={self._ledger.client_id!r}, dry_run={self._dry_run})"
 
-    def run_once(self) -> SyncReport:
+    def run_once(self, *, retry_held: bool = False) -> SyncReport:
+        """One pass. `retry_held` (an Admin resuming failed synchronisations) lifts the waiting that
+        follows a failure that waiting cures (`deferred`) or does not (`failed`): those writes are
+        tried again now. What a person overruled (a conflict) or undid stays held back, and nothing
+        is ever written twice: every write is recomputed from what the source holds now and names the
+        value it expects to replace."""
         if not self._policy.enabled:
             return SyncReport(dry_run=self._dry_run)
         try:
@@ -170,7 +175,7 @@ class WriteBackSyncer:
         )
 
         now = self._clock()
-        due = [(i, w) for i, w in enumerate(plan.writes) if not self._held_back(w, now)]
+        due = [(i, w) for i, w in enumerate(plan.writes) if not self._held_back(w, now, retry_held)]
         held = len(plan.writes) - len(due)
         if self._dry_run:
             return SyncReport(planned=len(due), held_back=held, skipped=plan.skipped, dry_run=True)
@@ -213,11 +218,13 @@ class WriteBackSyncer:
 
     # ---- holding back ---------------------------------------------------------------------
 
-    def _held_back(self, write: PlannedWrite, now: datetime) -> bool:
+    def _held_back(self, write: PlannedWrite, now: datetime, retry_held: bool = False) -> bool:
         """Whether a recent attempt on this field of this prospect makes another one unwise."""
         public_id = ProspectId(write.public_id)
         latest = self._ledger.latest(public_id, write.field)
         if latest is None:
+            return False
+        if retry_held and latest.outcome in (Outcome.DEFERRED, Outcome.FAILED):
             return False
         if latest.outcome is Outcome.DEFERRED:
             if latest.not_before is not None:

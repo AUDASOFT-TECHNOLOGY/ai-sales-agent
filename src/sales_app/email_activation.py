@@ -24,7 +24,7 @@ from sales_app.config.email_activation import (
     format_record,
     parse_record,
 )
-from sales_app.config.secrets import EMAIL_ACTIVATION
+from sales_app.config.secrets import EMAIL_ACTIVATION, EMAIL_CREDENTIALS_SHARED
 from sales_app.secret_store import client_scope
 from sales_app.secret_store.audit import SecretAudit, SecretAuditEvent
 from sales_app.secret_store.port import SecretStore
@@ -100,7 +100,37 @@ class EmailActivationService:
         cleaned = _clean_reason(reason)
         with self._lock:
             current = self._require(client_id, (ACTIVE,), "only an active request can be ended")
-            return self._move(client_id, current, REJECTED, cleaned, actor)
+            moved = self._move(client_id, current, REJECTED, cleaned, actor)
+            self._store.delete(client_scope(client_id), EMAIL_CREDENTIALS_SHARED)  # no mailbox left
+            return moved
+
+    # ---- whether the client may be shown its mailbox login -----------------------------------
+
+    def credentials_shared(self, client_id: str) -> bool:
+        """The Admin's decision to show this client the login of its mailbox. False unless set."""
+        return self._store.get(client_scope(client_id), EMAIL_CREDENTIALS_SHARED) == "1"
+
+    def set_credentials_shared(self, client_id: str, shared: bool, *, actor: str) -> bool:
+        """Only an active mailbox can be shared (there is nothing to show before)."""
+        with self._lock:
+            self._require(client_id, (ACTIVE,), "only an active mailbox can be shared")
+            scope = client_scope(client_id)
+            if shared:
+                self._store.set(scope, EMAIL_CREDENTIALS_SHARED, "1", by=actor)
+            else:
+                self._store.delete(scope, EMAIL_CREDENTIALS_SHARED)
+            self._audit.record(
+                SecretAuditEvent(
+                    self._now(),
+                    actor,
+                    "set" if shared else "delete",
+                    scope,
+                    EMAIL_CREDENTIALS_SHARED,
+                    "stored" if shared else "removed",
+                    "credentials_shared" if shared else "credentials_kept_back",
+                )
+            )
+            return shared
 
     # ---- internals -----------------------------------------------------------------------
 

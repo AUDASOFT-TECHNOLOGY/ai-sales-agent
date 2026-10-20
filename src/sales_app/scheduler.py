@@ -47,6 +47,23 @@ class Job(StrEnum):
     REPORT = "report"  # make the client's daily report if missing and send what is due
 
 
+class LeaseSupport(Protocol):
+    """Cross-process exclusion per (client, job) (`sales_app.shared_state.JobLeaseGuard`)."""
+
+    def try_acquire(self, client_id: str, job: str, now: datetime) -> bool: ...
+
+    def release(self, client_id: str, job: str) -> None: ...
+
+
+# The jobs that drive the Engine exclude each other, as they do inside one process; the others have a
+# lease of their own.
+_ENGINE_JOBS = frozenset({Job.DAILY, Job.PREPARE, Job.DISPATCH, Job.RECOVER})
+
+
+def lease_name(job: Job) -> str:
+    return "engine" if job in _ENGINE_JOBS else job.value
+
+
 class InboxSupport(Protocol):
     """Which clients have an inbox to poll, and how to open it (`IntegrationBuilders`)."""
 
@@ -70,6 +87,7 @@ class JobResult:
     job: Job
     ok: bool
     errors: tuple[str, ...] = ()  # problems reported by the Engine or the exception raised
+    skipped: bool = False  # another process holds this client's lease for the job: nothing was run
 
 
 class Scheduler:
@@ -86,6 +104,7 @@ class Scheduler:
         mail_cursors: Callable[[str], PositionStore] | None = None,
         reports: ReportSupport | None = None,
         report_every_minutes: int = REPORT_EVERY_MINUTES,
+        leases: LeaseSupport | None = None,
     ) -> None:
         self._registry = registry
         self._clock = clock
@@ -96,6 +115,7 @@ class Scheduler:
         self._sync_every = sync_every_minutes
         self._reports = reports  # None: no daily report (no database)
         self._report_every = report_every_minutes
+        self._leases = leases  # None: one process only, nothing to share
         self._executor = executor
         self._owns_executor = executor is None
 
@@ -197,6 +217,39 @@ class Scheduler:
         """Run one job immediately in this thread (used by the CLI)."""
         return self._execute(runtime, job, now if now is not None else self._clock.now())
 
+    def resume_sync(self, runtime: ClientRuntime, now: datetime | None = None) -> JobResult | None:
+        """An Admin resuming a client's failed write-backs, now, in this thread: the writes that were
+        waiting out a failure are tried again (`retry_held`). It takes the client's place like any
+        job (None when a job of this client is running: try again in a moment) and the lease of the
+        write-back, so it never overlaps the scheduled one in this or another process. Nothing is
+        written twice: every write is recomputed from what the source holds and names the value it
+        expects to replace."""
+        moment = now if now is not None else self._clock.now()
+        if not runtime.state.try_begin():
+            return None
+        leases = self._leases
+        name = lease_name(Job.SYNC)
+        try:
+            if leases is not None and not leases.try_acquire(runtime.client_id, name, moment):
+                return None
+            try:
+                with runtime.lease():
+                    return self._sync(runtime, moment, retry_held=True)
+            except ClientNotReadyError as error:
+                return JobResult(runtime.client_id, Job.SYNC, ok=False, errors=(str(error),))
+            except Exception as error:  # noqa: BLE001 - the type only: the message may carry a value
+                client_logger(__name__, runtime.client_id).error(
+                    "write-back resume failed (%s)", type(error).__name__
+                )
+                return JobResult(
+                    runtime.client_id, Job.SYNC, ok=False, errors=("write-back failed",)
+                )
+            finally:
+                if leases is not None:
+                    leases.release(runtime.client_id, name)
+        finally:
+            runtime.state.end()
+
     async def run(self, stop: asyncio.Event, interval_seconds: float) -> None:
         """Tick until `stop` is set. Ticking only submits work, so it never blocks the loop."""
         while not stop.is_set():
@@ -250,6 +303,21 @@ class Scheduler:
         return results
 
     def _execute(self, runtime: ClientRuntime, job: Job, now: datetime) -> JobResult:
+        leases = self._leases
+        if leases is None:
+            return self._execute_leased(runtime, job, now)
+        name = lease_name(job)
+        if not leases.try_acquire(runtime.client_id, name, now):
+            # Another process runs it (or the database cannot say). Nothing is marked done: this
+            # process looks again on a later tick, and the jobs are idempotent in the Core.
+            client_logger(__name__, runtime.client_id).info("job %s: held elsewhere", job.value)
+            return JobResult(runtime.client_id, job, ok=True, skipped=True)
+        try:
+            return self._execute_leased(runtime, job, now)
+        finally:
+            leases.release(runtime.client_id, name)
+
+    def _execute_leased(self, runtime: ClientRuntime, job: Job, now: datetime) -> JobResult:
         logger = client_logger(__name__, runtime.client_id)
         try:
             with runtime.lease() as engine:  # one Engine for the whole job, even across a refresh
@@ -302,13 +370,13 @@ class Scheduler:
         logger.info("job %s finished (%d reported problems)", job.value, len(errors))
         return JobResult(runtime.client_id, job, ok=True, errors=errors)
 
-    def _sync(self, runtime: ClientRuntime, now: datetime) -> JobResult:
+    def _sync(self, runtime: ClientRuntime, now: datetime, *, retry_held: bool = False) -> JobResult:
         """One write-back run. Called inside the lease, so the syncers are the ones of the Engine in
         force. Each source runs on its own; what comes back is counters and fixed sentences."""
         writeback = runtime.writeback
         if writeback is None:
             return JobResult(runtime.client_id, Job.SYNC, ok=True)
-        summary = writeback.run()
+        summary = writeback.run(retry_held=retry_held)
         runtime.state.last_sync_at = now
         if summary.all_failed:
             self._block_sync(runtime, now)

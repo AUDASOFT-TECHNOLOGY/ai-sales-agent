@@ -70,6 +70,28 @@ class CredentialService:
         never be placed in an API response; `describe` and `status` are what an admin sees."""
         return self._store.get(scope, spec_for(scope, key).key)
 
+    def reveal_audited(self, scope: str, key: str, *, actor: str, reason: str) -> str | None:
+        """`reveal` for a value a person is shown on request: the request is recorded (who, which
+        credential, why), never the value. For the few credentials meant to be communicated."""
+        value = self.reveal(scope, key)
+        self._audit.record(
+            SecretAuditEvent(
+                self._now(),
+                actor,
+                "reveal",
+                scope,
+                key,
+                "revealed" if value else "not_found",
+                reason,
+            )
+        )
+        return value
+
+    def record_refused_reveal(self, scope: str, key: str, *, actor: str, reason: str) -> None:
+        self._audit.record(
+            SecretAuditEvent(self._now(), actor, "reveal", scope, key, "rejected", reason)
+        )
+
     def save(
         self, scope: str, key: str, value: str, *, actor: str, apply: bool = True
     ) -> CredentialStatus:
