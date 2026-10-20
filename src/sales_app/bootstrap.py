@@ -36,6 +36,7 @@ from sales_app.hubspot_wiring import install as install_hubspot_access
 from sales_app.inbox import PositionStore
 from sales_app.llm_pricing import LLMPricingStore
 from sales_app.llm_usage import LLMUsageStore
+from sales_app.metrics import MetricsReader
 from sales_app.parsers import ParserTable, build_parsers
 from sales_app.payment_confirmation import PAYMENT_WEBHOOK_SECRET
 from sales_app.payment_provider import PaymentProvider, SignedWebhookProvider
@@ -44,11 +45,14 @@ from sales_app.persistence.invoice_rows import SqlInvoiceStore
 from sales_app.persistence.llm_pricing_rows import SqlLLMPricingStore
 from sales_app.persistence.llm_usage_rows import SqlLLMUsageStore
 from sales_app.persistence.mail_cursor_rows import SqlMailCursorStore
+from sales_app.persistence.metrics_rows import SqlMetricsRows
 from sales_app.persistence.operational_rows import SqlOperationalRows
 from sales_app.persistence.plan_rows import SqlPlanStore
+from sales_app.persistence.read_model_rows import SqlProspectReadModel
 from sales_app.persistence.resource_rows import SqlResourceStore
 from sales_app.persistence.send_cap_rows import SqlSendCapStore, SqlSendCounter
 from sales_app.plans import PlanStore, current_daily_quota
+from sales_app.read_model import ProspectReadModel
 from sales_app.registry import ClientRegistry
 from sales_app.report_wiring import build_report_service
 from sales_app.resources.knowledge import KnowledgeIndex
@@ -175,6 +179,11 @@ class Application:
     # The specialised register of credential changes (kept as is; the Admin reads it through
     # `GET /admin/v1/audit/secrets`).
     secret_audit: SecretAudit | None = None
+    # One client's read model (prospects and conversations listed by SQL, without the Engine) and
+    # its metrics reader; None without a database (the Client API then lists through the Engine).
+    # See `sales_app.read_model` and `sales_app.metrics`.
+    read_models: Callable[[str], ProspectReadModel] | None = None
+    metrics_readers: Callable[[str], MetricsReader] | None = None
 
     def client_wiring(self, client_id: str) -> tuple[dict[str, Any] | None, str | None]:
         """A client's operator wiring: its record first, its `client.yaml` as the fallback."""
@@ -551,6 +560,8 @@ def _assemble(
         audit=audit_service,
         notifications=notification_service,
         secret_audit=audit,
+        read_models=_read_models(account_stores),
+        metrics_readers=_metrics_readers(account_stores),
     )
 
 
@@ -571,6 +582,24 @@ def _audit_and_notifications(
         AuditService(SqlAuditLog(engine), now=clock.now),
         NotificationService(SqlNotificationStore(engine), now=clock.now),
     )
+
+
+def _read_models(
+    account_stores: AccountStores | None,
+) -> Callable[[str], ProspectReadModel] | None:
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None
+    return lambda client_id: SqlProspectReadModel(engine, client_id)
+
+
+def _metrics_readers(
+    account_stores: AccountStores | None,
+) -> Callable[[str], MetricsReader] | None:
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None
+    return lambda client_id: SqlMetricsRows(engine, client_id)
 
 
 def _resources(

@@ -88,6 +88,7 @@ KEYWORD_ACTOR = "system:inbound"
 
 _UNKNOWN = "unknown prospect"
 _SOFT = "warning:"  # how a verification issue says it is not blocking
+LOCAL_SOURCE = "local"  # the source id of the prospects Revansa created itself
 _SINGLE_SOURCE = "source"  # the id of the one source of a client that has just one, unnamed
 
 
@@ -174,6 +175,7 @@ class CompositeRepository:
         gate = self._gate(read_source=True)
 
         result: list[Prospect] = []
+        origins: dict[str, tuple[str, str]] = {}
         public_ids: set[str] = set()
         contacts: set[str] = set()
         owners: dict[str, tuple[int, str]] = {}  # contact key -> (index in result, source id)
@@ -219,6 +221,7 @@ class CompositeRepository:
                     continue
                 for key in keys:
                     owners.setdefault(key, (len(result), bound.source_id))
+                origins[public] = (bound.source_id, record.prospect_id)
                 result.append(merged)
         for prospect in local:
             if prospect.prospect_id in public_ids:  # the source wins; the local one is set aside
@@ -226,8 +229,10 @@ class CompositeRepository:
                 continue
             if contact_keys(prospect.contact) & contacts:
                 conflicts.append(_conflict("a local prospect and a source record share a contact"))
+            origins[prospect.prospect_id] = (LOCAL_SOURCE, prospect.prospect_id)
             result.append(self._local_view(prospect, gate))
         self._conflicts = tuple(conflicts)
+        self._index(result, origins)
         return result
 
     def get_prospect(self, prospect_id: ProspectId) -> Prospect | None:
@@ -310,6 +315,7 @@ class CompositeRepository:
             self._store.save_states(self._new_states(changes))
         except StateConflictError:  # someone changed a state since it was read: once more, fresh
             self._store.save_states(self._new_states(changes))
+        self._index([incoming[c.prospect_id] for c in changes], None)
 
     # ---- facts ---------------------------------------------------------------------------
 
@@ -384,6 +390,20 @@ class CompositeRepository:
     def _require_client(self, client_id: ClientId) -> None:
         if client_id != self.client_id:
             raise ValueError("an object belongs to another client")
+
+    def _index(
+        self, prospects: Sequence[Prospect], origins: Mapping[str, tuple[str, str]] | None
+    ) -> None:
+        """Keep the store's read model of the prospects (what the Client API lists, filters and
+        pages by SQL) in step with what was just read or saved. Best effort: it is a projection,
+        so a store without one, or one that fails, never changes what the Engine reads or writes."""
+        refresh = getattr(self._store, "index_prospects", None)
+        if refresh is None or not prospects:
+            return
+        try:
+            refresh(prospects, origins)
+        except Exception:  # noqa: BLE001 - the projection is rebuilt by the next read
+            return
 
     def _public_id(self, bound: _Bound, native_id: str) -> str | None:
         try:

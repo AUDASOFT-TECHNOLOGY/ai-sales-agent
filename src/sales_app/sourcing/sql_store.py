@@ -18,6 +18,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import replace
 from typing import Any, Protocol
 
+from sales_app.read_model.search import search_text
 from sales_app.sourcing import store_codec as codec
 from sales_app.sourcing.contacts import contact_keys, lookup_keys
 from sales_app.sourcing.errors import StoreError
@@ -65,6 +66,7 @@ class OperationalRows(Protocol):
     def get_local(self, prospect_id: str) -> Row | None: ...
     def find_local_by_keys(self, keys: Collection[str]) -> Row | None: ...
     def create_local(self, rows: Sequence[Row]) -> None: ...
+    def index_prospects(self, rows: Sequence[Row]) -> int: ...
 
 
 _UNREADABLE = "a stored record could not be read"
@@ -110,6 +112,9 @@ class SqlOperationalStore:
                     "idempotency_key": a.idempotency_key,
                     "status": str(a.status),
                     "document": codec.action_to_doc(a),
+                    "prospect_id": a.prospect_id,
+                    "action_type": str(a.action_type),
+                    "due_at": a.due_at,
                 }
                 for a in actions
             ]
@@ -137,6 +142,9 @@ class SqlOperationalStore:
                     "prospect_id": m.prospect_id,
                     "conversation_id": m.conversation_id,
                     "document": codec.message_to_doc(m),
+                    "direction": str(m.direction),
+                    "channel": str(m.channel),
+                    "sent_at": m.timestamp,
                 }
                 for m in messages
             ]
@@ -171,6 +179,7 @@ class SqlOperationalStore:
                     "fact_id": fact_identity(self._client_id, prospect_id, fact),
                     "recorded_at": fact.recorded_at,
                     "document": codec.fact_to_doc(fact),
+                    "fact_key": fact.key,
                 }
             )
         self._rows.append_facts(prospect_id, rows)
@@ -250,6 +259,48 @@ class SqlOperationalStore:
                 for p in prospects
             ]
         )
+
+    def index_prospects(
+        self, prospects: Sequence[Prospect], origins: Mapping[str, tuple[str, str]] | None = None
+    ) -> int:
+        """Refresh the read model of these prospects (see `op_prospect_index`): what a list filters,
+        searches and sorts by. `origins` maps a prospect id to (source id, id in that source).
+        Returns the number of rows written. A projection, never the truth."""
+        rows = []
+        for p in prospects:
+            self._require_client(p.client_id)
+            origin = (origins or {}).get(p.prospect_id)
+            moments = [
+                m for m in (p.schedule.last_contacted_at, p.schedule.last_inbound_at) if m
+            ]
+            rows.append(
+                {
+                    "prospect_id": p.prospect_id,
+                    **({} if origin is None else {"source_id": origin[0], "external_id": origin[1]}),
+                    "lane_id": p.lane_id,
+                    "display_name": p.display_name,
+                    "email": p.contact.email,
+                    "phone": p.contact.phone,
+                    "search_text": search_text(p.display_name, p.contact.email, p.contact.phone),
+                    "status": str(p.status),
+                    "stage": p.stage,
+                    "locale": p.locale,
+                    "channel": None
+                    if p.contact.preferred_channel is None
+                    else str(p.contact.preferred_channel),
+                    "next_action_type": None
+                    if p.schedule.next_action_type is None
+                    else str(p.schedule.next_action_type),
+                    "next_action_at": p.schedule.next_action_due_at,
+                    "last_contacted_at": p.schedule.last_contacted_at,
+                    "last_inbound_at": p.schedule.last_inbound_at,
+                    "last_activity_at": max(moments) if moments else None,
+                    "follow_up_count": p.schedule.follow_up_count,
+                    "needs_human": p.status is ProspectStatus.PAUSED,
+                    "conversation_id": p.conversation_id,
+                }
+            )
+        return self._rows.index_prospects(rows)
 
     def problems(self) -> tuple[SourceProblem, ...]:
         return ()

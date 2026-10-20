@@ -29,6 +29,7 @@ from sales_app.persistence.tables import (
     op_local_contacts,
     op_local_prospects,
     op_messages,
+    op_prospect_index,
     op_prospect_states,
 )
 from sales_app.sourcing.errors import StateConflictError, StoreUnavailableError
@@ -110,6 +111,9 @@ class SqlOperationalRows:
                         "idempotency_key": row["idempotency_key"],
                         "status": row["status"],
                         "document": row["document"],
+                        "prospect_id": row.get("prospect_id"),
+                        "action_type": row.get("action_type"),
+                        "due_at": row.get("due_at"),
                     }
                     changed = connection.execute(
                         update(op_actions)
@@ -179,6 +183,9 @@ class SqlOperationalRows:
                             prospect_id=row["prospect_id"],
                             conversation_id=row["conversation_id"],
                             document=row["document"],
+                            direction=row.get("direction"),
+                            channel=row.get("channel"),
+                            sent_at=row.get("sent_at"),
                         )
                     )
             except IntegrityError:
@@ -265,6 +272,7 @@ class SqlOperationalRows:
                                 prospect_id=prospect_id,
                                 recorded_at=row["recorded_at"],
                                 document=row["document"],
+                                fact_key=row.get("fact_key"),
                             )
                         )
                 except IntegrityError:
@@ -327,6 +335,68 @@ class SqlOperationalRows:
                         )
                 except IntegrityError:
                     raise StateConflictError(pid) from None
+
+    # ---- the read model of the prospects (a projection, see `op_prospect_index`) -----------
+
+    def index_prospects(self, rows: Sequence[Row]) -> int:
+        """Insert or refresh the index rows, only those that changed. Each row holds the columns of
+        `op_prospect_index` but `client_id` and `indexed_at`. A row the database refuses (the same
+        external id in the same lane under another prospect) is skipped, never raised. Returns the
+        number of rows written."""
+        wanted = {r["prospect_id"]: r for r in rows}
+        if not wanted:
+            return 0
+        written = 0
+        columns = {c.name for c in op_prospect_index.c} - {"client_id", "prospect_id", "indexed_at"}
+        with self._write() as connection:
+            held: dict[str, Row] = {}
+            ids = list(wanted)
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                for r in connection.execute(
+                    select(op_prospect_index).where(
+                        op_prospect_index.c.client_id == self._client_id,
+                        op_prospect_index.c.prospect_id.in_(chunk),
+                    )
+                ):
+                    held[r.prospect_id] = r._mapping
+            now = self._now()
+            for pid, row in wanted.items():
+                values = {name: row[name] for name in columns if name in row}
+                current = held.get(pid)
+                if current is None:  # the columns the database does not default
+                    values.setdefault("display_name", "")
+                    values.setdefault("search_text", "")
+                    values.setdefault("follow_up_count", 0)
+                    values.setdefault("needs_human", False)
+                if current is not None and all(
+                    current[name] == value for name, value in values.items()
+                ):
+                    continue
+                try:
+                    with connection.begin_nested():
+                        if current is None:
+                            connection.execute(
+                                insert(op_prospect_index).values(
+                                    client_id=self._client_id,
+                                    prospect_id=pid,
+                                    indexed_at=now,
+                                    **values,
+                                )
+                            )
+                        else:
+                            connection.execute(
+                                update(op_prospect_index)
+                                .where(
+                                    op_prospect_index.c.client_id == self._client_id,
+                                    op_prospect_index.c.prospect_id == pid,
+                                )
+                                .values(indexed_at=now, **values)
+                            )
+                    written += 1
+                except IntegrityError:
+                    continue
+        return written
 
     # ---- prospects created locally -------------------------------------------------------
 

@@ -81,7 +81,7 @@ describe("Prospects (live)", () => {
     expect(within(line).getByText("Opted out")).toBeInTheDocument();
     expect(screen.getByText(/1 prospects in total/)).toBeInTheDocument();
     expect(within(line).getByRole("link")).toHaveAttribute("href", "/conversations/p1");
-    expect(calls).toEqual(["GET /client/v1/prospects?limit=25&offset=0"]);
+    expect(calls.filter((c) => c.includes("/prospects"))).toEqual(["GET /client/v1/prospects?limit=25&offset=0"]);
   });
 
   it("shows a loading state before the answer arrives", async () => {
@@ -142,5 +142,50 @@ describe("Prospects (live)", () => {
     stub({ "GET /client/v1/prospects?limit=25&offset=0": () => json(401, { detail: "not authenticated" }) });
     renderPage();
     await waitFor(() => expect(logout).toHaveBeenCalled());
+  });
+
+  it("searches on the server and keeps the page in the URL, back to page 1", async () => {
+    const calls = stub({
+      "GET /client/v1/prospects?limit=25&offset=0": () => json(200, page([row("p1", { display_name: "Amel" }), row("p2", { display_name: "Zied" })])),
+      "GET /client/v1/prospects?limit=25&offset=0&q=zied": () => json(200, page([row("p2", { display_name: "Zied" })])),
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId("prospect-p1");
+    await user.type(screen.getByRole("searchbox"), "zied");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(screen.queryByTestId("prospect-p1")).not.toBeInTheDocument());
+    expect(screen.getByTestId("prospect-p2")).toBeInTheDocument();
+    expect(screen.getByText(/1 matching/)).toBeInTheDocument();
+    expect(calls).toContain("GET /client/v1/prospects?limit=25&offset=0&q=zied");
+  });
+
+  it("sends every filter to the server and says when nothing matches", async () => {
+    const wanted = "GET /client/v1/prospects?limit=25&offset=0&status=paused&channel=email&needs_human=true&has_error=true";
+    const calls = stub({
+      "GET /client/v1/prospects?limit=25&offset=0": () => json(200, page([row("p1")])),
+      [wanted]: () => json(200, page([])),
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId("prospect-p1");
+    await user.selectOptions(screen.getByLabelText("Status"), "paused");
+    await user.selectOptions(screen.getByLabelText("Channel"), "email");
+    await user.click(screen.getByLabelText("Needs a person"));
+    await user.click(screen.getByLabelText("With errors"));
+    expect(await screen.findByTestId("prospects-no-match")).toHaveTextContent("No prospect matches");
+    expect(calls).toContain(wanted);
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByTestId("prospect-p1")).toBeInTheDocument();
+  });
+
+  it("restores the filters and the page from the URL, with a period in UTC days", async () => {
+    const calls = stub({
+      "GET /client/v1/prospects?limit=25&offset=25&q=amel&status=active&active_since=2026-10-01T00%3A00%3A00Z&active_until=2026-10-11T00%3A00%3A00.000Z": () =>
+        json(200, page([row("z1")], 27, 25)),
+    });
+    renderPage("/prospects?page=2&q=amel&status=active&since=2026-10-01&until=2026-10-10");
+    expect(await screen.findByTestId("prospect-z1")).toBeInTheDocument();
+    expect(calls.length).toBeGreaterThan(0);
   });
 });

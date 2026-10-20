@@ -1,6 +1,6 @@
-/** The client's prospects, read from `GET /client/v1/prospects` (read-only, paginated by the server).
- *  Everything shown is what the platform stores: no search, filter or sales stage is invented here,
- *  because the server offers none. The page number lives in the URL (`?page=2`). */
+/** The client's prospects, read from `GET /client/v1/prospects` (read-only). The server searches,
+ *  filters and paginates; everything shown is what the platform stores. The page and the filters live
+ *  in the URL (`?page=2&q=amel&status=active`). */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -13,6 +13,7 @@ import { useFetched } from "../client/useFetched";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Glass } from "../ui/Glass";
+import { ListFilters, filtersFromParams, isFiltered, paramsFromFilters, toApiFilters, type FilterState } from "./ListFilters";
 
 export const PAGE_SIZE = 25;
 
@@ -31,9 +32,12 @@ export function Prospects() {
   const requested = Number.parseInt(params.get("page") ?? "1", 10);
   const page = Number.isFinite(requested) && requested >= 1 ? requested : 1;
   const [attempt, setAttempt] = useState(0);
+  const filterKey = params.toString().replace(/(^|&)page=\d+/, "");
+  const filters = useMemo(() => filtersFromParams(params), [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const apiFilters = useMemo(() => toApiFilters(filters), [filters]);
 
   // `attempt` makes a retry a new request.
-  const load = useCallback(() => clientProspects(PAGE_SIZE, (page - 1) * PAGE_SIZE).then((r) => ({ r, attempt })), [page, attempt]);
+  const load = useCallback(() => clientProspects(PAGE_SIZE, (page - 1) * PAGE_SIZE, apiFilters).then((r) => ({ r, attempt })), [page, attempt, apiFilters]);
   const { loading, value, error, failed } = useFetched(load);
   const failure = useMemo(() => (failed ? crmFailureOf(error) : null), [failed, error]);
   const signedOut = failure?.signedOut === true;
@@ -42,7 +46,9 @@ export function Prospects() {
   }, [signedOut, logout]);
 
   const result = value?.r;
-  const go = (next: number) => setParams(next <= 1 ? {} : { page: String(next) }, { replace: true });
+  const go = (next: number) => setParams(paramsFromFilters(filters, next), { replace: true });
+  const refilter = (next: FilterState) => setParams(paramsFromFilters(next), { replace: true });
+  const narrowed = isFiltered(filters);
   const lastPage = result ? Math.max(1, Math.ceil(result.total / PAGE_SIZE)) : page;
   const when = (iso: string | null) => (iso ? d(iso, { dateStyle: "medium", timeStyle: "short" }) : "—");
 
@@ -51,9 +57,13 @@ export function Prospects() {
       <div className="page-head">
         <div>
           <h2 className="t-h1">{t("prospects.title")}</h2>
-          {result ? <p className="c-2 tabular">{t("prospects.live.count", { n: n(result.total) })}</p> : null}
+          {result ? (
+            <p className="c-2 tabular">{narrowed ? t("prospects.f.matching", { n: n(result.total) }) : t("prospects.live.count", { n: n(result.total) })}</p>
+          ) : null}
         </div>
       </div>
+
+      <ListFilters value={filters} onChange={refilter} />
 
       {failure ? (
         <>
@@ -69,8 +79,8 @@ export function Prospects() {
           {t("prospects.live.loading")}
         </p>
       ) : result && result.total === 0 ? (
-        <div className="empty" data-testid="prospects-empty">
-          <h3 className="t-h3">{t("prospects.live.empty")}</h3>
+        <div className="empty" data-testid={narrowed ? "prospects-no-match" : "prospects-empty"}>
+          <h3 className="t-h3">{narrowed ? t("prospects.f.noMatch") : t("prospects.live.empty")}</h3>
         </div>
       ) : result && result.prospects.length === 0 ? (
         <div className="empty" data-testid="prospects-page-empty">

@@ -636,10 +636,35 @@ export interface ProspectRow {
   last_contacted_at: string | null;
   last_inbound_at: string | null;
   follow_up_count: number;
+  /** Added with the read model; absent from older servers. */
+  source_id?: string | null;
+  last_activity_at?: string | null;
+  /** Paused: waiting for a person. */
+  needs_human?: boolean;
+  status_reason?: string | null;
+  /** null: the server could not tell (it listed through the agent). */
+  has_error?: boolean | null;
+}
+
+/** The narrowing both lists accept (see src/sales_app/api/client_prospects.py). Empty = no narrowing. */
+export interface ProspectFilters {
+  q?: string;
+  status?: ProspectRow["status"][];
+  /** The circuit (a lane id). */
+  lane?: string;
+  product?: string;
+  channel?: string;
+  source?: string;
+  needs_human?: boolean;
+  has_error?: boolean;
+  /** ISO 8601; last activity in [since, until). */
+  active_since?: string;
+  active_until?: string;
+  sort?: "name" | "recent";
 }
 
 export interface ProspectsPage {
-  /** All the client's prospects, not just this page. */
+  /** All the prospects matching the filters, not just this page. */
   total: number;
   limit: number;
   offset: number;
@@ -660,17 +685,73 @@ export interface ConversationHistory {
   prospect_id: string;
   conversation_id: string;
   origin: "outbound" | "inbound" | "unknown";
-  /** Oldest first; empty when nothing was exchanged yet. */
+  /** In the requested `order`; empty when nothing was exchanged yet. */
   messages: ConversationMessage[];
+  /** All the messages of the conversation (this page is `messages.length` of them). */
+  total_messages?: number | null;
+  limit?: number | null;
+  offset?: number | null;
+  order?: "asc" | "desc" | null;
+  prospect?: ProspectRow | null;
+  next_follow_up?: { action_type: string; due_at: string } | null;
+  errors?: ConversationActionError[];
+}
+
+export interface ConversationActionError {
+  action_id: string;
+  action_type: string;
+  due_at: string | null;
+  attempts: number;
+  reason: string | null;
+}
+
+export interface ConversationListItem {
+  prospect: ProspectRow;
+  /** null: not known (the server listed through the agent). */
+  message_count: number | null;
+  last_message_at: string | null;
+  last_message_direction: "inbound" | "outbound" | null;
+}
+
+export interface ConversationsPage {
+  total: number;
+  limit: number;
+  offset: number;
+  conversations: ConversationListItem[];
+}
+
+/** The query string of a list: `limit` and `offset` first, then only the filters that are set. */
+export function listQuery(limit: number, offset: number, filters: ProspectFilters = {}): string {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (filters.q?.trim()) params.set("q", filters.q.trim());
+  for (const status of filters.status ?? []) params.append("status", status);
+  for (const key of ["lane", "product", "channel", "source", "active_since", "active_until", "sort"] as const) {
+    const value = filters[key];
+    if (value) params.set(key, value);
+  }
+  if (filters.needs_human) params.set("needs_human", "true");
+  if (filters.has_error) params.set("has_error", "true");
+  return params.toString();
 }
 
 /** `limit` is 1..100, `offset` >= 0: the server refuses anything else. */
-export function clientProspects(limit: number, offset: number): Promise<ProspectsPage> {
-  return request<ProspectsPage>(`/prospects?limit=${limit}&offset=${offset}`);
+export function clientProspects(limit: number, offset: number, filters?: ProspectFilters): Promise<ProspectsPage> {
+  return request<ProspectsPage>(`/prospects?${listQuery(limit, offset, filters)}`);
 }
 
-export function clientConversation(prospectId: string): Promise<ConversationHistory> {
-  return request<ConversationHistory>(`/conversations/${encodeURIComponent(prospectId)}`);
+/** Prospects with at least one message, latest first by default. */
+export function clientConversations(limit: number, offset: number, filters?: ProspectFilters): Promise<ConversationsPage> {
+  return request<ConversationsPage>(`/conversations?${listQuery(limit, offset, filters)}`);
+}
+
+/** Without `page`, the server's default page (the first 200 messages, oldest first). With it, `limit`
+ *  (1..500) messages from `offset` in `order`. */
+export function clientConversation(
+  prospectId: string,
+  page?: { limit: number; offset: number; order: "asc" | "desc" },
+): Promise<ConversationHistory> {
+  const query = page ? `?limit=${page.limit}&offset=${page.offset}&order=${page.order}` : "";
+  return request<ConversationHistory>(`/conversations/${encodeURIComponent(prospectId)}${query}`);
 }
 
 /* ── Dashboard summary, read-only (see src/sales_app/api/client_prospects.py) ──

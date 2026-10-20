@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { I18nProvider } from "../i18n";
@@ -8,7 +8,8 @@ import { Conversations } from "./Conversations";
 const logout = vi.fn(async () => undefined);
 vi.mock("../client/ClientAuthContext", () => ({ useClientAuth: () => ({ logout }) }));
 
-const LIST = "GET /client/v1/prospects?limit=100&offset=0";
+const LIST = "GET /client/v1/conversations?limit=25&offset=0&sort=recent";
+const THREAD = (id: string, offset = 0) => `GET /client/v1/conversations/${id}?limit=50&offset=${offset}&order=desc`;
 
 function row(id: string, name: string) {
   return {
@@ -29,12 +30,18 @@ function row(id: string, name: string) {
   };
 }
 
-function prospects(rows: unknown[], total = rows.length) {
-  return { total, limit: 100, offset: 0, prospects: rows };
+function prospects(rows: unknown[], total = rows.length, offset = 0) {
+  return {
+    total,
+    limit: 25,
+    offset,
+    conversations: rows.map((p) => ({ prospect: p, message_count: 3, last_message_at: (p as { last_inbound_at: string | null }).last_inbound_at, last_message_direction: "inbound" })),
+  };
 }
 
-function history(id: string, messages: unknown[]) {
-  return { prospect_id: id, conversation_id: `conv-${id}`, origin: "unknown", messages };
+function history(id: string, messages: unknown[], total = messages.length) {
+  // The server answers newest first.
+  return { prospect_id: id, conversation_id: `conv-${id}`, origin: "unknown", messages: [...messages].reverse(), total_messages: total, limit: 50, offset: 0, order: "desc", errors: [] };
 }
 
 function message(id: string, direction: "inbound" | "outbound", text: string, minute: number) {
@@ -96,13 +103,14 @@ describe("Conversations (live)", () => {
     expect(await screen.findByText("Amel")).toBeInTheDocument();
     expect(screen.getByText("Bea")).toBeInTheDocument();
     expect(screen.getByText("Choose a prospect to read the conversation.")).toBeInTheDocument();
-    expect(calls).toEqual([LIST]);
+    expect(calls).toContain(LIST);
+    expect(calls.filter((c) => /conversations\/[^?]/.test(c))).toEqual([]); // no thread fetched
   });
 
   it("shows the messages the server returns, oldest first, for the selected prospect", async () => {
     stub({
       [LIST]: () => json(200, prospects([row("p1", "Amel"), row("p2", "Bea")])),
-      "GET /client/v1/conversations/p1": () =>
+      [THREAD("p1")]: () =>
         json(200, history("p1", [message("m1", "outbound", "Hello Amel", 1), message("m2", "inbound", "Tell me more", 2)])),
     });
     renderPage("/conversations/p1");
@@ -121,7 +129,7 @@ describe("Conversations (live)", () => {
   it("says so when nothing was exchanged yet", async () => {
     stub({
       [LIST]: () => json(200, prospects([row("p1", "Amel")])),
-      "GET /client/v1/conversations/p1": () => json(200, history("p1", [])),
+      [THREAD("p1")]: () => json(200, history("p1", [])),
     });
     renderPage("/conversations/p1");
     expect(await screen.findByTestId("thread-empty")).toHaveTextContent("No message has been exchanged");
@@ -130,7 +138,7 @@ describe("Conversations (live)", () => {
   it("shows a not-found for a prospect that is not the client's, never someone else's messages", async () => {
     stub({
       [LIST]: () => json(200, prospects([row("p1", "Amel")])),
-      "GET /client/v1/conversations/other": () => json(404, { detail: "no such prospect" }),
+      [THREAD("other")]: () => json(404, { detail: "no such prospect" }),
     });
     renderPage("/conversations/other");
     expect(await screen.findByRole("alert")).toHaveTextContent("does not exist");
@@ -141,7 +149,7 @@ describe("Conversations (live)", () => {
     let reads = 0;
     stub({
       [LIST]: () => json(200, prospects([row("p1", "Amel")])),
-      "GET /client/v1/conversations/p1": () =>
+      [THREAD("p1")]: () =>
         reads++ === 0 ? json(503, { detail: "prospects are temporarily unavailable" }) : json(200, history("p1", [message("m1", "inbound", "Hi", 1)])),
     });
     const user = userEvent.setup();
@@ -151,16 +159,6 @@ describe("Conversations (live)", () => {
     expect(await screen.findByTestId("message-m1")).toBeInTheDocument();
   });
 
-  it("points to Prospects when the list holds only the first prospects", async () => {
-    stub({
-      [LIST]: () => json(200, prospects([row("p1", "Amel")], 250)),
-      "GET /client/v1/conversations/p1": () => json(200, history("p1", [])),
-    });
-    renderPage("/conversations/p1");
-    const more = await screen.findByTestId("convo-list-more");
-    expect(within(more).getByRole("link")).toHaveAttribute("href", "/prospects");
-  });
-
   it("signs the client out when the session has ended", async () => {
     stub({ [LIST]: () => json(401, { detail: "not authenticated" }) });
     renderPage("/conversations");
@@ -168,35 +166,67 @@ describe("Conversations (live)", () => {
   });
 });
 
-describe("Conversations (history by prospect, channel and day)", () => {
-  it("puts the prospects with the most recent exchange first and says channel and date", async () => {
+describe("Conversations (search, filters, pages)", () => {
+  it("shows the last exchange, the channel and the message count of each conversation", async () => {
     const recent = { ...row("p2", "Bea"), preferred_channel: "email", last_inbound_at: "2026-10-12T10:00:00Z" };
-    const older = { ...row("p1", "Amel"), preferred_channel: "telegram", last_contacted_at: "2026-10-01T10:00:00Z" };
-    stub({ [LIST]: () => json(200, prospects([older, recent, row("p3", "Zed")])) });
+    stub({ [LIST]: () => json(200, prospects([recent, row("p1", "Amel")])) });
     renderPage("/conversations");
     await screen.findByText("Amel");
-    const names = screen.getAllByRole("link").map((a) => a.textContent ?? "");
-    expect(names[0]).toContain("Bea");
-    expect(names[0]).toContain("email");
-    expect(names[1]).toContain("Amel");
-    expect(names[2]).toContain("Zed");
+    const links = screen.getAllByRole("link").map((a) => a.textContent ?? "");
+    expect(links[0]).toContain("Bea");
+    expect(links[0]).toContain("email");
+    expect(links[0]).toContain("3 messages");
   });
 
-  it("filters the list by channel", async () => {
-    const a = { ...row("p1", "Amel"), preferred_channel: "telegram" };
-    const b = { ...row("p2", "Bea"), preferred_channel: "email" };
-    stub({ [LIST]: () => json(200, prospects([a, b])) });
+  it("asks the server to filter by channel and to search, and shows what it returns", async () => {
+    const calls = stub({
+      [LIST]: () => json(200, prospects([row("p1", "Amel"), row("p2", "Bea")])),
+      "GET /client/v1/conversations?limit=25&offset=0&channel=email&sort=recent": () => json(200, prospects([row("p2", "Bea")])),
+      "GET /client/v1/conversations?limit=25&offset=0&q=bea&channel=email&sort=recent": () => json(200, prospects([row("p2", "Bea")])),
+    });
+    const user = userEvent.setup();
     renderPage("/conversations");
     await screen.findByText("Amel");
-    await userEvent.selectOptions(screen.getByLabelText("Channel"), "email");
-    expect(screen.queryByText("Amel")).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Channel"), "email");
+    await waitFor(() => expect(screen.queryByText("Amel")).not.toBeInTheDocument());
     expect(screen.getByText("Bea")).toBeInTheDocument();
+    await user.type(screen.getByRole("searchbox"), "bea");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(calls).toContain("GET /client/v1/conversations?limit=25&offset=0&q=bea&channel=email&sort=recent"));
   });
 
+  it("says so when nothing matches the filters", async () => {
+    stub({
+      [LIST]: () => json(200, prospects([row("p1", "Amel")])),
+      "GET /client/v1/conversations?limit=25&offset=0&status=closed&sort=recent": () => json(200, prospects([])),
+    });
+    const user = userEvent.setup();
+    renderPage("/conversations");
+    await screen.findByText("Amel");
+    await user.selectOptions(screen.getByLabelText("Status"), "closed");
+    expect(await screen.findByTestId("convo-list-empty")).toHaveTextContent("No conversation matches");
+  });
+
+  it("pages the list on the server", async () => {
+    const calls = stub({
+      [LIST]: () => json(200, prospects([row("p1", "Amel")], 30)),
+      "GET /client/v1/conversations?limit=25&offset=25&sort=recent": () => json(200, prospects([row("p9", "Zed")], 30, 25)),
+    });
+    const user = userEvent.setup();
+    renderPage("/conversations");
+    await screen.findByText("Amel");
+    expect(screen.getByTestId("convo-list-page")).toHaveTextContent(/1\D+2/);
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Zed")).toBeInTheDocument();
+    expect(calls).toContain("GET /client/v1/conversations?limit=25&offset=25&sort=recent");
+  });
+});
+
+describe("Conversations (thread)", () => {
   it("separates the messages by day", async () => {
     stub({
       [LIST]: () => json(200, prospects([row("p1", "Amel")])),
-      "GET /client/v1/conversations/p1": () =>
+      [THREAD("p1")]: () =>
         json(200, history("p1", [
           message("m1", "outbound", "Hello", 1),
           { id: "m2", direction: "inbound", channel: "email", text: "Hi", timestamp: "2026-10-11T09:00:00Z" },
@@ -206,5 +236,40 @@ describe("Conversations (history by prospect, channel and day)", () => {
     await screen.findByTestId("message-m1");
     expect(screen.getByTestId("day-2026-10-10")).toBeInTheDocument();
     expect(screen.getByTestId("day-2026-10-11")).toBeInTheDocument();
+  });
+
+  it("opens on the latest messages and loads older ones on request", async () => {
+    const newest = Array.from({ length: 50 }, (_, i) => message(`n${i}`, "inbound", `new ${i}`, 5));
+    stub({
+      [LIST]: () => json(200, prospects([row("p1", "Amel")])),
+      [THREAD("p1")]: () => json(200, history("p1", newest, 51)),
+      [THREAD("p1", 50)]: () => json(200, { ...history("p1", [message("old", "outbound", "the very first", 1)], 51), offset: 50 }),
+    });
+    const user = userEvent.setup();
+    renderPage("/conversations/p1");
+    await screen.findByTestId("message-n0");
+    expect(screen.getByTestId("thread-count")).toHaveTextContent("50 of 51");
+    await user.click(screen.getByRole("button", { name: "Show older messages" }));
+    const old = await screen.findByTestId("message-old");
+    expect(screen.getByTestId("message-n0").compareDocumentPosition(old) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Show older messages" })).not.toBeInTheDocument();
+  });
+
+  it("shows the status, the next follow-up and the actions that failed", async () => {
+    stub({
+      [LIST]: () => json(200, prospects([row("p1", "Amel")])),
+      [THREAD("p1")]: () =>
+        json(200, {
+          ...history("p1", [message("m1", "outbound", "Hello", 1)]),
+          prospect: { ...row("p1", "Amel"), status: "paused", needs_human: true, preferred_channel: "email" },
+          next_follow_up: { action_type: "follow_up", due_at: "2026-10-20T09:00:00Z" },
+          errors: [{ action_id: "a1", action_type: "follow_up", due_at: "2026-10-09T09:00:00Z", attempts: 2, reason: "channel refused" }],
+        }),
+    });
+    renderPage("/conversations/p1");
+    await screen.findByTestId("message-m1");
+    expect(screen.getByTestId("thread-status")).toHaveTextContent("Waiting for a person");
+    expect(screen.getByTestId("thread-follow-up")).toHaveTextContent("Next follow-up");
+    expect(screen.getByTestId("thread-errors")).toHaveTextContent("channel refused");
   });
 });

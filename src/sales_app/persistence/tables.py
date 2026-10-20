@@ -26,6 +26,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    false,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -181,8 +182,14 @@ op_actions = Table(
     Column("idempotency_key", String(255), nullable=False),
     Column("status", String(32), nullable=False),
     Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    # Denormalised from the document (migration 0022), so errors and counts are read by SQL.
+    Column("prospect_id", String(255)),
+    Column("action_type", String(32)),
+    Column("due_at", UtcDateTime),
     UniqueConstraint("client_id", "idempotency_key", name="uq_op_actions_idempotency_key"),
     Index("ix_op_actions_status", "client_id", "status"),
+    Index("ix_op_actions_prospect", "client_id", "prospect_id"),
+    Index("ix_op_actions_status_due", "client_id", "status", "due_at"),
 )
 
 op_messages = Table(
@@ -194,8 +201,14 @@ op_messages = Table(
     Column("prospect_id", String(255), nullable=False),
     Column("conversation_id", String(255), nullable=False),
     Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    # Denormalised from the document (migration 0022): a conversation is paged and counted by SQL.
+    Column("direction", String(16)),
+    Column("channel", String(16)),
+    Column("sent_at", UtcDateTime),
     UniqueConstraint("client_id", "message_id", name="uq_op_messages_message_id"),
     Index("ix_op_messages_prospect", "client_id", "prospect_id"),
+    Index("ix_op_messages_prospect_sent", "client_id", "prospect_id", "sent_at"),
+    Index("ix_op_messages_sent", "client_id", "sent_at"),
 )
 
 op_audit = Table(
@@ -220,8 +233,10 @@ op_facts = Table(
     Column("prospect_id", String(255), nullable=False),
     Column("recorded_at", UtcDateTime, nullable=False),
     Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    Column("fact_key", String(128)),  # denormalised from the document (migration 0022)
     UniqueConstraint("client_id", "fact_id", name="uq_op_facts_fact_id"),
     Index("ix_op_facts_prospect", "client_id", "prospect_id"),
+    Index("ix_op_facts_key", "client_id", "fact_key"),
 )
 
 op_prospect_states = Table(
@@ -232,6 +247,47 @@ op_prospect_states = Table(
     Column("revision", Integer, nullable=False),
     Column("conversation_id", String(255)),
     Column("document", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+)
+
+# The read model of a client's prospects (migration 0022): one row per prospect the platform has
+# seen, with what a list needs to filter, search, sort and page by SQL, whoever owns the truth (the
+# source for who the person is, `op_prospect_states` for where Revansa stands). It is a projection,
+# never the truth: it is refreshed from the repository's merged view and can be rebuilt at any time.
+# `external_id` is the id in the lane's source (the public id without its source prefix), so the
+# database itself refuses to hold one person twice for the same (client, lane, external id).
+op_prospect_index = Table(
+    "op_prospect_index",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("prospect_id", String(255), primary_key=True),
+    Column("external_id", String(255)),
+    Column("lane_id", String(128)),
+    Column("source_id", String(128)),
+    Column("display_name", String(255), nullable=False, server_default=""),
+    Column("email", String(320)),
+    Column("phone", String(64)),
+    Column("search_text", Text, nullable=False, server_default=""),  # lower-cased name/contacts
+    Column("status", String(32), nullable=False),
+    Column("stage", String(255)),
+    Column("locale", String(32)),
+    Column("channel", String(16)),  # the channel the person is written to
+    Column("next_action_type", String(32)),
+    Column("next_action_at", UtcDateTime),
+    Column("last_contacted_at", UtcDateTime),
+    Column("last_inbound_at", UtcDateTime),
+    Column("last_activity_at", UtcDateTime),
+    Column("follow_up_count", Integer, nullable=False, server_default="0"),
+    Column("needs_human", Boolean, nullable=False, server_default=false()),
+    Column("status_reason", Text),
+    Column("conversation_id", String(255)),
+    Column("indexed_at", UtcDateTime, nullable=False),
+    UniqueConstraint("client_id", "lane_id", "external_id", name="uq_op_prospect_index_external"),
+    Index("ix_op_prospect_index_status", "client_id", "status"),
+    Index("ix_op_prospect_index_lane", "client_id", "lane_id"),
+    Index("ix_op_prospect_index_channel", "client_id", "channel"),
+    Index("ix_op_prospect_index_next", "client_id", "next_action_at"),
+    Index("ix_op_prospect_index_activity", "client_id", "last_activity_at"),
+    Index("ix_op_prospect_index_name", "client_id", "display_name"),
 )
 
 op_local_prospects = Table(

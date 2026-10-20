@@ -134,6 +134,12 @@ class TestProspects:
             "last_contacted_at": iso(NOW - timedelta(days=1)),
             "last_inbound_at": None,
             "follow_up_count": 1,
+            # added with the read model
+            "source_id": None,
+            "last_activity_at": iso(NOW - timedelta(days=1)),
+            "needs_human": False,
+            "status_reason": None,
+            "has_error": None,
         }
         assert "free_column" not in response.text
 
@@ -307,7 +313,7 @@ class TestConversations:
             "I am interested",
         ]
         first, _, last = body["messages"]
-        assert set(first) == {"id", "direction", "channel", "text", "timestamp"}
+        assert set(first) == {"id", "direction", "channel", "text", "timestamp", "delivery"}
         assert first["direction"] == "outbound" and first["channel"] == "whatsapp"
         assert last["direction"] == "inbound"
         assert first["timestamp"] == iso(NOW + timedelta(minutes=1))
@@ -419,3 +425,78 @@ class TestOnTheSqlStore:
             assert engine.conversation_of(ProspectId("404")) is None
         finally:
             database.dispose()
+
+
+class TestFiltersThroughTheEngineView:
+    """A client with no read model yet is listed through the Engine, with the same filters."""
+
+    def test_search_status_and_sort_apply_in_memory(self, world):
+        add(world, "alpha", "Amel Ben Salah", "Zied")
+        got = world.browser("alpha").get(PROSPECTS, params={"q": "zied"}).json()
+        assert [p["id"] for p in got["prospects"]] == ["p2"] and got["total"] == 1
+        got = world.browser("alpha").get(PROSPECTS, params={"status": "closed"}).json()
+        assert got["total"] == 0
+        assert world.browser("alpha").get(PROSPECTS, params={"status": "nope"}).status_code == 422
+        assert world.browser("alpha").get(PROSPECTS, params={"sort": "recent"}).status_code == 200
+
+    def test_the_conversation_list_and_message_paging(self, world):
+        add(world, "alpha", "Amel")
+        say(world, "alpha", "p1", "a", "b", "c")
+        params = {"limit": 2, "order": "desc"}
+        body = world.browser("alpha").get(conversation("p1"), params=params).json()
+        assert [m["text"] for m in body["messages"]] == ["c", "b"]
+        assert body["total_messages"] == 3 and body["order"] == "desc"
+        too_many = world.browser("alpha").get(conversation("p1"), params={"limit": 501})
+        assert too_many.status_code == 422
+        assert world.browser("alpha").get("/client/v1/conversations").status_code == 200
+
+
+class TestOnTheReadModel:
+    """With a database the lists come from SQL, even when the agent is not loaded."""
+
+    def test_lists_and_detail_do_not_need_the_engine(self, world, sql_engine, monkeypatch):
+        from sales_app.persistence.clients import ensure_client
+        from sales_app.persistence.read_model_rows import SqlProspectReadModel
+
+        with sql_engine.begin() as connection:
+            ensure_client(connection, "alpha", created_at=NOW, created_by="test")
+        store = SqlOperationalStore(SqlOperationalRows(sql_engine, "alpha"))
+        store.index_prospects(
+            [
+                make_prospect(
+                    client_id="alpha",
+                    prospect_id=ProspectId("p1"),
+                    display_name="Amel",
+                    status=ProspectStatus.PAUSED,
+                    lane_id="L1",
+                ),
+                make_prospect(
+                    client_id="alpha",
+                    prospect_id=ProspectId("p2"),
+                    display_name="Zied",
+                    lane_id="L2",
+                ),
+            ]
+        )
+        store.append_messages(
+            [
+                make_message(
+                    client_id="alpha",
+                    prospect_id=ProspectId("p1"),
+                    conversation_id=ConversationId("conv-p1"),
+                    message_id=MessageId("m1"),
+                    text="hello",
+                )
+            ]
+        )
+        world.application.read_models = lambda cid: SqlProspectReadModel(sql_engine, cid)
+        monkeypatch.setattr(world.application.registry, "get", lambda cid: None)  # no agent loaded
+        alpha = world.browser("alpha")
+        got = alpha.get(PROSPECTS, params={"needs_human": "true"}).json()
+        assert [p["id"] for p in got["prospects"]] == ["p1"] and got["prospects"][0]["needs_human"]
+        assert alpha.get(PROSPECTS, params={"lane": "L2"}).json()["total"] == 1
+        listed = alpha.get("/client/v1/conversations").json()
+        assert listed["total"] == 1 and listed["conversations"][0]["message_count"] == 1
+        detail = alpha.get(conversation("p1")).json()
+        assert [m["text"] for m in detail["messages"]] == ["hello"]
+        assert detail["prospect"]["status"] == "paused" and detail["errors"] == []
