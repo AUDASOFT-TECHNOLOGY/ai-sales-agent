@@ -28,6 +28,9 @@ nobody). Without a database only the Engine path exists (409 if the agent is not
   so a longer history is read page after page. 404, with the same words, for a prospect that does not
   exist and for one that belongs to another client. 409 if the agent is needed and not loaded or not
   ready, 503 if the store fails.
+  The answer also tells who is in charge (`control`: the agent, or a person, awaiting one when the
+  agent handed the conversation over) and who wrote each message (`author`: prospect, agent, human).
+  Taking over, writing yourself and giving back are in `client_conversation_control`.
 - `GET /client/v1/summary`: counts computed from the Engine's read (unchanged).
 
 Only fields the stored model holds are returned. What the source keeps in free columns
@@ -44,6 +47,7 @@ from pydantic import BaseModel
 from sales_app.api.admin_clients import client_wiring_and_document
 from sales_app.api.client import make_current_client_dependency
 from sales_app.api.client_agent import runs_lanes
+from sales_app.api.client_conversation_control import ControlResponse, control_response
 from sales_app.bootstrap import Application
 from sales_app.client_profiles import ClientProfile
 from sales_app.errors import ClientNotReadyError
@@ -143,6 +147,8 @@ class MessageResponse(BaseModel):
     # For a WhatsApp message we sent: what WhatsApp reported (sent | delivered | read | failed).
     # None when the channel reports nothing or nothing has been reported yet.
     delivery: str | None = None
+    # Who wrote it: prospect | agent | human (a person of the client, see take-over). Null: not known.
+    author: str | None = None
 
 
 class FollowUpResponse(BaseModel):
@@ -171,6 +177,9 @@ class ConversationResponse(BaseModel):
     prospect: ProspectResponse | None = None  # status, circuit, channel... (null: not known)
     next_follow_up: FollowUpResponse | None = None  # the planned next action, if any
     errors: list[ActionErrorResponse] = []  # actions that failed, newest first
+    # Who is in charge: the agent (mode "agent"), or a person (mode "human"), awaiting one when the
+    # agent handed the conversation over and nobody took it yet. Null: not known.
+    control: ControlResponse | None = None
 
 
 def prospect_response(item: ProspectItem) -> ProspectResponse:
@@ -471,6 +480,7 @@ def create_client_prospects_router(application: Application) -> APIRouter:
                     )
                     for e in detail.errors
                 ],
+                control=_control(application, client.client_id, prospect_id),
             )
         found = run(
             client, response, lambda engine: engine.conversation_of(ProspectId(prospect_id))
@@ -488,6 +498,11 @@ def create_client_prospects_router(application: Application) -> APIRouter:
                 text=m.text,
                 timestamp=m.timestamp,
                 external_id=m.external_id,
+                author=(
+                    "prospect"
+                    if m.direction.value == "inbound"
+                    else ("human" if m.metadata.get("author") == "human" else "agent")
+                ),
             )
             for m in everything[offset : offset + limit]
         ]
@@ -500,9 +515,22 @@ def create_client_prospects_router(application: Application) -> APIRouter:
             limit=limit,
             offset=offset,
             order=order.value,
+            control=_control(application, client.client_id, prospect_id),
         )
 
     return router
+
+
+def _control(application: Application, client_id: str, prospect_id: str) -> ControlResponse | None:
+    """Who is in charge of the conversation. A store that cannot be read only means it is not shown;
+    the conversation is never refused for it."""
+    controls = application.conversation_controls
+    if controls is None:
+        return None
+    try:
+        return control_response(controls(client_id).get(ProspectId(prospect_id)))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _messages(
@@ -516,6 +544,7 @@ def _messages(
             text=m.text,
             timestamp=m.timestamp,
             delivery=delivered.get(m.external_id or ""),
+            author=m.author,
         )
         for m in messages
     ]

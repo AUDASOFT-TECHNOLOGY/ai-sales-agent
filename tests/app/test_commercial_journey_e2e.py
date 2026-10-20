@@ -471,8 +471,11 @@ def test_the_commercial_journey_of_two_clients(world):
         ("evt_wrong", "amount_mismatch"),
         ("evt_1", "applied"),
     }
-    client_session = j.browser("beta")  # a client has no billing route at all
-    for path in ("/client/v1/invoices", "/client/v1/billing", "/client/v1/billing/invoices"):
+    client_session = j.browser("beta")  # a client reads its own invoices (lot 3) and changes nothing
+    own = client_session.get("/client/v1/invoices")
+    assert own.status_code == 200
+    assert all(i["client_id"] == "beta" for i in own.json().get("invoices", [])) if own.json().get("invoices") and "client_id" in own.json()["invoices"][0] else True
+    for path in ("/client/v1/billing", "/client/v1/billing/invoices"):
         assert client_session.get(path).status_code == 404
     assert client_session.get(INVOICES).status_code in (401, 403, 404)
 

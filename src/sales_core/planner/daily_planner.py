@@ -4,7 +4,7 @@ Callers (the engine) read prospects and existing actions from the repository, ca
 `plan_daily_actions`, and persist the returned actions themselves.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -62,6 +62,7 @@ def plan_daily_actions(
     daily_limit: int = DEFAULT_DAILY_ACTION_LIMIT,
     channel: Channel | None = None,
     route_of: Callable[[Prospect], LaneRoute | None] | None = None,
+    held_by_human: Collection[str] = (),
 ) -> DailyPlan:
     """Select up to `daily_limit` outreach actions for the client's current local day.
 
@@ -83,6 +84,10 @@ def plan_daily_actions(
     prospect is in no lane the client runs, and is skipped). The opt-in rule above is then applied
     per prospect with their own channel, and every action planned carries its lane and channel.
 
+    `held_by_human` holds the prospects whose conversation a person is in charge of: none of them is
+    ever planned (no first contact, no follow-up, no reminder), whatever their schedule says. Their
+    schedule is left alone, so the work resumes by itself when the conversation is given back.
+
     Every planned action is due `now`, has status PLANNED, and uses its idempotency key as id.
     """
     if now.tzinfo is None or now.utcoffset() is None:
@@ -103,6 +108,7 @@ def plan_daily_actions(
     remaining = max(0, daily_limit - len(counted_today))
     blocked = {a.prospect_id for a in existing_actions if a.status in _OPEN_STATUSES}
     blocked.update(a.prospect_id for a in counted_today)
+    blocked.update(held_by_human)
     used_keys = {a.idempotency_key for a in existing_actions}
 
     tiers: dict[SalesActionType, list[tuple[datetime, Prospect]]] = {t: [] for t in _TIER_ORDER}

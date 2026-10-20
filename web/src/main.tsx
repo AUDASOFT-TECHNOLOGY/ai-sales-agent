@@ -18,6 +18,7 @@ import "./styles/admin.css";
 import "./styles/dashboard.css";
 import "./styles/client.css";
 import "./styles/client-theme.css";
+import "./styles/conversation-control.css";
 import { App } from "./App";
 
 createRoot(document.getElementById("root")!).render(

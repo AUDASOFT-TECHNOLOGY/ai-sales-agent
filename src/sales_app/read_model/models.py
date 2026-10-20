@@ -120,6 +120,7 @@ class MessageItem:
     text: str
     timestamp: datetime
     external_id: str | None = None  # the channel provider's id; for the API's own use, not shown
+    author: str | None = None  # prospect | agent | human (null: not known)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

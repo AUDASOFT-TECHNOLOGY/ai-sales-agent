@@ -37,6 +37,7 @@ class BlockReason(StrEnum):
     CLOSED = "closed"
     NO_CONTACT = "no_contact"  # no address for the channel
     NOT_LINKED = "not_linked"  # the channel needs the person to start the conversation first
+    HUMAN_CONTROL = "human_control"  # a person is in charge of the conversation
     NO_LANE = "no_lane"  # the prospect belongs to no lane the client runs, so no channel is known
     NO_DRAFT = "no_draft"
     CLIENT_MISMATCH = "client_mismatch"

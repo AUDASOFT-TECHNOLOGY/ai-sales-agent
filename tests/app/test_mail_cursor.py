@@ -114,6 +114,9 @@ class TestMigration0010:
             "op_prospect_index",
             "cost_rates",
             "provider_costs",
+            "conversation_control",
+            "cost_rates",
+            "provider_costs",
         }
         assert after - {"alembic_version"} == set(metadata.tables) - later
 

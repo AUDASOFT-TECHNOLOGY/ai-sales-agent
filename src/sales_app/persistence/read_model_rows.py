@@ -292,8 +292,18 @@ def _aware(value: Any) -> datetime | None:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+def _author(document: Any) -> str:
+    """Who wrote a message: the prospect, the agent, or a person of the client (`human`)."""
+    if document.get("direction") == "inbound":
+        return "prospect"
+    metadata = document.get("metadata")
+    written = metadata.get("author") if isinstance(metadata, dict) else None
+    return "human" if written == "human" else "agent"
+
+
 def _message(document: Any) -> MessageItem:
     return MessageItem(
+        author=_author(document),
         message_id=document["message_id"],
         direction=document["direction"],
         channel=document["channel"],

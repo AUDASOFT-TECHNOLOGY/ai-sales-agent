@@ -71,6 +71,11 @@ class FollowUpPolicy:
     def action_type(situation: str) -> SalesActionType:
         return _ACTION_TYPES.get(situation, SalesActionType.FOLLOW_UP)
 
+    def _in_window(self, due: datetime) -> datetime:
+        """A follow-up due outside the client's allowed hours waits for the next opening."""
+        window = self._settings.send_window
+        return due if window is None else window.next_allowed(due)
+
     @staticmethod
     def _forward_steps(table: Situation) -> list[Step]:
         """The waits that follow our own messages. (The schema keeps them within `max_touches`.)"""
@@ -133,13 +138,16 @@ class FollowUpPolicy:
         if unanswered < len(steps):
             after = steps[unanswered].after
             assert after is not None
-            return touch(due_at=now + timedelta(seconds=duration_seconds(after)), then=table.then)
+            due = self._in_window(now + timedelta(seconds=duration_seconds(after)))
+            return touch(due_at=due, then=table.then)
         if table.then == "park":
             return touch(then="park")
         last = steps[-1].after if steps else self._settings.limits.min_gap
         assert last is not None
         return touch(
-            due_at=now + timedelta(seconds=duration_seconds(last)), then=table.then, final=True
+            due_at=self._in_window(now + timedelta(seconds=duration_seconds(last))),
+            then=table.then,
+            final=True,
         )
 
     def exhausted_then(self, unanswered: int, product: Product | None = None) -> Then | None:

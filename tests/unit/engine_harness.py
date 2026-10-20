@@ -136,6 +136,7 @@ class Harness:
     config_kwargs: dict
     facts: FactsReader | None = None
     facts_writer: FactsWriter | None = None
+    control: object | None = None
 
     def new_engine(self, brain: ScriptedBrain | None = None) -> Engine:
         """A fresh Engine over the same repository, as after a process restart."""
@@ -148,6 +149,7 @@ class Harness:
             config=EngineConfig(mode=self.mode, **self.config_kwargs),
             facts=self.facts,
             facts_writer=self.facts_writer,
+            control=self.control,  # type: ignore[arg-type]
         )
 
     # ---- inspection -----------------------------------------------------------------------
@@ -193,6 +195,7 @@ def build(
     brain: ScriptedBrain | None = None,
     mode: ApprovalMode = ApprovalMode.APPROVAL,
     facts: FactsReader | None = None,
+    control: object | None = None,
     **config: object,
 ) -> Harness:
     clock = FakeClock(NOW)
@@ -208,6 +211,7 @@ def build(
         mode=mode,
         config_kwargs=dict(config),
         facts=facts,
+        control=control,
     )
     harness.engine = harness.new_engine()
     return harness

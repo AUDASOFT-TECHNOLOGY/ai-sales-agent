@@ -40,6 +40,7 @@ from sales_core.contracts import (
     Fact,
     InboundMessage,
     Message,
+    MessageDraft,
     MessageId,
     OutboundMessage,
     Prospect,
@@ -59,14 +60,23 @@ from sales_core.engine.applier import (
     clear_next_action,
     proposal,
     validate_decision,
+    with_next_action,
 )
-from sales_core.engine.errors import ProposalNotApprovableError, ProposalNotFoundError, describe
+from sales_core.engine.errors import (
+    ControlUnavailableError,
+    ManualSendError,
+    ProposalNotApprovableError,
+    ProposalNotFoundError,
+    describe,
+)
 from sales_core.engine.models import (
     EngineConfig,
     InboundReceipt,
     InboundStatus,
+    ManualSendReceipt,
     PendingProposal,
     ProspectSummary,
+    ReleaseOutcome,
     RunCollector,
     RunReport,
     UpcomingActions,
@@ -78,6 +88,8 @@ from sales_core.planner import plan_daily_actions
 from sales_core.ports import (
     Brain,
     Clock,
+    ConversationControl,
+    ConversationControlStore,
     FactsReader,
     FactsWriter,
     MessagingChannel,
@@ -100,6 +112,35 @@ from sales_core.safety import (
 _RELINK_AFTER = timedelta(days=1)  # a number Telegram did not know is not asked again before
 UNCONFIRMED = "unconfirmed send"  # prefix of `last_error` on actions stuck in SENDING
 _ACTIVE_STATUSES = (ProspectStatus.NEW, ProspectStatus.ACTIVE)
+AUTHOR_HUMAN = "human"  # `Message.metadata["author"]` of a message a person wrote
+_MANUAL_INFIX = ":manual:"  # in the idempotency key of an action that carries a person's message
+_MAX_ERROR_TEXT = 300
+
+
+def _is_manual(action: SalesAction) -> bool:
+    return action.action_type is SalesActionType.REPLY and _MANUAL_INFIX in action.idempotency_key
+
+
+_REFUSALS = {
+    BlockReason.OPTED_OUT: (
+        "opted_out",
+        "This person asked not to be contacted. Nothing can be sent to them.",
+    ),
+    BlockReason.NO_CONTACT: ("no_contact", "There is no address for this person on the channel."),
+    BlockReason.NOT_LINKED: (
+        "not_linked",
+        "This person has not started the conversation on this channel yet.",
+    ),
+    BlockReason.NO_LANE: ("no_channel", "This prospect is not reachable on a channel."),
+}
+
+
+def _refusal_of(reason: str) -> ManualSendError:
+    """The error that tells a person why safety stopped their message."""
+    for block, (code, sentence) in _REFUSALS.items():
+        if block.value == reason:
+            return ManualSendError(code, sentence)
+    return ManualSendError("send_failed", "The message could not be sent.")
 
 
 def _created_prefix(day: date) -> str:
@@ -121,9 +162,12 @@ class Engine:
         config: EngineConfig,
         facts: FactsReader | None = None,
         facts_writer: FactsWriter | None = None,
+        control: ConversationControlStore | None = None,
     ) -> None:
         if repository.client_id != client.client_id:
             raise ValueError("repository is bound to a different client than the engine")
+        if control is not None and control.client_id != client.client_id:
+            raise ValueError("conversation control is bound to a different client than the engine")
         if (channel is None) == (router is None):
             raise ValueError("an engine needs exactly one of `channel` and `router`")
         if facts_writer is not None:
@@ -142,6 +186,9 @@ class Engine:
         self._config = config
         self._facts = facts  # None: no facts are known, the Brain gets an empty collection
         self._facts_writer = facts_writer  # None: facts a Brain proposes are refused, not lost
+        # None: no conversation can be taken over, and nothing is held back for a person.
+        self._control = control
+        self._manual_actors: dict[str, str] = {}  # who wrote the manual message being sent
         self._lock = threading.RLock()
         self._events: list[AuditEvent] = []  # audit events not yet written
         self._link_attempts: dict[str, datetime] = {}  # Telegram accounts looked for, by prospect
@@ -247,6 +294,7 @@ class Engine:
                 daily_limit=self._config.daily_action_limit,
                 channel=None if explicit else self._router.any_channel,
                 route_of=self._router.lane_for if explicit else None,
+                held_by_human=self._held_by_human(),
             )
             if plan.actions and not self._dry_run:
                 # One batch, BEFORE any Brain call: the quota stays reserved if we crash.
@@ -273,9 +321,27 @@ class Engine:
             return action.channel
         return self._router.channel_for(prospect)
 
+    def _held_by_human(self) -> frozenset[str]:
+        """The prospects a person is in charge of. A store that cannot be read stops the run (it is
+        raised): planning blind could contact someone a person is talking to."""
+        return self._control.humans() if self._control is not None else frozenset()
+
+    def _is_human(self, prospect_id: ProspectId) -> bool:
+        """Whether a person is in charge of this conversation. Any doubt counts as yes: a control
+        store that fails never lets an automatic message through."""
+        if self._control is None:
+            return False
+        try:
+            found = self._control.get(prospect_id)
+        except Exception:  # noqa: BLE001 - fail closed
+            return True
+        return found is not None and found.is_human
+
     def _contactable(self, action: SalesAction, prospect: Prospect | None) -> SafetyVerdict:
         if prospect is None:
             return check_contactable(None, self._router.any_channel)
+        if self._is_human(prospect.prospect_id):
+            return SafetyVerdict(BlockReason.HUMAN_CONTROL)
         channel = self._channel_of(action, prospect)
         if channel is None:
             return SafetyVerdict(BlockReason.NO_LANE)
@@ -389,9 +455,22 @@ class Engine:
         self._emit_for(ev.ACTION_COMPLETED, action, decision=decision.decision_type)
         if decision.decision_type is DecisionType.HANDOFF_TO_HUMAN:
             self._emit_for(ev.PROSPECT_HANDOFF, action, rationale=decision.rationale or None)
+            self._await_human(action, decision.rationale or None, run)
         elif decision.decision_type is DecisionType.CLOSE:
             self._emit_for(ev.PROSPECT_CLOSED, action, rationale=decision.rationale or None)
         run.outcome(action.action_id, ActionStatus.COMPLETED, str(decision.decision_type))
+
+    def _await_human(self, action: SalesAction, reason: str | None, run: RunCollector) -> None:
+        """The Brain handed the conversation over: it now waits, visibly, for a person. The prospect
+        is already paused, so a failure here only costs the visibility and is reported."""
+        if self._control is None:
+            return
+        try:
+            self._control.await_human(action.prospect_id, reason=reason, at=self._clock.now())
+        except Exception as error:  # noqa: BLE001
+            run.error(f"{action.action_id}: could not record the handover: {describe(error)}")
+            return
+        self._emit_for(ev.CONVERSATION_AWAITING_HUMAN, action, rationale=reason)
 
     def _review_proposed_facts(
         self, action: SalesAction, request: BrainRequest, decision: BrainDecision
@@ -576,15 +655,27 @@ class Engine:
                 outcomes=first.outcomes + second.outcomes, errors=first.errors + second.errors
             )
 
-    def _dispatch_one(self, action: SalesAction, run: RunCollector) -> None:
+    def _dispatch_one(
+        self, action: SalesAction, run: RunCollector, *, manual: bool = False
+    ) -> None:
+        """Send one APPROVED action. `manual` is a person's own message (`send_manual`): the human
+        gate does not apply to it (it is what the gate leaves room for), a paused prospect is
+        written to, and everything else (opt-out, address, channel, the first-contact rule) does."""
         prospect = self._repo.get_prospect(action.prospect_id)  # fresh state, not a snapshot
+        if not manual and prospect is not None and self._is_human(prospect.prospect_id):
+            self._block(action, prospect, SafetyVerdict(BlockReason.HUMAN_CONTROL), run)
+            return
         channel = self._channel_of(action, prospect) if prospect is not None else None
         adapter = self._router.adapter(channel) if channel is not None else None
         if prospect is not None and adapter is None:
             self._block(action, prospect, SafetyVerdict(BlockReason.NO_LANE), run)
             return
         channel = channel or self._router.any_channel
-        verdict = check_ready_to_send(prospect, action, channel)
+        verdict = (
+            self._manual_verdict(prospect, action, channel)
+            if manual
+            else check_ready_to_send(prospect, action, channel)
+        )
         if verdict.allowed and prospect is not None:
             verdict = self._initiation_verdict(prospect, channel)  # final gate, fresh history
         recipient = recipient_for(prospect, channel) if prospect is not None else None
@@ -659,6 +750,11 @@ class Engine:
             raise ValueError("cannot record a message without a draft")
         conversation = self._repo.get_conversation(action.prospect_id)
         metadata = {"action_id": action.action_id}
+        if _is_manual(action):
+            metadata["author"] = AUTHOR_HUMAN
+            actor = self._manual_actors.get(action.action_id)
+            if actor:
+                metadata["actor"] = actor
         if draft.template_id:
             metadata["template_id"] = draft.template_id
         self._repo.append_messages(
@@ -1119,7 +1215,18 @@ class Engine:
                 action = replace(action, lane_id=lane.lane_id, channel=chosen)
 
         if is_opt_out_message(message.text, self._config.opt_out_keywords):
+            # Before the human gate, so a stop request is honoured whoever is in charge.
             self._handle_opt_out(prospect, action, run)
+            return
+        if self._is_human(prospect_id):
+            # A person is in charge: the message stays in the history for them, the agent answers
+            # nothing, and the reply is settled so it is not picked up again when the
+            # conversation is given back (the person has answered it, or chose not to).
+            self._repo.save_actions(
+                [replace(action, status=ActionStatus.COMPLETED, last_error=None)]
+            )
+            self._emit_for(ev.ACTION_COMPLETED, action, reason="human control")
+            run.outcome(action.action_id, ActionStatus.COMPLETED, "human control")
             return
         verdict = self._contactable(action, prospect)
         if not verdict.allowed:
@@ -1147,9 +1254,15 @@ class Engine:
         run.outcome(action.action_id, ActionStatus.COMPLETED, "opt-out")
 
     def _supersede_open_actions(
-        self, prospect_id: ProspectId, *, keep: ActionId, run: RunCollector
+        self,
+        prospect_id: ProspectId,
+        *,
+        keep: ActionId | None,
+        run: RunCollector,
+        reason: str = "superseded by inbound reply",
     ) -> None:
-        """Cancel every unsent action for the prospect: the reply makes them stale."""
+        """Cancel every unsent action for the prospect: the reply makes them stale (or a person
+        took the conversation over)."""
         open_statuses = {ActionStatus.PLANNED, ActionStatus.PROPOSED, ActionStatus.APPROVED}
         stale = [
             a
@@ -1158,7 +1271,6 @@ class Engine:
         ]
         if not stale:
             return
-        reason = "superseded by inbound reply"
         self._repo.save_actions(
             [replace(a, status=ActionStatus.CANCELLED, last_error=reason) for a in stale]
         )
@@ -1168,6 +1280,282 @@ class Engine:
 
     def _reply_key(self, prospect_id: ProspectId, message_id: MessageId) -> str:
         return f"{self._client.client_id}:{prospect_id}:reply:{message_id}"
+
+    # ==== A person in charge of a conversation ===============================================
+
+    def control_of(self, prospect_id: ProspectId) -> ConversationControl | None:
+        """Who is in charge of this conversation (None: the agent, always). Read-only."""
+        if self._control is None:
+            return None
+        with self._lock:
+            return self._control.get(prospect_id)
+
+    def take_over(
+        self, prospect_id: ProspectId, *, by: str, reason: str | None = None
+    ) -> ConversationControl:
+        """A person takes the conversation. From now on nothing automatic goes to this prospect:
+        their open actions are cancelled, no follow-up is planned, and the prospect is paused so it
+        shows as waiting for a person. Their schedule is kept; `release` decides what resumes."""
+        with self._lock:
+            store = self._require_control()
+            prospect = self._known_prospect(prospect_id)
+            now = self._clock.now()
+            control = store.take(prospect_id, by=by, reason=reason, at=now)
+            run = RunCollector()
+            self._supersede_open_actions(prospect_id, keep=None, run=run, reason="taken over")
+            if prospect.status in _ACTIVE_STATUSES:
+                self._repo.update_prospects([replace(prospect, status=ProspectStatus.PAUSED)])
+                self._emit(ev.PROSPECT_PAUSED, prospect_id=prospect_id, reason="taken over")
+            self._emit(ev.CONVERSATION_TAKEN_OVER, actor=by, prospect_id=prospect_id)
+            self._flush(run)
+            return control
+
+    def release(
+        self,
+        prospect_id: ProspectId,
+        *,
+        by: str,
+        resume_after: timedelta | None = None,
+    ) -> ReleaseOutcome:
+        """Give the conversation back to the agent.
+
+        What resumes, by the same rules as everywhere else: a prospect who opted out or was closed
+        stays so (only a paused one is made contactable again); the follow-up count starts over,
+        since a person spoke to them; and if nothing is due ahead, one follow-up is planned
+        `resume_after` from now (None: none is, the agent waits for the prospect). A stop request is
+        never undone by giving a conversation back."""
+        with self._lock:
+            store = self._require_control()
+            prospect = self._known_prospect(prospect_id)
+            now = self._clock.now()
+            control = store.release(prospect_id, at=now)
+            if control is None:
+                return ReleaseOutcome(
+                    released=False,
+                    status=prospect.status.value,
+                    next_follow_up_at=prospect.schedule.next_action_due_at,
+                )
+            updated = prospect
+            if prospect.status is ProspectStatus.PAUSED:
+                schedule = prospect.schedule
+                in_touch = (
+                    schedule.last_contacted_at is not None
+                    or schedule.last_inbound_at is not None
+                    or schedule.next_action_type is not None
+                )
+                resumed = ProspectStatus.ACTIVE if in_touch else ProspectStatus.NEW
+                updated = replace(prospect, status=resumed)
+            if updated.status in _ACTIVE_STATUSES:
+                schedule = replace(updated.schedule, follow_up_count=0)
+                updated = replace(updated, schedule=schedule)
+                due = updated.schedule.next_action_due_at
+                if (
+                    resume_after is not None
+                    and updated.status is ProspectStatus.ACTIVE  # a NEW one is first contacted
+                    and (updated.schedule.next_action_type is None or due is None or due <= now)
+                ):
+                    updated = with_next_action(
+                        updated, SalesActionType.FOLLOW_UP, now + resume_after
+                    )
+            if updated != prospect:
+                self._repo.update_prospects([updated])
+            self._emit(ev.CONVERSATION_RELEASED, actor=by, prospect_id=prospect_id)
+            self._flush(RunCollector())
+            return ReleaseOutcome(
+                released=True,
+                status=updated.status.value,
+                next_follow_up_at=(
+                    updated.schedule.next_action_due_at
+                    if updated.status in _ACTIVE_STATUSES
+                    else None
+                ),
+            )
+
+    def send_manual(
+        self, prospect_id: ProspectId, text: str, *, idempotency_key: str, actor: str
+    ) -> ManualSendReceipt:
+        """Send a message a person wrote, on the channel the prospect is reached on.
+
+        Only while a person is in charge of the conversation. It goes out through the same channel
+        as the agent's messages, so everything that channel enforces applies as it does for the
+        agent (send limits, WhatsApp's 24-hour window and templates, the first-contact rule); a
+        prospect who opted out cannot be written to. It is stored with the author `human`.
+        Idempotent by `idempotency_key`: the same key never sends twice and returns the first
+        outcome. Raises `ManualSendError`, with a stable code and a sentence to show."""
+        with self._lock:
+            try:
+                return self._send_manual(prospect_id, text, idempotency_key, actor)
+            except ManualSendError as refusal:
+                self._emit(
+                    ev.MESSAGE_MANUAL_REFUSED,
+                    actor=actor,
+                    prospect_id=prospect_id,
+                    reason=refusal.code,
+                )
+                self._flush(RunCollector())
+                raise
+
+    def _send_manual(
+        self, prospect_id: ProspectId, text: str, idempotency_key: str, actor: str
+    ) -> ManualSendReceipt:
+        content = text.strip()
+        if not content:
+            raise ManualSendError("empty", "Write a message first.")
+        if self._dry_run:
+            raise ManualSendError("dry_run", "This agent is in test mode: nothing is sent.")
+        if self._control is None:
+            raise ManualSendError("control_unavailable", "Manual messages are not available.")
+        prospect = self._repo.get_prospect(prospect_id)
+        if prospect is None or prospect.client_id != self._client.client_id:
+            raise ManualSendError("unknown_prospect", "No such conversation.")
+        key = f"{self._client.client_id}:{prospect_id}:manual:{idempotency_key}"
+        earlier = self._repo.find_action_by_idempotency_key(key)
+        if earlier is not None:
+            return self._manual_outcome(earlier, replayed=True)
+        control = self._control.get(prospect_id)
+        if control is None or not control.is_human:
+            raise ManualSendError(
+                "not_in_human_mode", "Take over the conversation before writing to the prospect."
+            )
+        channel = self._manual_channel(prospect)
+        if channel is None:
+            raise ManualSendError("no_channel", "This prospect is not reachable on a channel.")
+        now = self._clock.now()
+        lane = self._router.lane_for(prospect)
+        action = SalesAction(
+            action_id=ActionId(key),
+            client_id=self._client.client_id,
+            prospect_id=prospect_id,
+            action_type=SalesActionType.REPLY,
+            due_at=now,
+            idempotency_key=key,
+            priority=ActionPriority.URGENT,
+            status=ActionStatus.APPROVED,
+            draft=MessageDraft(text=content),
+            lane_id=lane.lane_id if lane is not None else None,
+            channel=channel,
+        )
+        if control.awaiting_human:
+            self._control.take(prospect_id, by=actor, reason=control.reason, at=now)
+        self._manual_actors[key] = actor
+        run = RunCollector()
+        try:
+            self._repo.save_actions([action])
+            self._dispatch_one(action, run, manual=True)
+        except Exception as error:
+            self._withdraw_manual(key, describe(error))
+            raise ManualSendError(
+                "send_failed", "The message could not be sent. Nothing was sent; try again."
+            ) from error
+        finally:
+            self._manual_actors.pop(key, None)
+            self._flush(run)
+        saved = self._repo.find_action_by_idempotency_key(key)
+        if saved is None:  # cannot happen: it was saved above
+            raise ManualSendError("send_failed", "The message could not be sent.")
+        if saved.status is ActionStatus.APPROVED:
+            # The channel said "not now" or "try again": a person's message is never left to be
+            # sent later on its own. It is withdrawn and the person decides.
+            self._withdraw_manual(key, saved.last_error or "not sent")
+            saved = self._repo.find_action_by_idempotency_key(key) or saved
+        outcome = self._manual_outcome(saved, replayed=False)
+        self._emit(
+            ev.MESSAGE_MANUAL_SENT,
+            actor=actor,
+            prospect_id=prospect_id,
+            action_id=saved.action_id,
+            channel=channel,
+        )
+        self._flush(run)
+        return outcome
+
+    def _manual_channel(self, prospect: Prospect) -> Channel | None:
+        """Where the person is written to: the channel they last wrote on if the client has it,
+        else the one of their lane (the only one for a client with no lanes)."""
+        conversation = self._repo.get_conversation(prospect.prospect_id)
+        for message in reversed(conversation.messages):
+            if message.direction is Direction.INBOUND and self._router.adapter(message.channel):
+                return message.channel
+        return self._router.channel_for(prospect)
+
+    def _manual_verdict(
+        self, prospect: Prospect | None, action: SalesAction, channel: Channel
+    ) -> SafetyVerdict:
+        """What stops a person's message. Not the pause (a conversation in human hands is paused);
+        an opt-out, a missing address, another client's prospect, an empty draft."""
+        if prospect is None:
+            return SafetyVerdict(BlockReason.UNKNOWN_PROSPECT)
+        if prospect.client_id != action.client_id:
+            return SafetyVerdict(BlockReason.CLIENT_MISMATCH)
+        if prospect.status is ProspectStatus.OPTED_OUT:
+            return SafetyVerdict(BlockReason.OPTED_OUT)
+        if recipient_for(prospect, channel) is None:
+            return SafetyVerdict(
+                BlockReason.NOT_LINKED if channel in OPT_IN_CHANNELS else BlockReason.NO_CONTACT
+            )
+        if action.draft is None:
+            return SafetyVerdict(BlockReason.NO_DRAFT)
+        return ALLOWED
+
+    def _manual_outcome(self, action: SalesAction, *, replayed: bool) -> ManualSendReceipt:
+        """The result of a manual message from the action as stored (also for a replayed key)."""
+        if action.status is ActionStatus.SENT:
+            sent = next(
+                (
+                    m
+                    for m in self._repo.get_conversation(action.prospect_id).messages
+                    if m.message_id == f"out:{action.action_id}"
+                ),
+                None,
+            )
+            where = sent.channel if sent is not None else action.channel
+            return ManualSendReceipt(
+                message_id=MessageId(f"out:{action.action_id}"),
+                channel=where.value if where is not None else "",
+                sent_at=sent.timestamp if sent is not None else None,
+                replayed=replayed,
+            )
+        reason = (action.last_error or "")[:_MAX_ERROR_TEXT]
+        if action.status is ActionStatus.SENDING:
+            raise ManualSendError(
+                "unconfirmed",
+                "We could not confirm whether this message was sent. Check the conversation "
+                "before writing again.",
+            )
+        if action.status is ActionStatus.CANCELLED and reason.startswith("safety: "):
+            raise _refusal_of(reason.removeprefix("safety: "))
+        if action.status is ActionStatus.APPROVED or (
+            action.status is ActionStatus.CANCELLED and reason
+        ):
+            why = (reason or "the channel asked to wait").rstrip(".")
+            raise ManualSendError("not_now", f"The message was not sent: {why}.")
+        why = (reason or "the channel refused it").rstrip(".")
+        raise ManualSendError("send_failed", f"The message was not sent: {why}.")
+
+    def _withdraw_manual(self, key: str, reason: str) -> None:
+        """Make sure a manual message that did not go out cannot be sent later by the dispatcher."""
+        try:
+            action = self._repo.find_action_by_idempotency_key(key)
+            if action is not None and action.status in (
+                ActionStatus.APPROVED,
+                ActionStatus.PLANNED,
+            ):
+                self._repo.save_actions(
+                    [replace(action, status=ActionStatus.CANCELLED, last_error=reason[:300])]
+                )
+        except Exception:  # noqa: BLE001 - the human gate still holds the dispatcher back
+            return
+
+    def _require_control(self) -> ConversationControlStore:
+        if self._control is None:
+            raise ControlUnavailableError("this agent has no conversation control")
+        return self._control
+
+    def _known_prospect(self, prospect_id: ProspectId) -> Prospect:
+        prospect = self._repo.get_prospect(prospect_id)
+        if prospect is None or prospect.client_id != self._client.client_id:
+            raise LookupError(f"unknown prospect {prospect_id!r}")
+        return prospect
 
     # ==== shared helpers =====================================================================
 

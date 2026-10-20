@@ -26,12 +26,15 @@ export class ClientApiError extends Error {
   status: number;
   /** What the server says is still missing, when it refuses an action for that reason (409 on start). */
   reasons: ReadinessCheck[];
+  /** A stable code when the server gives one with its refusal (`{code, message}`), e.g. `not_in_human_mode`. */
+  code: string | null;
 
-  constructor(status: number, message: string, reasons: ReadinessCheck[] = []) {
+  constructor(status: number, message: string, reasons: ReadinessCheck[] = [], code: string | null = null) {
     super(message);
     this.name = "ClientApiError";
     this.status = status;
     this.reasons = reasons;
+    this.code = code;
   }
 }
 
@@ -47,24 +50,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ClientApiError(0, "Could not reach the server.");
   }
   if (!response.ok) {
-    const { message, reasons } = await errorDetail(response);
-    throw new ClientApiError(response.status, message, reasons);
+    const { message, reasons, code } = await errorDetail(response);
+    throw new ClientApiError(response.status, message, reasons, code);
   }
   return (await response.json()) as T;
 }
 
-async function errorDetail(response: Response): Promise<{ message: string; reasons: ReadinessCheck[] }> {
+async function errorDetail(response: Response): Promise<{ message: string; reasons: ReadinessCheck[]; code: string | null }> {
   const fallback = response.statusText || `request failed (${response.status})`;
   try {
     const body: unknown = await response.json();
     const detail = body && typeof body === "object" ? (body as { detail?: unknown }).detail : undefined;
-    if (typeof detail === "string") return { message: detail, reasons: [] };
+    if (typeof detail === "string") return { message: detail, reasons: [], code: null };
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
       // `{message, reasons}`: a refusal that lists what is missing (the agent cannot start yet).
-      const { message, reasons } = detail as { message?: unknown; reasons?: unknown };
+      // `{code, message}`: a refusal with a stable code (a message that could not be sent).
+      const { message, reasons, code } = detail as { message?: unknown; reasons?: unknown; code?: unknown };
       return {
         message: typeof message === "string" ? message : fallback,
         reasons: Array.isArray(reasons) ? reasons.filter(isCheck) : [],
+        code: typeof code === "string" ? code : null,
       };
     }
     if (Array.isArray(detail)) {
@@ -78,12 +83,12 @@ async function errorDetail(response: Response): Promise<{ message: string; reaso
         }
         return [];
       });
-      if (lines.length > 0) return { message: lines.join("; "), reasons: [] };
+      if (lines.length > 0) return { message: lines.join("; "), reasons: [], code: null };
     }
   } catch {
     /* not JSON, or no `detail` string (e.g. a 422 list): fall through to the generic message */
   }
-  return { message: fallback, reasons: [] };
+  return { message: fallback, reasons: [], code: null };
 }
 
 function isCheck(value: unknown): value is ReadinessCheck {
@@ -679,6 +684,19 @@ export interface ConversationMessage {
   timestamp: string;
   /** What WhatsApp reported for a message we sent; absent until it reports something. */
   delivery?: "sent" | "delivered" | "read" | "failed" | null;
+  /** Who wrote it; absent for older servers. `human` is a person of the client who took the conversation over. */
+  author?: "prospect" | "agent" | "human" | null;
+}
+
+/** Who is in charge of a conversation. No row on the server is the agent, in charge since the start. */
+export interface ConversationControl {
+  mode: "agent" | "human";
+  /** The agent handed the conversation over and nobody took it yet. */
+  awaiting_human: boolean;
+  taken_by: string | null;
+  taken_at: string | null;
+  reason: string | null;
+  released_at: string | null;
 }
 
 export interface ConversationHistory {
@@ -695,6 +713,8 @@ export interface ConversationHistory {
   prospect?: ProspectRow | null;
   next_follow_up?: { action_type: string; due_at: string } | null;
   errors?: ConversationActionError[];
+  /** Absent or null: not known (older server, or the control store could not be read). */
+  control?: ConversationControl | null;
 }
 
 export interface ConversationActionError {
@@ -752,6 +772,89 @@ export function clientConversation(
 ): Promise<ConversationHistory> {
   const query = page ? `?limit=${page.limit}&offset=${page.offset}&order=${page.order}` : "";
   return request<ConversationHistory>(`/conversations/${encodeURIComponent(prospectId)}${query}`);
+}
+
+/* ── A person in charge of a conversation (client_conversation_control.py) ── */
+
+export function clientTakeOver(prospectId: string, reason?: string): Promise<ConversationControl> {
+  return request<ConversationControl>(`/conversations/${encodeURIComponent(prospectId)}/take-over`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+export interface ReleaseResult {
+  /** false: the agent was already in charge. */
+  released: boolean;
+  control: ConversationControl;
+  /** The prospect's status afterwards. */
+  status: string | null;
+  /** When the agent comes back; null when nothing is scheduled. */
+  next_follow_up_at: string | null;
+}
+
+export function clientReleaseConversation(prospectId: string): Promise<ReleaseResult> {
+  return request<ReleaseResult>(`/conversations/${encodeURIComponent(prospectId)}/release`, { method: "POST" });
+}
+
+export interface SentMessage {
+  message_id: string;
+  channel: string;
+  sent_at: string | null;
+  /** true: this key had already sent it; nothing new went out. */
+  replayed: boolean;
+}
+
+/** `idempotencyKey` is chosen by the caller (8..64 of letters, digits, `_ . : -`): the same key never sends twice.
+ *  A refusal carries `ClientApiError.code` (not_in_human_mode, channel_not_ready, opted_out, not_now, ...). */
+export function clientSendMessage(prospectId: string, text: string, idempotencyKey: string): Promise<SentMessage> {
+  return request<SentMessage>(`/conversations/${encodeURIComponent(prospectId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ text, idempotency_key: idempotencyKey }),
+  });
+}
+
+/* ── Follow-up settings (client_followup.py) ── */
+
+export interface FollowUpWindow {
+  /** HH:MM. */
+  start: string;
+  end: string;
+  /** An IANA name. */
+  timezone: string;
+}
+
+export interface FollowUpSettings {
+  version: number | null;
+  /** false: the business settings are not written yet, so nothing can be saved. */
+  configured: boolean;
+  max_followups: number;
+  gap_days: number;
+  window: FollowUpWindow | null;
+  /** The client's own time zone, offered as the window's default. */
+  timezone: string | null;
+  /** The cadence has uneven waits: saving replaces it by an even one. */
+  custom_schedule: boolean;
+  defaults: { max_followups: number; gap_days: number };
+  bounds: { max_followups: [number, number]; gap_days: [number, number] };
+}
+
+export interface FollowUpChange {
+  max_followups: number;
+  gap_days: number;
+  /** null: any hour. `timezone` null: the client's own. */
+  window: { start: string; end: string; timezone?: string | null } | null;
+}
+
+export function clientFollowUpSettings(): Promise<FollowUpSettings> {
+  return request<FollowUpSettings>("/followup-settings");
+}
+
+export function clientSaveFollowUpSettings(expectedVersion: number | null, change: FollowUpChange): Promise<FollowUpSettings> {
+  return request<FollowUpSettings>("/followup-settings", {
+    method: "PUT",
+    body: JSON.stringify({ expected_version: expectedVersion, ...change }),
+  });
 }
 
 /* ── Dashboard summary, read-only (see src/sales_app/api/client_prospects.py) ──
@@ -946,8 +1049,8 @@ export async function clientUploadResource(productId: string, file: File, title:
     throw new ClientApiError(0, "Could not reach the server.");
   }
   if (!response.ok) {
-    const { message, reasons } = await errorDetail(response);
-    throw new ClientApiError(response.status, message, reasons);
+    const { message, reasons, code } = await errorDetail(response);
+    throw new ClientApiError(response.status, message, reasons, code);
   }
   return (await response.json()) as ProductResource;
 }

@@ -592,6 +592,11 @@ def build_runtime(
                 ),
                 telegram_consent_attribute=_telegram_consent_attribute(config),
             ),
+            control=(
+                builders.conversation_control(client_id)
+                if builders.conversation_control is not None
+                else None
+            ),
         ),
     )
     return ClientRuntime(config=config, engine=engine, stagger=stagger, writeback=writeback)

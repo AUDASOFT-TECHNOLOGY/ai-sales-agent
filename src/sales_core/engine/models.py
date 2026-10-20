@@ -133,6 +133,25 @@ class InboundReceipt:
     errors: tuple[str, ...] = ()  # non-fatal problems, e.g. an audit write that must be retried
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ManualSendReceipt:
+    """A person's message that went out (or did earlier: `replayed`, same idempotency key)."""
+
+    message_id: MessageId
+    channel: str
+    sent_at: datetime | None
+    replayed: bool = False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReleaseOutcome:
+    """What giving a conversation back did. `released` is False if it was never in human mode."""
+
+    released: bool
+    status: str | None  # the prospect's status afterwards
+    next_follow_up_at: datetime | None  # when the agent comes back, None: nothing is scheduled
+
+
 @dataclass(slots=True)
 class RunCollector:
     """Mutable accumulator used inside one Engine call."""

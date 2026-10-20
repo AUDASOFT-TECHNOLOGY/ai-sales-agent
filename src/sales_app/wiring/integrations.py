@@ -96,6 +96,9 @@ class IntegrationBuilders:
     # One client's cap guard for a channel kind (`guard(client_id, channel)`), or None when the
     # deployment has no database: a `metered` channel then refuses every message.
     send_guards: Callable[[str, str], DailySendGuard] | None = None
+    # One client's conversation control (who is in charge of each conversation: the agent or a
+    # person), or None: the Engine is then built without it and no conversation can be taken over.
+    conversation_control: Callable[[str], Any] | None = None
 
     # ---- polling the channels that do not call us ------------------------------------------
 
@@ -186,6 +189,7 @@ def default_builders(
     llm_usage: Callable[[str], LLMUsageStore] | None = None,
     knowledge: Callable[[str], Any] | None = None,
     send_guards: Callable[[str, str], DailySendGuard] | None = None,
+    conversation_control: Callable[[str], Any] | None = None,
     gmail: Any = None,
     whatsapp_service: Any = None,
     telegram_accounts: Any = None,
@@ -255,4 +259,5 @@ def default_builders(
         llm_usage=llm_usage,
         knowledge=knowledge,
         send_guards=send_guards,
+        conversation_control=conversation_control,
     )

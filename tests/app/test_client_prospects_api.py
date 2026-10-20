@@ -313,7 +313,9 @@ class TestConversations:
             "I am interested",
         ]
         first, _, last = body["messages"]
-        assert set(first) == {"id", "direction", "channel", "text", "timestamp", "delivery"}
+        assert set(first) == {
+            "id", "direction", "channel", "text", "timestamp", "delivery", "author",
+        }  # fmt: skip
         assert first["direction"] == "outbound" and first["channel"] == "whatsapp"
         assert last["direction"] == "inbound"
         assert first["timestamp"] == iso(NOW + timedelta(minutes=1))

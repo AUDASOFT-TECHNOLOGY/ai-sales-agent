@@ -3,6 +3,11 @@
 from sales_core.ports.brain import Brain, BrainFactory, BrainSettingsSpec
 from sales_core.ports.channel import MessagingChannel
 from sales_core.ports.clock import Clock
+from sales_core.ports.conversation_control import (
+    ControlMode,
+    ConversationControl,
+    ConversationControlStore,
+)
 from sales_core.ports.facts import FactsReader, FactsWriter
 from sales_core.ports.llm import (
     LLMAuthError,
@@ -21,6 +26,9 @@ __all__ = [
     "BrainFactory",
     "BrainSettingsSpec",
     "Clock",
+    "ControlMode",
+    "ConversationControl",
+    "ConversationControlStore",
     "FactsReader",
     "FactsWriter",
     "InvalidSignatureError",

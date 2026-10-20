@@ -26,6 +26,11 @@ from sales_app.config.client_wiring import wiring_for
 from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
 from sales_app.config_store import ConfigStore
 from sales_app.consent_wiring import check_consent_mode, open_consent_registry
+from sales_app.conversation_control import (
+    ControlRows,
+    ConversationControlHub,
+    InMemoryControlRows,
+)
 from sales_app.daily_report import DailyReportService
 from sales_app.email_activation import EmailActivationService
 from sales_app.email_platform import AuthLedger
@@ -87,7 +92,7 @@ from sales_app.wiring import IntegrationBuilders, default_builders
 from sales_app.wiring.providers import ProviderRegistry, default_registry
 from sales_app.wiring.writeback import WritebackSupport, default_policies, sql_ledgers
 from sales_core.approval import ApprovalMode
-from sales_core.ports import Clock
+from sales_core.ports import Clock, ConversationControlStore
 from sales_integrations.system import SystemClock
 
 log = logging.getLogger(__name__)
@@ -198,6 +203,11 @@ class Application:
     # `sales_app.finance`). None without a database.
     billing_loop: BillingLoop | None = None
     finance: FinanceService | None = None
+    # One client's conversation control (who is in charge of each conversation: the agent or a
+    # person who took it over). In the database when there is one, in memory otherwise. The Engine
+    # of every client is given the same store, so what the Client API reads is what the Engine obeys.
+    # See `sales_app.conversation_control`.
+    conversation_controls: Callable[[str], ConversationControlStore] | None = None
 
     def client_wiring(self, client_id: str) -> tuple[dict[str, Any] | None, str | None]:
         """A client's operator wiring: its record first, its `client.yaml` as the fallback."""
@@ -394,6 +404,9 @@ def _assemble(
     credentials = CredentialService(secrets, audit, now=clock.now)
     plans = _plan_store(account_stores)
     audit_service, notification_service = _audit_and_notifications(account_stores, clock)
+    control_hub = ConversationControlHub(
+        _control_rows(account_stores), notifications=notification_service, audit=audit_service
+    )
     send_caps, send_limits = _send_limits(account_stores, plans, clock)
     quotas = None
     if send_limits is not None:
@@ -449,6 +462,7 @@ def _assemble(
         llm_usage=_llm_usage_stores(account_stores),
         knowledge=knowledge.for_client if knowledge is not None else None,
         send_guards=send_limits.guard if send_limits is not None else None,
+        conversation_control=control_hub.for_client,
         gmail=gmail,
         whatsapp_service=whatsapp,
         telegram_accounts=telegram_accounts,
@@ -460,6 +474,8 @@ def _assemble(
     )
     if builders.knowledge is None and knowledge is not None:
         builders = replace(builders, knowledge=knowledge.for_client)
+    if builders.conversation_control is None:
+        builders = replace(builders, conversation_control=control_hub.for_client)
     if builders.send_guards is None and send_limits is not None:
         # Builders given by the caller still obey the deployment's cap (their metered channels).
         builders = replace(builders, send_guards=send_limits.guard)
@@ -587,7 +603,19 @@ def _assemble(
             plans, invoices_store, notification_service, audit_service, clock, shared.leases
         ),
         finance=_finance(account_stores),
+        conversation_controls=builders.conversation_control,
     )
+
+
+def _control_rows(account_stores: AccountStores | None) -> ControlRows:
+    """Where who-is-in-charge is kept: the database when there is one (a restart must not give a
+    conversation back to the agent), memory otherwise."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return InMemoryControlRows()
+    from sales_app.persistence.control_rows import SqlControlRows
+
+    return SqlControlRows(engine)
 
 
 def _audit_and_notifications(

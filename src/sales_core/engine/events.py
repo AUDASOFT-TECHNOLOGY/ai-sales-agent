@@ -32,5 +32,12 @@ INBOUND_UNKNOWN_SENDER = "inbound.unknown_sender"
 INBOUND_LINK_REFUSED = "inbound.link_refused"  # a claim on a prospect that could not be honoured
 INBOUND_ERROR = "inbound.error"
 
+# Who is in charge of a conversation (see `sales_core.ports.conversation_control`).
+CONVERSATION_AWAITING_HUMAN = "conversation.awaiting_human"  # the Brain handed it over
+CONVERSATION_TAKEN_OVER = "conversation.taken_over"  # a person took it; `actor` says who
+CONVERSATION_RELEASED = "conversation.released"  # given back to the agent; `actor` says who
+MESSAGE_MANUAL_SENT = "message.manual_sent"  # a person's own message went out; `actor` says who
+MESSAGE_MANUAL_REFUSED = "message.manual_refused"  # a person's message was not sent; see `reason`
+
 DRYRUN_DECISION = "dryrun.decision"
 DRYRUN_INBOUND = "dryrun.inbound"

@@ -1,0 +1,37 @@
+/* Who is in charge of a conversation: the banner above the messages, the box to write, and the
+ * follow-up settings card. Tokens only, no raw colors. Shared by the Admin-style and Client themes. */
+
+.control-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-block-end: 1px solid var(--line-1);
+  background: rgb(255 255 255 / 0.03);
+}
+.control-bar__text { display: grid; gap: 2px; flex: 1 1 260px; min-width: 0; }
+.control-bar[data-mode="waiting"] {
+  background: rgb(var(--tint-danger) / 0.08);
+  border-block-end-color: rgb(var(--tint-danger) / 0.4);
+}
+.control-bar[data-mode="human"] {
+  background: rgb(var(--tint-action) / 0.08);
+  border-block-end-color: rgb(var(--tint-action) / 0.3);
+}
+
+.composer {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-block-start: 1px solid var(--line-1);
+}
+
+.convo-item__flag { color: var(--danger-text); }
+
+.followup-card { display: grid; gap: var(--space-4); }
+.followup-card__grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.followup-card__check { display: flex; align-items: center; gap: var(--space-2); }
+
+@media (max-width: 640px) {
+  .control-bar { padding: var(--space-3); }
+  .composer { padding: var(--space-3); }
+}

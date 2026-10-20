@@ -826,3 +826,22 @@ provider_costs = Table(
     Index("ix_provider_costs_period", "period_date", "provider"),
     Index("ix_provider_costs_client", "client_id", "period_date"),
 )
+
+# Who is in charge of a conversation (`sales_app.conversation_control`, migration 0025). One row per
+# (client, prospect) that was ever handed to a person; no row means the agent. `mode` is `agent` or
+# `human`; in `human` mode `taken_by` is empty while the conversation waits for a person (the Brain
+# handed it over) and names the person once they took it. Durable on purpose: a restart must never
+# give a conversation a person is handling back to the agent.
+conversation_control = Table(
+    "conversation_control",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("prospect_id", String(255), primary_key=True),
+    Column("mode", String(8), nullable=False),
+    Column("taken_by", String(128), nullable=True),
+    Column("taken_at", UtcDateTime, nullable=True),
+    Column("reason", String(300), nullable=True),
+    Column("released_at", UtcDateTime, nullable=True),
+    CheckConstraint("mode IN ('agent', 'human')", name="ck_conversation_control_mode"),
+    Index("ix_conversation_control_mode", "client_id", "mode"),
+)
