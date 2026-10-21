@@ -1,4 +1,4 @@
-# Dashboards (lot 4)
+﻿# Dashboards (lot 4)
 
 Two read-only endpoints assemble figures that earlier lots already compute. Nothing is simulated,
 estimated by the dashboard, or written. Code: `src/sales_app/dashboards/` (pure rules),
@@ -14,7 +14,7 @@ An indicator is `{value, availability, reason?}`:
 | `estimated`   | approximate or partial (a flat tariff, a lower bound, notifications truncated). |
 | `not_tracked` | not recorded, or not readable right now: `value` is `null`, `reason` says why. Never shown as 0. |
 
-Conversions are always `not_tracked` (lot 2B: no conversion event exists). A sum where one term is
+Conversions are two measured figures: `conversions_declared` (the prospect says they paid) and `conversions_confirmed` (the payment is confirmed); a declaration is never counted as confirmed. Their rates are over the prospects contacted. Per product / circuit / channel / source / day breakdowns of conversions are not computed (payment facts carry no lane/channel in the metrics reader). A sum where one term is
 `not_tracked` is `not_tracked`. Costs map the lot 2C basis `unavailable` to `not_tracked`. A store
 that is missing (no database) or unreadable degrades its block to `not_tracked`; the response stays 200.
 
@@ -52,7 +52,7 @@ Rules:
 
 No client id is accepted: the session decides it (a `client_id` parameter is ignored), every store is
 asked for that client only. Blocks: `agent` (state and the client-safe readiness sentences),
-`activity` (prospects, contacted, conversations, replies, rate, conversions `not_tracked`, needs_human,
+`activity` (prospects, contacted, conversations, replies, rate, conversions declared + confirmed and their rates, needs_human,
 errors, by product / circuit / source / channel / status, payments declared vs confirmed vs awaiting),
 `human_requests`, `incidents` (open problems, connection problems), `usage` (quota, no Admin cap),
 `billing` (subscription, invoice counts, recent invoices) and `series` (`activity`, `performance`,
@@ -61,7 +61,7 @@ errors, by product / circuit / source / channel / status, payments declared vs c
 ## Front end
 
 - Admin: `web/src/admin/pages/AdminDashboardPage.tsx` keeps every existing indicator (Clients, LLM
-  models, Active agents, Total revenue, Prospects contacted, Conversations, Conversions, Revenue, LLM
+  models, Active agents, Total revenue, Prospects contacted, Conversations, Conversions declared, Conversions confirmed, Revenue, LLM
   cost, WhatsApp cost; now fed by the endpoint, "—" with the reason when not tracked) and adds, in
   `AdminDashboardInsights.tsx`, the six chart families with period and client filters. Billed,
   collected, free, discounted and costs have their own colours and columns.
@@ -78,3 +78,8 @@ errors, by product / circuit / source / channel / status, payments declared vs c
 - Activity is read client by client (one query set per client and, for performance, per month); fine
   for tens of clients, to be revisited for hundreds.
 - The Client menu entry for `/dashboard` has to be added in `shell/AppShell.tsx`.
+
+## Failure notifications and audit (spec 14, 12.4)
+
+- `sales_app/operational_signals.py` wraps each client's channels (`NotifyingChannel`) and model (`NotifyingLLMProvider`) and the scheduler's inbox job (`job_result_hook`): a failed send (Email / Telegram / WhatsApp, transient or permanent), an unreadable inbox, a provider quota / credential / model error opens one notification per client, channel and type (`send:<channel>`, `receive:<channel>`, `llm:quota|auth|model`) for the Client and the Admin; the next success closes it. A send deferred by the daily cap is not a failure; timeouts and unusable model answers are transient and not notified. Texts are fixed sentences with an action, never a secret or the provider's text. Human intervention, billing errors, quotas, sync and report failures were already wired.
+- Audit: the middleware keeps the `before` state of client update, LLM assignment, source, plan, send cap, channels and plan edits (read through the app's own GET route with the caller's session, so it is secret-free and redacted); refused Admin and Client sign-ins are audited (`admin.login_refused`, `client.login_refused`: typed name, reason, never the password). Invoice actions were already audited (`invoice.generate`, `invoice.status_change`).

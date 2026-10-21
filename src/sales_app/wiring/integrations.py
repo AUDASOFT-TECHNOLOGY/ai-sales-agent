@@ -99,6 +99,8 @@ class IntegrationBuilders:
     # One client's conversation control (who is in charge of each conversation: the agent or a
     # person), or None: the Engine is then built without it and no conversation can be taken over.
     conversation_control: Callable[[str], Any] | None = None
+    # Tells the notifications how sends and model calls go (`sales_app.operational_signals`), or None.
+    signals: Any | None = None
 
     # ---- polling the channels that do not call us ------------------------------------------
 
@@ -120,6 +122,10 @@ class IntegrationBuilders:
         if config.effective_mode is ApprovalMode.DRY_RUN:
             return False
         return bool(self._inbox_providers(config))
+
+    def inbox_channels(self, config: ClientConfig) -> tuple[str, ...]:
+        """The channel kinds that `open_inbox` reads (for the notifications of a failed poll)."""
+        return tuple(p.kind.value for p in self._inbox_providers(config))
 
     def open_inbox(self, config: ClientConfig) -> InboxPoller:
         providers = self._inbox_providers(config)

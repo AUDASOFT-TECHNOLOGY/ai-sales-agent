@@ -85,9 +85,36 @@ export function AdminDashboardInsights({ data }: { data: AdminDashboard }) {
               unavailable={na(s.performance.availability, s.performance.reason)}
               emptyText="Nobody was contacted in this period, so there is no rate."
             />
+          </Glass>
+          <Glass level={1} className="dv-card">
+            <TimeChart
+              title="Agent performance: conversions"
+              description="Declared = the prospect says they paid. Confirmed = payment confirmed by the client. A declaration is never counted as confirmed."
+              labels={perf.map((p) => p.period)}
+              series={[
+                {
+                  id: "declared",
+                  label: "Declared",
+                  color: "var(--dv-a)",
+                  values: perf.map((p) => p.conversions_declared.value),
+                },
+                {
+                  id: "confirmed",
+                  label: "Confirmed",
+                  color: "var(--dv-b)",
+                  values: perf.map((p) => p.conversions_confirmed.value),
+                },
+              ]}
+              format={(v) => String(Math.round(v))}
+              unavailable={na(s.performance.availability, s.performance.reason)}
+              emptyText="No conversion in this period."
+            />
             <p className="dv-note">
-              Conversions: <Badge availability={data.activity.conversions.availability} />{" "}
-              {data.activity.conversions.reason}
+              Conversion rate (of prospects contacted): declared{" "}
+              {data.activity.conversion_rate_declared_percent.value ?? "—"}
+              {data.activity.conversion_rate_declared_percent.value === null ? "" : "%"}, confirmed{" "}
+              {data.activity.conversion_rate_confirmed_percent.value ?? "—"}
+              {data.activity.conversion_rate_confirmed_percent.value === null ? "" : "%"}.
             </p>
           </Glass>
         </div>

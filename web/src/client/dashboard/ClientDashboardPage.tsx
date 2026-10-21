@@ -1,7 +1,7 @@
 /** The Client's dashboard: its agent, activity, results, payments, problems, usage and invoices.
  *
  *  Everything comes from `GET /client/v1/dashboard` for the logged-in client. Honesty rules: a figure
- *  that is not tracked (conversions) says so and is never shown as 0; nothing technical is shown. */
+ *  that is not tracked says so and is never shown as 0; nothing technical is shown. */
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -165,7 +165,10 @@ function Body({
         <Kpi tx={tx} n={num} label={tx.conversations} ind={a.conversations} />
         <Kpi tx={tx} n={num} label={tx.replies} ind={a.replies_received} />
         <Kpi tx={tx} n={num} label={tx.replyRate} ind={a.reply_rate_percent} suffix=" %" />
-        <Kpi tx={tx} n={num} label={tx.conversions} ind={a.conversions} note={tx.conversionsNote} />
+        <Kpi tx={tx} n={num} label={tx.conversionsDeclared} ind={a.conversions_declared} note={tx.conversionsDeclaredNote} />
+        <Kpi tx={tx} n={num} label={tx.conversionsConfirmed} ind={a.conversions_confirmed} note={tx.conversionsConfirmedNote} />
+        <Kpi tx={tx} n={num} label={tx.conversionRateDeclared} ind={a.conversion_rate_declared_percent} suffix=" %" />
+        <Kpi tx={tx} n={num} label={tx.conversionRateConfirmed} ind={a.conversion_rate_confirmed_percent} suffix=" %" />
         <Kpi tx={tx} n={num} label={tx.human} ind={data.human_requests} note={tx.humanNote} />
         <Kpi tx={tx} n={num} label={tx.errors} ind={a.with_errors} />
       </div>

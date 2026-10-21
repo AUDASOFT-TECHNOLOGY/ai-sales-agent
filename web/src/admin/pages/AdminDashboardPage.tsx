@@ -157,7 +157,8 @@ function DashboardBody({ data }: { data: Loaded }) {
       <div className="admin-stat-grid">
         <Stat label="Prospects contacted" icon={Send} tint="action" {...stat(a?.prospects_contacted)} note={loadingNote ?? stat(a?.prospects_contacted).note} />
         <Stat label="Conversations" icon={MessageSquare} tint="action" {...stat(a?.conversations)} note={loadingNote ?? stat(a?.conversations).note} />
-        <Stat label="Conversions" icon={Target} tint="action" {...stat(a?.conversions)} note={loadingNote ?? stat(a?.conversions).note} />
+        <Stat label="Conversions declared" icon={Target} tint="action" {...stat(a?.conversions_declared)} note={loadingNote ?? rateNote(a?.conversion_rate_declared_percent, "the prospect says they paid") ?? stat(a?.conversions_declared).note} />
+        <Stat label="Conversions confirmed" icon={Target} tint="action" {...stat(a?.conversions_confirmed)} note={loadingNote ?? rateNote(a?.conversion_rate_confirmed_percent, "payment confirmed by the client") ?? stat(a?.conversions_confirmed).note} />
         <Stat label="Revenue" icon={TrendingUp} tint="action" {...revenue} note={loadingNote ?? revenue.note} />
         <Stat label="LLM cost" icon={Sparkles} tint="action" {...costStat("openai")} />
         <Stat label="WhatsApp cost" icon={MessageCircle} tint="action" {...costStat("meta_whatsapp")} />
@@ -165,6 +166,11 @@ function DashboardBody({ data }: { data: Loaded }) {
       {d ? <AdminDashboardInsights data={d} /> : null}
     </>
   );
+}
+
+function rateNote(rate: Indicator | undefined, what: string): string | undefined {
+  if (!rate || rate.value === null) return undefined;
+  return `${what}; ${Number(rate.value).toFixed(1)}% of prospects contacted`;
 }
 
 function Stat({

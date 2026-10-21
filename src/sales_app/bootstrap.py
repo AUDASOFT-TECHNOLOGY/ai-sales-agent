@@ -43,6 +43,7 @@ from sales_app.llm_pricing import LLMPricingStore
 from sales_app.llm_usage import LLMUsageStore
 from sales_app.metrics import MetricsReader
 from sales_app.notification_wiring import job_result_hook, wire_reauth
+from sales_app.operational_signals import OperationalSignals
 from sales_app.notifications import InMemoryNotificationStore, NotificationService
 from sales_app.parsers import ParserTable, build_parsers
 from sales_app.payment_confirmation import PAYMENT_WEBHOOK_SECRET
@@ -476,6 +477,9 @@ def _assemble(
         builders = replace(builders, knowledge=knowledge.for_client)
     if builders.conversation_control is None:
         builders = replace(builders, conversation_control=control_hub.for_client)
+    if builders.signals is None:
+        # Failed sends, unreadable inboxes and model quota/credential errors reach the notifications.
+        builders = replace(builders, signals=OperationalSignals(notification_service))
     if builders.send_guards is None and send_limits is not None:
         # Builders given by the caller still obey the deployment's cap (their metered channels).
         builders = replace(builders, send_guards=send_limits.guard)

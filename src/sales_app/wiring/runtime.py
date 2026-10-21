@@ -19,6 +19,7 @@ from sales_app.config.schema import BrainSection
 from sales_app.config.telegram_settings import TelegramChannelSettings, account_mode_of
 from sales_app.errors import ClientNotReadyError, ClientUnavailableError, RuntimeBuildError
 from sales_app.llm_usage import RecordingLLMProvider
+from sales_app.operational_signals import NotifyingChannel, NotifyingLLMProvider
 from sales_app.send_cap import RefusingChannel, SendCapChannel
 from sales_app.sourcing.composite import CompositeRepository
 from sales_app.wiring.brains import load_brain
@@ -432,11 +433,16 @@ def _metered(
     prospecting, replies and follow-ups all pass through it. Without a guard (no database) it can
     send nothing. The daily report builds its own channel and takes its place in the same counter."""
     channel = provider.build(config)
-    if not provider.metered:
-        return channel
-    if builders.send_guards is None:
-        return RefusingChannel(provider.kind)
-    return SendCapChannel(channel, builders.send_guards(config.client_id, provider.kind.value))
+    if provider.metered:
+        if builders.send_guards is None:
+            channel = RefusingChannel(provider.kind)
+        else:
+            channel = SendCapChannel(
+                channel, builders.send_guards(config.client_id, provider.kind.value)
+            )
+    if getattr(builders, "signals", None) is not None:  # failed sends open a notification, a good one closes it
+        channel = NotifyingChannel(channel, config.client_id, builders.signals)
+    return channel
 
 
 def _build_lane_parts(
@@ -545,6 +551,8 @@ def build_runtime(
         lambda: _choose(client_id, builders.llms, spec.llm.provider, "llm")(config),
     )
     llm = _record_usage(config, builders, llm)
+    if getattr(builders, "signals", None) is not None:  # quota / credential / model errors open a notification
+        llm = NotifyingLLMProvider(llm, client_id, builders.signals)
     brain = _stage(client_id, "brain", lambda: _build_brain(spec.brain, llm, brains))
     _attach_knowledge(brain, builders, client_id)
     channel: MessagingChannel | None = None

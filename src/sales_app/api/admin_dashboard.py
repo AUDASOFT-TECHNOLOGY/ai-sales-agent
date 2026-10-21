@@ -4,7 +4,7 @@ One read-only payload that assembles ONLY what the other lots already compute: t
 agents, the commercial metrics (lot 2B), the technical costs (lot 2C), the invoices and the
 subscriptions (lot 3), the plan quotas, the notifications and the runtime health. Nothing is
 simulated: every indicator is `{value, availability}` with `availability` one of `measured`,
-`estimated`, `not_tracked` (value null + a reason). Conversions are `not_tracked`.
+`estimated`, `not_tracked` (value null + a reason). Conversions are declared (prospect said they paid) and confirmed (client confirmed).
 
 Scope: an owner sees every client; another role only the clients it can reach, and a `client_id`
 outside them is a 404. See docs/dashboards.md.
@@ -132,8 +132,10 @@ class _Builder:
         months = self.range.months()[-PERFORMANCE_MONTHS:]
         base = {
             "granularity": "month",
-            "conversion": not_tracked(assemble.CONVERSIONS_REASON),
-            "note": "rate = prospects who replied / prospects contacted, month by month",
+            "note": (
+                "rate = prospects who replied / prospects contacted, month by month; conversions "
+                "declared = prospects who said they paid, confirmed = payment confirmed by the client"
+            ),
         }
         if self.app.metrics_readers is None:
             return {**base, "availability": "not_tracked", "reason": NO_DATABASE, "points": []}

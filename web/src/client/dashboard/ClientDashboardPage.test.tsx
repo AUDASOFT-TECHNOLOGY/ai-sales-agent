@@ -17,7 +17,7 @@ function payload(over: Record<string, unknown> = {}) {
     agent: { availability: "measured", state: "running", active: true, ready: true, integrations: [] },
     activity: {
       prospects_total: m(5), prospects_contacted: m(4), conversations: m(4), messages_sent: m(4), replies_received: m(2),
-      prospects_replied: m(2), reply_rate_percent: m(50), needs_human: m(1), with_errors: m(2), conversions: NT,
+      prospects_replied: m(2), reply_rate_percent: m(50), needs_human: m(1), with_errors: m(2), conversions_declared: m(3), conversions_confirmed: m(1), conversion_rate_declared_percent: m(75), conversion_rate_confirmed_percent: NT,
       payments: { declared: m(3), confirmed: m(1), awaiting_confirmation: m(2) },
       by_status: { new: 5 }, by_circuit: {}, by_product: { P1: 3 }, by_channel: { email: 5 }, by_source: {}, messages_by_channel: {},
     },
@@ -33,7 +33,7 @@ function payload(over: Record<string, unknown> = {}) {
     },
     series: {
       activity: { availability: "measured", granularity: "day", points: [{ period: "2026-04-20", sent: 4, received: 2 }] },
-      performance: { availability: "measured", points: [{ period: "2026-04", prospects_contacted: m(4), prospects_replied: m(2), reply_rate_percent: m(50), conversions: NT }] },
+      performance: { availability: "measured", points: [{ period: "2026-04", prospects_contacted: m(4), prospects_replied: m(2), reply_rate_percent: m(50), conversions_declared: m(3), conversions_confirmed: m(1), conversion_rate_declared_percent: m(75), conversion_rate_confirmed_percent: NT }] },
       incidents: { availability: "measured", points: [] },
     },
     ...over,
@@ -75,13 +75,15 @@ describe("ClientDashboardPage", () => {
     expect(calls[0]).not.toContain("client_id");
   });
 
-  it("shows conversions as not tracked, never as zero", async () => {
+  it("shows declared and confirmed conversions as two distinct figures", async () => {
     window.localStorage.setItem("revansa.locale", "en");
     serve(() => new Response(JSON.stringify(payload())));
     renderPage();
-    const card = (await screen.findByText("Conversions")).closest(".dv-kpi") as HTMLElement;
-    expect(card).toHaveTextContent("—");
-    expect(within(card).getByText("Not tracked")).toBeInTheDocument();
+    const declared = (await screen.findByText("Conversions declared")).closest(".dv-kpi") as HTMLElement;
+    const confirmed = (await screen.findByText("Conversions confirmed")).closest(".dv-kpi") as HTMLElement;
+    expect(declared).toHaveTextContent("3");
+    expect(confirmed).toHaveTextContent("1");
+    expect(within(declared).queryByText("Not tracked")).toBeNull();
   });
 
   it("speaks French", async () => {

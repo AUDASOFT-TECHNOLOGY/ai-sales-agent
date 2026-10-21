@@ -20,12 +20,33 @@ from sales_app.dashboards.figures import (
     NOT_TRACKED,
     cost_availability,
     from_figure,
-    not_tracked,
 )
 from sales_app.metrics import ClientMetrics, NotTracked, compute
 from sales_app.provider_costs import CostReport
 
-CONVERSIONS_REASON = "no conversion event is recorded; confirmed payments are shown under payments"
+
+def _rate(part: int | NotTracked, whole: int | NotTracked) -> float | NotTracked:
+    if isinstance(part, NotTracked):
+        return part
+    if isinstance(whole, NotTracked):
+        return whole
+    return compute.percent(part, whole)
+
+
+def conversion_figures(
+    metrics: Sequence[ClientMetrics], contacted: int | NotTracked
+) -> dict[str, Any]:
+    """Declared (the prospect said they paid) and confirmed (the client confirmed) conversions and
+    their rates over the prospects contacted. A declaration is never counted as confirmed."""
+    declared = sum_figures(m.conversions_declared for m in metrics)
+    confirmed = sum_figures(m.conversions_confirmed for m in metrics)
+    return {
+        "conversions_declared": from_figure(declared),
+        "conversions_confirmed": from_figure(confirmed),
+        "conversion_rate_declared_percent": from_figure(_rate(declared, contacted)),
+        "conversion_rate_confirmed_percent": from_figure(_rate(confirmed, contacted)),
+    }
+
 
 
 def sum_figures(values: Iterable[int | NotTracked]) -> int | NotTracked:
@@ -71,7 +92,7 @@ def activity_block(metrics: Sequence[ClientMetrics]) -> dict[str, Any]:
         "reply_rate_percent": from_figure(rate),
         "needs_human": from_figure(sum_figures(m.needs_human for m in metrics)),
         "with_errors": from_figure(sum_figures(m.with_errors for m in metrics)),
-        "conversions": not_tracked(CONVERSIONS_REASON),
+        **conversion_figures(metrics, contacted),
         "payments": {
             "declared": from_figure(sum_figures(m.payments.declared for m in metrics)),
             "confirmed": from_figure(sum_figures(m.payments.confirmed for m in metrics)),
@@ -118,7 +139,10 @@ def performance_point(period: str, metrics: Sequence[ClientMetrics]) -> dict[str
         "prospects_contacted": block["prospects_contacted"],
         "prospects_replied": block["prospects_replied"],
         "reply_rate_percent": block["reply_rate_percent"],
-        "conversions": block["conversions"],
+        "conversions_declared": block["conversions_declared"],
+        "conversions_confirmed": block["conversions_confirmed"],
+        "conversion_rate_declared_percent": block["conversion_rate_declared_percent"],
+        "conversion_rate_confirmed_percent": block["conversion_rate_confirmed_percent"],
     }
 
 

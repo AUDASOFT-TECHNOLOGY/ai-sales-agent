@@ -5,6 +5,8 @@ nothing about a client's data or configuration -- that belongs to the routers bu
 (Configuration, CRM, Dashboard: not built yet, see docs/web-admin-product-design.md).
 """
 
+import logging
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel
 
@@ -15,6 +17,7 @@ from sales_app.admin_auth import (
     InvalidCredentialsError,
     TooManyAttemptsError,
 )
+from sales_app.audit_log import OUTCOME_DENIED
 from sales_app.bootstrap import Application
 
 COOKIE_NAME = "revansa_admin_session"
@@ -68,6 +71,24 @@ def ensure_client_access(admin: AdminUser, client_id: str) -> None:
         raise HTTPException(404, "no such client")
 
 
+log = logging.getLogger(__name__)
+
+
+def _audit_refused_login(application: Application, who: str, name: str, reason: str) -> None:
+    """A refused sign-in is audited (spec 12.4): who tried (the typed name, never the password),
+    which door and why. Never raises and never changes the answer."""
+    try:
+        application.audit.record(
+            actor=str(name)[:128] or "(empty)",
+            actor_role=who,
+            action=f"{who}.login_refused",
+            target=reason,
+            outcome=OUTCOME_DENIED,
+        )
+    except Exception:  # noqa: BLE001
+        log.error("a refused sign-in could not be audited")
+
+
 def create_admin_router(application: Application) -> APIRouter:
     auth = application.admin_auth
     get_current_admin = make_current_admin_dependency(auth)
@@ -78,8 +99,10 @@ def create_admin_router(application: Application) -> APIRouter:
         try:
             result = auth.login(body.username, body.password)
         except TooManyAttemptsError:
+            _audit_refused_login(application, "admin", body.username, "too_many_attempts")
             raise HTTPException(429, "too many attempts; try again later") from None
         except InvalidCredentialsError:
+            _audit_refused_login(application, "admin", body.username, "invalid_credentials")
             raise HTTPException(401, "invalid username or password") from None
         response.set_cookie(
             COOKIE_NAME,

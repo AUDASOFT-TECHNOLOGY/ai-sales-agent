@@ -10,7 +10,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Sequence
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
@@ -88,6 +88,7 @@ class JobResult:
     ok: bool
     errors: tuple[str, ...] = ()  # problems reported by the Engine or the exception raised
     skipped: bool = False  # another process holds this client's lease for the job: nothing was run
+    channels: tuple[str, ...] = ()  # INBOX: the channels that were polled (for notifications)
 
 
 class Scheduler:
@@ -321,7 +322,14 @@ class Scheduler:
 
     def _execute_leased(self, runtime: ClientRuntime, job: Job, now: datetime) -> JobResult:
         result = self._execute_job(runtime, job, now)
-        if self._on_job_result is not None and job in (Job.SYNC, Job.REPORT):
+        if self._on_job_result is not None and job in (Job.SYNC, Job.REPORT, Job.INBOX):
+            if job is Job.INBOX and self._inbox is not None:
+                channels = getattr(self._inbox, "inbox_channels", None)
+                try:
+                    if channels is not None:
+                        result = replace(result, channels=tuple(channels(runtime.config)))
+                except Exception:  # noqa: BLE001 - only used to word a notification
+                    log.error("the polled channels could not be listed")
             try:  # notifications: never a reason for a job to fail
                 self._on_job_result(result)
             except Exception:  # noqa: BLE001

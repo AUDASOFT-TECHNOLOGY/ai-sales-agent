@@ -376,9 +376,10 @@ class TestMetrics:
         counts = {"status": {"new": 2}, "lane": {None: 2}, "channel": {}, "source": {}}
         m = MetricsService(FakeReader(counts=counts)).client_metrics(Period())
         assert isinstance(m.reply_rate_percent, NotTracked)  # nobody contacted: no rate
-        assert isinstance(m.conversions, NotTracked)
+        assert m.conversions_declared == 0 and m.conversions_confirmed == 0  # tracked: a real zero
+        assert isinstance(m.conversion_rate_declared_percent, NotTracked)  # nobody contacted
         assert m.payments.declared == 0 and m.payments.confirmed == 0
-        assert m.to_json()["conversions"]["tracked"] is False
+        assert m.to_json()["conversions_declared"] == 0
         assert m.by_lane == {"unassigned": 2}
 
     def test_sql_metrics_end_to_end(self, world):
@@ -399,3 +400,51 @@ class TestMetrics:
         other = MetricsService(SqlMetricsRows(engine, OTHER)).client_metrics(Period())
         assert other.prospects_total == 0 and other.messages_sent == 0
         assert m.messages_by_day["2026-01-15"] == {"inbound": 3, "outbound": 3}
+
+
+class PaymentsReader(FakeReader):
+    """p1 only declared, p2 declared then confirmed by a person, p3 only a (hypothesis) claim."""
+
+    def distinct_prospects_by_direction(self, *, since, until):
+        return {"outbound": 8}
+
+    def fact_documents(self, keys, *, since, until):
+        from sales_app.sourcing import store_codec
+        from sales_core.contracts import (
+            PAYMENT_CLAIMED_KEY,
+            PAYMENT_CONFIRMED_KEY,
+            Fact,
+            FactEvidence,
+            FactSource,
+            FactStatus,
+        )
+
+        def fact(key, status, source):
+            return store_codec.fact_to_doc(
+                Fact(
+                    key=key,
+                    value="x",
+                    status=status,
+                    evidence=FactEvidence(source=source),
+                    recorded_at=NOW,
+                )
+            )
+
+        return [
+            ("p1", fact(PAYMENT_CLAIMED_KEY, FactStatus.DISCOVERED, FactSource.PROSPECT)),
+            ("p2", fact(PAYMENT_CLAIMED_KEY, FactStatus.DISCOVERED, FactSource.PROSPECT)),
+            ("p2", fact(PAYMENT_CONFIRMED_KEY, FactStatus.CONFIRMED, FactSource.HUMAN)),
+            ("p3", fact(PAYMENT_CLAIMED_KEY, FactStatus.HYPOTHESIS, FactSource.BRAIN_INFERENCE)),
+        ]
+
+
+class TestConversions:
+    def test_declared_and_confirmed_are_distinct(self):
+        counts = {"status": {"new": 3}, "lane": {}, "channel": {}, "source": {}}
+        m = MetricsService(PaymentsReader(counts=counts)).client_metrics(Period())
+        assert m.conversions_declared == 2  # p1 and p2; a hypothesis is not a declaration
+        assert m.conversions_confirmed == 1  # only p2, confirmed by a person
+        assert m.conversions_declared == m.payments.declared
+        assert m.conversion_rate_declared_percent == 25.0  # 2 / 8 contacted
+        assert m.conversion_rate_confirmed_percent == 12.5
+        assert m.to_json()["conversions_confirmed"] == 1

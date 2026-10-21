@@ -86,7 +86,9 @@ Reader: `sales_app.persistence.metrics_rows.SqlMetricsRows` (`Application.metric
 | `payments.declared` | prospects who said they paid / sent a receipt (facts by date) |
 | `payments.confirmed` | prospects whose payment a person at the client confirmed (valid confirmation only) |
 | `payments.awaiting_confirmation` | declared and not confirmed |
-| `conversions` | **`NotTracked`**: no conversion event is recorded |
+| `conversions_declared` | = `payments.declared`: prospects whose payment the prospect declared (never counted as confirmed) |
+| `conversions_confirmed` | = `payments.confirmed`: prospects whose payment is confirmed (by a person at the client or a reliable mechanism) |
+| `conversion_rate_declared_percent`, `conversion_rate_confirmed_percent` | conversions / `prospects_contacted` of the period (same population caveat as the reply rate: may exceed 100); `NotTracked` when nobody was contacted |
 
 A figure not tracked is `{"tracked": false, "reason": "..."}`; an empty tracked figure is a real `0`.
 
@@ -98,3 +100,4 @@ A figure not tracked is `{"tracked": false, "reason": "..."}`; an empty tracked 
 - `external_id` uniqueness only applies when both a lane and an external id are known.
 - Message counts / last direction are not known in the Engine fallback (`null`).
 - Payment figures use the facts' `recorded_at` for the period; a confirmation outside the window does not pair with a claim inside it.
+- Conversions are the payment counts (declared / confirmed) with rates over the prospects contacted. Payment facts carry no lane or channel in the metrics reader, so there is no conversion breakdown by product, circuit, channel or source, and the daily series is monthly (performance). A prospect confirmed without a recorded declaration counts as confirmed only. The HubSpot / Google Sheets write-back does not expose payment statuses today, so the conversion result is not synchronised there (document-only: add the status to the write-back mapping when the client asks for it).

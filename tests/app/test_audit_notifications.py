@@ -430,3 +430,33 @@ class TestWiredSources:
         hook(JobResult("alpha", Job.REPORT, ok=False, errors=("report failed",)))
         kinds = [n["kind"] for n in as_root(fx).get("/admin/v1/notifications").json()["items"]]
         assert "report_failure" in kinds
+
+
+class TestAuditBeforeAndLogins:
+    def test_a_sensitive_change_keeps_the_state_before_it(self, fx):
+        root = as_root(fx)
+        created = root.post("/admin/v1/plans", json=PLAN)
+        assert created.status_code == 201
+        plan_id = created.json()["plan_id"]
+        changed = {**PLAN, "monthly_price": "59.90"}
+        assert root.put(f"/admin/v1/plans/{plan_id}", json=changed).status_code == 200
+        entries = root.get("/admin/v1/audit?action=plan.update").json()["items"]
+        assert len(entries) == 1
+        assert entries[0]["before"]["monthly_price"] in ("49.90", 49.9)
+        assert entries[0]["after"]["monthly_price"] == "59.90"
+        creation = root.get("/admin/v1/audit?action=plan.create").json()["items"][0]
+        assert creation["before"] is None  # a creation has no before
+
+    def test_a_refused_admin_and_client_login_is_audited_without_the_password(self, fx):
+        bad = fx.client.post("/admin/v1/auth/login", json={"username": "root", "password": "wrong-pw-1"})
+        assert bad.status_code == 401
+        bad = fx.client.post(
+            "/client/v1/auth/login", json={"login": "alpha.login", "password": "wrong-pw-2"}
+        )
+        assert bad.status_code == 401
+        response = as_root(fx).get("/admin/v1/audit?limit=200")
+        items = {i["action"]: i for i in response.json()["items"]}
+        assert items["admin.login_refused"]["actor"] == "root"
+        assert items["admin.login_refused"]["outcome"] == "denied"
+        assert items["client.login_refused"]["actor"] == "alpha.login"
+        assert "wrong-pw" not in response.text

@@ -3,7 +3,6 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AdminDashboardPage } from "./AdminDashboardPage";
 
-const NT = { value: null, availability: "not_tracked", reason: "no conversion event is recorded" };
 const m = (value: number) => ({ value, availability: "measured" });
 
 function dashboard(over: Record<string, unknown> = {}) {
@@ -26,7 +25,10 @@ function dashboard(over: Record<string, unknown> = {}) {
       reply_rate_percent: m(50),
       needs_human: m(2),
       with_errors: m(4),
-      conversions: NT,
+      conversions_declared: m(3),
+      conversions_confirmed: m(1),
+      conversion_rate_declared_percent: m(75),
+      conversion_rate_confirmed_percent: m(25),
       payments: { declared: m(0), confirmed: m(0), awaiting_confirmation: m(0) },
       by_status: {}, by_circuit: {}, by_product: {}, by_channel: {}, by_source: {}, messages_by_channel: {},
     },
@@ -57,7 +59,7 @@ function dashboard(over: Record<string, unknown> = {}) {
     integrations: { ready: m(2), not_ready: m(0), clients: [] },
     series: {
       activity: { availability: "measured", granularity: "day", points: [{ period: "2026-04-20", sent: 14, received: 7 }] },
-      performance: { availability: "measured", points: [{ period: "2026-04", prospects_contacted: m(14), prospects_replied: m(7), reply_rate_percent: m(50), conversions: NT }] },
+      performance: { availability: "measured", points: [{ period: "2026-04", prospects_contacted: m(14), prospects_replied: m(7), reply_rate_percent: m(50), conversions_declared: m(3), conversions_confirmed: m(1), conversion_rate_declared_percent: m(75), conversion_rate_confirmed_percent: m(25) }] },
       finance: { availability: "measured", timeline: [{ period: "2026-03", currency: "USD", billed: "60.00", collected: "30.00" }] },
       subscriptions: { availability: "measured", points: [{ period: "2026-03", active: 2, inactive: 0 }] },
       costs: { availability: "estimated", points: [{ period: "2026-03", by_provider: [{ provider: "openai", basis: "measured", availability: "measured", totals: { USD: "0.007500" } }], totals: { USD: "0.007500" }, complete: true }] },
@@ -97,7 +99,7 @@ describe("AdminDashboardPage", () => {
   it("keeps the existing indicators and adds the six chart families", async () => {
     serve(() => new Response(JSON.stringify(dashboard())));
     render(<AdminDashboardPage />);
-    for (const label of ["Clients", "LLM Models configured", "Active Agents", "Total Revenue", "Prospects contacted", "Conversations", "Conversions", "Revenue", "LLM cost", "WhatsApp cost"]) {
+    for (const label of ["Clients", "LLM Models configured", "Active Agents", "Total Revenue", "Prospects contacted", "Conversations", "Conversions declared", "Conversions confirmed", "Revenue", "LLM cost", "WhatsApp cost"]) {
       expect(await screen.findByText(label)).toBeInTheDocument();
     }
     for (const heading of ["Commercial activity", "Financial evolution", "Subscriptions", "Technical costs by provider", "Reliability"]) {
@@ -126,9 +128,12 @@ describe("AdminDashboardPage", () => {
   it("never shows a figure that is not tracked as zero", async () => {
     serve(() => new Response(JSON.stringify(dashboard())));
     render(<AdminDashboardPage />);
-    const card = (await screen.findByText("Conversions")).closest(".admin-stat-card") as HTMLElement;
-    await waitFor(() => expect(card).toHaveTextContent("no conversion event is recorded"));
-    expect(card).toHaveTextContent("—");
+    const declared = (await screen.findByText("Conversions declared")).closest(".admin-stat-card") as HTMLElement;
+    const confirmed = (await screen.findByText("Conversions confirmed")).closest(".admin-stat-card") as HTMLElement;
+    await waitFor(() => expect(declared).toHaveTextContent("3"));
+    expect(declared).toHaveTextContent("75.0% of prospects contacted");
+    expect(confirmed).toHaveTextContent("1");
+    expect(confirmed).toHaveTextContent("payment confirmed by the client");
     const wa = screen.getByText("WhatsApp cost").closest(".admin-stat-card") as HTMLElement;
     expect(wa).toHaveTextContent("—");
     expect(await screen.findByText(/Profitability/)).toBeInTheDocument();

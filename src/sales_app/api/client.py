@@ -16,6 +16,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from sales_app.admin_auth import InvalidCredentialsError, TooManyAttemptsError
+from sales_app.api.admin import _audit_refused_login
 from sales_app.api.admin_clients import _clean_whatsapp_number, _digits, rename_client
 from sales_app.bootstrap import Application
 from sales_app.client_auth import (
@@ -128,10 +129,13 @@ def create_client_router(application: Application) -> APIRouter:
         try:
             result = auth.login(body.login, body.password)
         except TooManyAttemptsError:
+            _audit_refused_login(application, "client", body.login, "too_many_attempts")
             raise HTTPException(429, "too many attempts; try again later") from None
         except InvalidCredentialsError:
+            _audit_refused_login(application, "client", body.login, "invalid_credentials")
             raise HTTPException(401, "invalid login or password") from None
         except ClientInactiveError:
+            _audit_refused_login(application, "client", body.login, "inactive_account")
             raise HTTPException(403, "this account is inactive") from None
         set_session_cookie(response, result)
         return profile_response(result.profile)

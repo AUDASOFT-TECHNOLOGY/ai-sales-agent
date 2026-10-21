@@ -83,10 +83,20 @@ class ClientMetrics:
     with_errors: Figure  # prospects with a failed action in the period
     messages_by_day: dict[str, dict[str, int]] = field(default_factory=dict)
     messages_by_channel: dict[str, dict[str, int]] = field(default_factory=dict)
-    conversions: Figure = field(
-        default_factory=lambda: NotTracked(
-            "no conversion event is recorded; confirmed payments are under `payments`"
-        )
+    # A conversion is a prospect's payment. DECLARED: the prospect said they paid (never counted as
+    # confirmed). CONFIRMED (real): a person at the client confirmed it. Rates are over the
+    # prospects contacted in the period (NotTracked when nobody was contacted).
+    conversions_declared: Figure = field(
+        default_factory=lambda: NotTracked("payments are not recorded")
+    )
+    conversions_confirmed: Figure = field(
+        default_factory=lambda: NotTracked("payments are not recorded")
+    )
+    conversion_rate_declared_percent: float | NotTracked = field(
+        default_factory=lambda: NotTracked("payments are not recorded")
+    )
+    conversion_rate_confirmed_percent: float | NotTracked = field(
+        default_factory=lambda: NotTracked("payments are not recorded")
     )
     payments: PaymentFigures = field(
         default_factory=lambda: PaymentFigures(
@@ -118,7 +128,12 @@ class ClientMetrics:
             "with_errors": figure_json(self.with_errors),
             "messages_by_day": self.messages_by_day,
             "messages_by_channel": self.messages_by_channel,
-            "conversions": figure_json(self.conversions),
+            "conversions_declared": figure_json(self.conversions_declared),
+            "conversions_confirmed": figure_json(self.conversions_confirmed),
+            "conversion_rate_declared_percent": figure_json(self.conversion_rate_declared_percent),
+            "conversion_rate_confirmed_percent": figure_json(
+                self.conversion_rate_confirmed_percent
+            ),
             "payments": {
                 "declared": figure_json(self.payments.declared),
                 "confirmed": figure_json(self.payments.confirmed),

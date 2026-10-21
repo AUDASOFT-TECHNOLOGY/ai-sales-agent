@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from sales_app.metrics import compute
-from sales_app.metrics.contracts import ClientMetrics, NotTracked, PaymentFigures, Period
+from sales_app.metrics.contracts import ClientMetrics, PaymentFigures, Period
 from sales_app.sourcing import store_codec
 from sales_core.contracts import (
     CONFIRMATION_KEYS,
@@ -69,6 +69,7 @@ class MetricsService:
         directions = r.distinct_prospects_by_direction(since=since, until=until)
         contacted = directions.get("outbound", 0)
         replied = directions.get("inbound", 0)
+        payments = self._payments(period)
         return ClientMetrics(
             period=period,
             prospects_total=sum(r.prospect_counts("status", since=since, until=until).values())
@@ -89,10 +90,13 @@ class MetricsService:
             with_errors=r.prospects_with_failed_actions(since=since, until=until),
             messages_by_day=compute.day_buckets(r.messages_by_day(since=since, until=until)),
             messages_by_channel=compute.nested_labelled(r.message_counts(since=since, until=until)),
-            conversions=NotTracked(
-                "no conversion event is recorded; confirmed payments are under `payments`"
+            conversions_declared=payments.declared,
+            conversions_confirmed=payments.confirmed,
+            conversion_rate_declared_percent=compute.conversion_rate(payments.declared, contacted),
+            conversion_rate_confirmed_percent=compute.conversion_rate(
+                payments.confirmed, contacted
             ),
-            payments=self._payments(period),
+            payments=payments,
         )
 
     def _payments(self, period: Period) -> PaymentFigures:

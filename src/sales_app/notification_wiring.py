@@ -11,6 +11,7 @@ from sales_app.notifications import (
     SYNC_FAILURE,
     NotificationService,
 )
+from sales_app.operational_signals import OperationalSignals
 
 GOOGLE_MAIL, GOOGLE_SHEETS, HUBSPOT, WHATSAPP, TELEGRAM = (
     "gmail",
@@ -89,10 +90,21 @@ def _connected_hook(notifications: NotificationService, source: str):
 
 
 def job_result_hook(notifications: NotificationService):
-    """For the scheduler: a failed write-back or report opens a notification, a good one closes it."""
+    """For the scheduler: a failed write-back, report or inbox poll opens a notification, a good
+    one closes it. A run skipped (held by another process) says nothing."""
+    signals = OperationalSignals(notifications)
 
     def hook(result) -> None:
+        if getattr(result, "skipped", False):
+            return
         job = str(result.job.value)
+        if job == "inbox":
+            for channel in result.channels or ("email",):
+                if result.ok:
+                    signals.receive_ok(result.client_id, channel)
+                else:
+                    signals.receive_failed(result.client_id, channel)
+            return
         if job == "sync":
             kind, key = SYNC_FAILURE, "sync"
             texts = {

@@ -64,6 +64,13 @@ def percent(part: int, whole: int) -> float | NotTracked:
     return round(100 * part / whole, 1)
 
 
+def conversion_rate(conversions: int | NotTracked, contacted: int) -> float | NotTracked:
+    """Conversions (declared or confirmed) over the prospects contacted; a hole stays a hole."""
+    if isinstance(conversions, NotTracked):
+        return conversions
+    return percent(conversions, contacted)
+
+
 def nested_labelled(rows: Mapping[tuple[str | None, str | None], int]) -> dict[str, dict[str, int]]:
     """{(direction, channel): n} as {channel: {direction: n}}."""
     result: dict[str, dict[str, int]] = {}

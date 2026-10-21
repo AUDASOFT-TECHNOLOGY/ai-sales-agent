@@ -2,7 +2,7 @@
 
 Takes no client id: the session decides it, and every store is asked for that client only. Same
 rules as the Admin dashboard: every indicator is `{value, availability}` (`measured`, `estimated`,
-`not_tracked`), nothing is simulated, conversions are `not_tracked`. Nothing technical is shown (no
+`not_tracked`), nothing is simulated, conversions are declared and confirmed. Nothing technical is shown (no
 cost, token, provider or internal id): the integrations are the readiness sentences the client
 already reads under `/client/v1/readiness`. See docs/dashboards.md.
 """
@@ -31,7 +31,7 @@ from sales_app.billing import InvoiceFilter, InvoiceStatus, parse_period
 from sales_app.bootstrap import Application
 from sales_app.client_profiles import ClientProfile
 from sales_app.dashboards import assemble
-from sales_app.dashboards.figures import MEASURED, indicator, not_tracked
+from sales_app.dashboards.figures import MEASURED, indicator
 from sales_app.dashboards.ranges import DashboardRange, InvalidRangeError, days_of, resolve_range
 from sales_app.metrics import Period
 from sales_app.notifications import CLIENT, NotificationQuery
@@ -81,8 +81,10 @@ class _ClientBuilder:
     def performance(self) -> dict[str, Any]:
         base = {
             "granularity": "month",
-            "conversion": not_tracked(assemble.CONVERSIONS_REASON),
-            "note": "rate = prospects who replied / prospects contacted, month by month",
+            "note": (
+                "rate = prospects who replied / prospects contacted, month by month; conversions "
+                "declared = prospects who said they paid, confirmed = payment confirmed by the client"
+            ),
         }
         if self.app.metrics_readers is None:
             return {**base, "availability": "not_tracked", "reason": NO_DATABASE, "points": []}

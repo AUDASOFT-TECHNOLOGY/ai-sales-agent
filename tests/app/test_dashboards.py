@@ -111,11 +111,10 @@ class TestAdminDashboard:
         assert a["reply_rate_percent"]["value"] == 50.0  # 7 replied / 14 contacted
         assert a["prospects_total"]["value"] == 12
         assert a["needs_human"]["value"] == 2
-        assert a["conversions"] == {
-            "value": None,
-            "availability": "not_tracked",
-            "reason": assemble.CONVERSIONS_REASON,
-        }
+        assert a["conversions_declared"] == {"value": 0, "availability": "measured"}
+        assert a["conversions_confirmed"] == {"value": 0, "availability": "measured"}
+        assert a["conversion_rate_declared_percent"]["value"] == 0.0
+        assert a["conversion_rate_confirmed_percent"]["value"] == 0.0
 
     def test_a_scoped_admin_sees_only_its_clients(self, world):
         alice = admin_session(world, "alice")  # reaches alpha only
@@ -228,7 +227,8 @@ class TestAdminDashboard:
         assert (day["sent"], day["received"]) == (14, 7)
         perf = series["performance"]["points"][0]
         assert perf["reply_rate_percent"]["value"] == 50.0
-        assert perf["conversions"]["availability"] == "not_tracked"
+        assert perf["conversions_declared"]["availability"] == "measured"
+        assert perf["conversions_confirmed"]["value"] == 0
 
     def test_a_bad_range_is_refused(self, world):
         root = admin_session(world, "root")
@@ -252,7 +252,7 @@ class TestClientDashboard:
         beta = client_session(world, "beta").get(self.CURL).json()
         assert alpha["activity"]["messages_sent"]["value"] == 4
         assert beta["activity"]["messages_sent"]["value"] == 10
-        assert alpha["activity"]["conversions"]["availability"] == "not_tracked"
+        assert alpha["activity"]["conversions_confirmed"]["availability"] == "measured"
         assert alpha["activity"]["payments"]["declared"]["value"] == 0
 
     def test_a_client_cannot_choose_another_client(self, world):

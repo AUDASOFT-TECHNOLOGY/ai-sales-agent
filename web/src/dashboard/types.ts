@@ -27,7 +27,10 @@ export interface ActivityBlock {
   reply_rate_percent: Indicator;
   needs_human: Indicator;
   with_errors: Indicator;
-  conversions: Indicator;
+  conversions_declared: Indicator;
+  conversions_confirmed: Indicator;
+  conversion_rate_declared_percent: Indicator;
+  conversion_rate_confirmed_percent: Indicator;
   payments: { declared: Indicator; confirmed: Indicator; awaiting_confirmation: Indicator };
   by_status: Record<string, number>;
   by_circuit: Record<string, number>;
@@ -48,7 +51,10 @@ export interface PerformancePoint {
   prospects_contacted: Indicator;
   prospects_replied: Indicator;
   reply_rate_percent: Indicator;
-  conversions: Indicator;
+  conversions_declared: Indicator;
+  conversions_confirmed: Indicator;
+  conversion_rate_declared_percent: Indicator;
+  conversion_rate_confirmed_percent: Indicator;
 }
 
 export interface IncidentPoint {

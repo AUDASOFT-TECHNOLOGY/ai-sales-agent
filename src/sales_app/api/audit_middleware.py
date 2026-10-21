@@ -76,6 +76,26 @@ _BODY_ALLOWED = re.compile(
 )
 _SKIPPED = re.compile(r"^/(auth/|notifications)")  # reading a bell is not an operation
 
+# Sensitive operations whose state BEFORE the change is kept: (route pattern, the GET path that reads
+# that state, the keys to keep from it or None for all). The state is read through the application's
+# own GET route with the same session, so it has the same rights and the same shape (no secret is
+# ever in these responses; `audit_log.redact` runs on it anyway). Anything else keeps no `before`.
+_BEFORE: tuple[tuple[re.Pattern[str], str, tuple[str, ...] | None], ...] = tuple(
+    (re.compile(pattern), read, keys)
+    for pattern, read, keys in (
+        (r"^/clients/([^/]+)$", "/clients/{0}", None),
+        (r"^/clients/([^/]+)/llm$", "/clients/{0}", ("llm",)),
+        (r"^/clients/([^/]+)/source$", "/clients/{0}/source", None),
+        (r"^/clients/([^/]+)/plan$", "/clients/{0}/plan", None),
+        (r"^/clients/([^/]+)/send-cap$", "/clients/{0}/send-cap", None),
+        (r"^/clients/([^/]+)/channels$", "/clients/{0}/channels", None),
+        (r"^/settings/channels$", "/settings/channels", None),
+        (r"^/plans/([^/]+)$", "/plans/{0}", None),
+    )
+)
+_METHODS_WITH_BEFORE = frozenset({"PATCH", "PUT", "DELETE"})
+_NOT_STATE = frozenset({"account", "meta", "revenue", "prospects_contacted", "restart_required"})
+
 
 def action_name(method: str, template: str) -> str:
     match = None
@@ -147,12 +167,71 @@ class AuditMiddleware:
                 status = int(message["status"])
             await send(message)
 
+        before = await self._before(scope)
         try:
             await self.app(scope, watch_receive, watch_send)
         finally:
-            self._record(scope, status, b"".join(chunks) if size <= MAX_BODY else None)
+            self._record(scope, status, b"".join(chunks) if size <= MAX_BODY else None, before)
 
-    def _record(self, scope: dict, status: int, body: bytes | None) -> None:
+    async def _before(self, scope: dict) -> Any:
+        """The state a sensitive operation is about to change, or None (not a sensitive route, no
+        valid session, not readable, too large). Never raises and never changes the request."""
+        try:
+            if scope.get("method") not in _METHODS_WITH_BEFORE:
+                return None
+            template = scope["path"][len(PREFIX) :]
+            for pattern, read, keys in _BEFORE:
+                found = pattern.match(template)
+                if found is None:
+                    continue
+                token = _session_token(scope.get("headers", []))
+                if not token or self._application.admin_auth.authenticate(token) is None:
+                    return None
+                path = PREFIX + read.format(*found.groups())
+                return await self._read(scope, path, keys)
+        except Exception:  # noqa: BLE001 - the audit never changes a request
+            return None
+        return None
+
+    async def _read(self, scope: dict, path: str, keys: tuple[str, ...] | None) -> Any:
+        """An internal GET of `path` with the caller's own session."""
+        headers = [(k, v) for k, v in scope.get("headers", []) if k in (b"cookie", b"host")]
+        inner = {
+            **scope,
+            "method": "GET",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": headers,
+        }
+        inner.pop("route", None)
+        inner.pop("endpoint", None)
+        inner.pop("path_params", None)
+        status = 500
+        pieces: list[bytes] = []
+
+        async def empty_receive() -> Any:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def collect(message: Any) -> None:
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = int(message["status"])
+            elif message["type"] == "http.response.body":
+                pieces.append(message.get("body", b""))
+
+        await self.app(inner, empty_receive, collect)
+        raw = b"".join(pieces)
+        if status != 200 or len(raw) > MAX_BODY:
+            return None
+        document = _document(raw)
+        if not isinstance(document, dict):
+            return None
+        if keys is not None:
+            return {k: document[k] for k in keys if k in document}
+        return {k: v for k, v in document.items() if k not in _NOT_STATE}
+
+    def _record(self, scope: dict, status: int, body: bytes | None, before: Any = None) -> None:
         try:
             token = _session_token(scope.get("headers", []))
             admin = self._application.admin_auth.authenticate(token) if token else None
@@ -175,6 +254,7 @@ class AuditMiddleware:
                 target=scope["path"][len(PREFIX) :],
                 client_id=client_id,
                 outcome=outcome_of(status),
+                before=before,
                 after=after,
             )
         except Exception:  # noqa: BLE001 - the audit never changes a response
