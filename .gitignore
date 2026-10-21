@@ -38,3 +38,8 @@ web/node_modules/
 web/dist/
 web/.verify/
 web/.verify-dev.log
+
+# local files
+.claude/worktrees/
+.sales-agent.lock
+web/.vitest/
