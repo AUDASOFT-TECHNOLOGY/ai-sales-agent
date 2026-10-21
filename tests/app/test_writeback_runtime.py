@@ -466,7 +466,7 @@ class _Syncer:
         self.outcome = outcome
         self.runs = 0
 
-    def run_once(self):
+    def run_once(self, *, retry_held=False):
         self.runs += 1
         if isinstance(self.outcome, Exception):
             raise self.outcome
