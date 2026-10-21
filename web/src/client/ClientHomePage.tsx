@@ -4,11 +4,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Check, Clock, Pause, Play } from "lucide-react";
+import { ArrowRight, CalendarClock, Check, CheckSquare, Clock, MessagesSquare, Pause, Play, Users } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { StatusOrb } from "../agent/StatusOrb";
-import { Button, LinkButton } from "../ui/Button";
+import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
+import { Glass } from "../ui/Glass";
 import {
   clientAgent,
   clientChannel,
@@ -28,7 +29,7 @@ import {
 } from "./api";
 import { useClientAuth } from "./ClientAuthContext";
 import { HomeLinks } from "./HomeLinks";
-import { Card, FailureNote, Loading, Note, PageHead, failureOf, type Failure as FailureShape } from "./kit";
+import { FailureNote, Loading, Note, PageHead, failureOf, type Failure as FailureShape } from "./kit";
 import { PLATFORM_CHECKS, buildSteps, platformReasons, progressOf, type Step } from "./setupModel";
 import type { Doc } from "./settingsModel";
 
@@ -148,15 +149,121 @@ export function ClientHomePage() {
   const startBlocked = agent && !agent.ready ? t("rv.home.start.blocked") : undefined;
   const shownName = profile?.name ?? "";
 
+
+  const heroTint = hero.key === "active" ? "success" : hero.key === "error" ? "danger" : hero.key === "paused" || hero.key === "waiting" ? "attention" : "agent";
+
+  const kpis = !summary ? (
+    <Note tone="info">{t("rv.home.numbers.unavailable")}</Note>
+  ) : summary.total_prospects === 0 ? (
+    <Note tone="info">{t("rv.home.numbers.empty")}</Note>
+  ) : (
+    <div className="rv-kpis">
+      <Glass level={1} tint="action" className="rv-stat" data-testid="stat-prospects">
+        <span className="rv-stat__icon" aria-hidden>
+          <Users size={18} />
+        </span>
+        <span className="rv-stat__value">{n(summary.total_prospects)}</span>
+        <span className="rv-stat__label">{t("rv.home.numbers.prospects")}</span>
+        <Link to="/prospects" className="link-btn">
+          {t("rv.home.numbers.seeProspects")} <ArrowRight size={14} className="mirror" aria-hidden />
+        </Link>
+      </Glass>
+      <Glass level={1} tint="agent" className="rv-stat">
+        <span className="rv-stat__icon" aria-hidden>
+          <MessagesSquare size={18} />
+        </span>
+        <span className="rv-stat__value">{n(summary.by_status.active)}</span>
+        <span className="rv-stat__label">{t("rv.home.numbers.active")}</span>
+        <Link to="/conversations" className="link-btn">
+          {t("rv.nav.conversations")} <ArrowRight size={14} className="mirror" aria-hidden />
+        </Link>
+      </Glass>
+      <Glass level={1} tint="success" className="rv-stat">
+        <span className="rv-stat__icon" aria-hidden>
+          <CalendarClock size={18} />
+        </span>
+        <span className="rv-stat__value">{n(summary.upcoming_actions.scheduled)}</span>
+        <span className="rv-stat__label">{t("rv.home.numbers.scheduled")}</span>
+        {summary.upcoming_actions.next_due_at ? (
+          <span className="c-3 t-body-sm">{t("rv.home.next", { date: d(summary.upcoming_actions.next_due_at, { dateStyle: "medium", timeStyle: "short" }) })}</span>
+        ) : null}
+      </Glass>
+      {data.toReview !== null ? (
+        <Glass level={1} tint="attention" className="rv-stat" data-testid="stat-review">
+          <span className="rv-stat__icon" aria-hidden>
+            <CheckSquare size={18} />
+          </span>
+          <span className="rv-stat__value">{n(data.toReview)}</span>
+          <span className="rv-stat__label">{t("rv.home.numbers.toReview")}</span>
+          {data.toReview > 0 ? (
+            <Link to="/review" className="link-btn">
+              {t("rv.home.numbers.seeReview")} <ArrowRight size={14} className="mirror" aria-hidden />
+            </Link>
+          ) : null}
+        </Glass>
+      ) : null}
+    </div>
+  );
+
+  const preparation = (
+    <section className="rv-page" style={{ gap: 14 }} aria-labelledby="home-steps">
+      <div className="rv-card__head" style={{ alignItems: "center" }}>
+        <h3 className="rv-section-title" id="home-steps">
+          {t("rv.home.steps.title")}
+        </h3>
+        <span className="c-2 t-body-sm tabular">{t("rv.home.steps.progress", { done, total })}</span>
+      </div>
+      <div className="rv-progress" role="progressbar" aria-label={t("rv.home.steps.title")} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
+        <div className="rv-progress__fill" style={{ width: `${total === 0 ? 0 : (done / total) * 100}%` }} />
+      </div>
+      <ul className="rv-steps">
+        {steps.map((step, i) => (
+          <li key={step.id} className="rv-step" data-state={step.state} data-required={step.required || undefined} data-testid={`step-${step.id}`}>
+            <span className="rv-step__mark" aria-hidden>
+              {step.state === "done" ? <Check size={16} /> : step.state === "waiting" ? <Clock size={15} /> : i + 1}
+            </span>
+            <div className="rv-step__main">
+              <span className="rv-step__title">
+                <Link to={step.to} className="rv-step__link">
+                  {t(`rv.home.step.${step.id}` as MessageKey)}
+                </Link>{" "}
+                {!step.required ? <Chip>{t("rv.common.recommended")}</Chip> : null}
+              </span>
+              <span className="rv-step__sub">
+                {step.state === "done"
+                  ? t(stepSubKey(step, "done"), { name: String(step.value ?? ""), n: Number(step.value ?? 0) })
+                  : step.state === "waiting"
+                    ? t("rv.home.platform.other")
+                    : t(stepSubKey(step, "todo"))}
+              </span>
+            </div>
+            <ArrowRight size={18} className="rv-step__go mirror" aria-hidden />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+
+  const activity = (
+    <section className="rv-page" style={{ gap: 14 }} aria-labelledby="home-numbers">
+      <h3 className="rv-section-title" id="home-numbers">
+        {t("rv.home.numbers.title")}
+      </h3>
+      {kpis}
+    </section>
+  );
+
   return (
     <div className="rv-page">
-      <PageHead title={t("rv.home.hello", { name: shownName })} />
+      <PageHead eyebrow={t("rv.home.eyebrow")} title={t("rv.home.hello", { name: shownName })} />
 
       {failure ? <FailureNote failure={failure} /> : null}
       {notice ? <Note tone="success">{t(notice)}</Note> : null}
 
-      <Card className="rv-hero" data-testid="home-hero">
-        <StatusOrb state={hero.pulse} size={64} />
+      <Glass level={3} tint={heroTint} className="rv-hero" data-testid="home-hero">
+        <div className="rv-hero__orb">
+          <StatusOrb state={hero.pulse} size={72} />
+        </div>
         <div className="rv-hero__text">
           <h2 data-testid="agent-state">{t(`rv.home.hero.${hero.key}.title` as MessageKey)}</h2>
           <p>{t(`rv.home.hero.${hero.key}.text` as MessageKey)}</p>
@@ -181,7 +288,7 @@ export function ClientHomePage() {
         ) : (
           <Button onClick={() => void load()}>{t("rv.common.retry")}</Button>
         )}
-      </Card>
+      </Glass>
 
       {platform.length > 0 ? (
         <Note tone="warn" title={t("rv.home.platform.title")}>
@@ -194,43 +301,6 @@ export function ClientHomePage() {
         </Note>
       ) : null}
 
-      <Card flush aria-label={t("rv.home.steps.title")}>
-        <div className="rv-card" style={{ paddingBlockEnd: 8 }}>
-          <div className="rv-card__head">
-            <h3>{t("rv.home.steps.title")}</h3>
-            <span className="c-2 t-body-sm tabular">{t("rv.home.steps.progress", { done, total })}</span>
-          </div>
-          <div className="rv-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
-            <div className="rv-progress__fill" style={{ width: `${total === 0 ? 0 : (done / total) * 100}%` }} />
-          </div>
-        </div>
-        <ul className="rv-list rv-steps">
-          {steps.map((step, i) => (
-            <li key={step.id} className="rv-step" data-state={step.state} data-testid={`step-${step.id}`}>
-              <span className="rv-step__mark" aria-hidden>
-                {step.state === "done" ? <Check size={16} /> : step.state === "waiting" ? <Clock size={15} /> : i + 1}
-              </span>
-              <div className="rv-step__main">
-                <span className="rv-step__title">
-                  {t(`rv.home.step.${step.id}` as MessageKey)}{" "}
-                  {!step.required ? <Chip>{t("rv.common.recommended")}</Chip> : null}
-                </span>
-                <span className="rv-step__sub">
-                  {step.state === "done"
-                    ? t(stepSubKey(step, "done"), { name: String(step.value ?? ""), n: Number(step.value ?? 0) })
-                    : step.state === "waiting"
-                      ? t("rv.home.platform.other")
-                      : t(stepSubKey(step, "todo"))}
-                </span>
-              </div>
-              <LinkButton to={step.to} size="sm" variant={step.state === "todo" && step.required ? "primary" : "secondary"} trailing={<ArrowRight size={14} className="mirror" aria-hidden />}>
-                {t(step.state === "done" ? "rv.common.edit" : "rv.home.step.go")}
-              </LinkButton>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
       {agent && !agent.ready && allRequiredDone && platform.length === 0 && agent.reasons.length > 0 ? (
         <Note tone="warn">
           <ul className="stack" dir="auto">
@@ -241,48 +311,18 @@ export function ClientHomePage() {
         </Note>
       ) : null}
 
-      <section className="rv-page" aria-labelledby="home-numbers">
-        <h3 className="t-h2" id="home-numbers">
-          {t("rv.home.numbers.title")}
-        </h3>
-        {!summary ? (
-          <Note tone="info">{t("rv.home.numbers.unavailable")}</Note>
-        ) : summary.total_prospects === 0 ? (
-          <Note tone="info">{t("rv.home.numbers.empty")}</Note>
-        ) : (
-          <div className="rv-grid-3">
-            <Card className="rv-stat" data-testid="stat-prospects">
-              <span className="rv-stat__value">{n(summary.total_prospects)}</span>
-              <span className="rv-stat__label">{t("rv.home.numbers.prospects")}</span>
-              <Link to="/prospects" className="link-btn">
-                {t("rv.home.numbers.seeProspects")} <ArrowRight size={14} className="mirror" aria-hidden />
-              </Link>
-            </Card>
-            <Card className="rv-stat">
-              <span className="rv-stat__value">{n(summary.by_status.active)}</span>
-              <span className="rv-stat__label">{t("rv.home.numbers.active")}</span>
-            </Card>
-            <Card className="rv-stat">
-              <span className="rv-stat__value">{n(summary.upcoming_actions.scheduled)}</span>
-              <span className="rv-stat__label">{t("rv.home.numbers.scheduled")}</span>
-              {summary.upcoming_actions.next_due_at ? (
-                <span className="c-3 t-body-sm">{t("rv.home.next", { date: d(summary.upcoming_actions.next_due_at, { dateStyle: "medium", timeStyle: "short" }) })}</span>
-              ) : null}
-            </Card>
-            {data.toReview !== null ? (
-              <Card className="rv-stat" data-testid="stat-review">
-                <span className="rv-stat__value">{n(data.toReview)}</span>
-                <span className="rv-stat__label">{t("rv.home.numbers.toReview")}</span>
-                {data.toReview > 0 ? (
-                  <Link to="/review" className="link-btn">
-                    {t("rv.home.numbers.seeReview")} <ArrowRight size={14} className="mirror" aria-hidden />
-                  </Link>
-                ) : null}
-              </Card>
-            ) : null}
-          </div>
-        )}
-      </section>
+      {/* What is missing comes first; once the agent is set up, its results do. */}
+      {allRequiredDone ? (
+        <>
+          {activity}
+          {preparation}
+        </>
+      ) : (
+        <>
+          {preparation}
+          {activity}
+        </>
+      )}
 
       <HomeLinks />
     </div>

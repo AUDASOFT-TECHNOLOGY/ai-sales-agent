@@ -2,15 +2,15 @@
  *  connect prospects and channels, review, follow results), not around the platform's internals.
  *  Nothing here is a prototype control: the agent's state is read from the server. */
 
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Bell, CheckSquare, FileText, House, LayoutDashboard, Link2, LogOut, MessageSquare, Package, Receipt, UserRound, Users } from "lucide-react";
+import { Bell, CheckSquare, Ellipsis, FileText, House, LayoutDashboard, Link2, LogOut, MessageSquare, Package, Receipt, UserRound, Users } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { googleReturnOf } from "../client/ClientGmailCard";
 import { useClientAgentStatus } from "../client/useClientAgentStatus";
-import { useReviewCount } from "../client/useReviewCount";
 import { useNotificationCount } from "../client/useNotificationCount";
+import { useReviewCount } from "../client/useReviewCount";
 import { StatusOrb } from "../agent/StatusOrb";
 import { Button, LinkButton } from "../ui/Button";
 import { Segmented } from "../ui/Controls";
@@ -26,22 +26,26 @@ interface NavEntry {
   icon: typeof House;
   /** Other paths that belong to this entry. */
   also?: string[];
-  /** Side menu only: on a phone these live in the top bar / account menu, so the tab bar stays short. */
-  sideOnly?: boolean;
 }
 
-const NAV: NavEntry[] = [
+/** Two groups: what happens with prospects every day, and what the owner prepares for the agent.
+ *  On a phone the first four stay in the tab bar and the rest sit under "More". */
+const ACTIVITY: NavEntry[] = [
   { to: "/home", key: "rv.nav.home", icon: House },
-  { to: "/dashboard", key: "rv.nav.dashboard", icon: LayoutDashboard, sideOnly: true },
-  { to: "/prospects", key: "rv.nav.prospects", icon: Users },
-  { to: "/conversations", key: "rv.nav.conversations", icon: MessageSquare },
   { to: "/review", key: "rv.nav.review", icon: CheckSquare },
+  { to: "/conversations", key: "rv.nav.conversations", icon: MessageSquare },
+  { to: "/prospects", key: "rv.nav.prospects", icon: Users },
+  { to: "/reports", key: "rv.nav.reports", icon: FileText },
+  { to: "/dashboard", key: "rv.nav.dashboard", icon: LayoutDashboard },
+  { to: "/billing", key: "rv.nav.billing", icon: Receipt },
+  { to: "/notifications", key: "rv.nav.notifications", icon: Bell },
+];
+const AGENT: NavEntry[] = [
   { to: "/offer", key: "rv.nav.offer", icon: Package },
   { to: "/connections", key: "rv.nav.connections", icon: Link2 },
-  { to: "/reports", key: "rv.nav.reports", icon: FileText },
-  { to: "/billing", key: "rv.nav.billing", icon: Receipt, sideOnly: true },
-  { to: "/notifications", key: "rv.nav.notifications", icon: Bell, sideOnly: true },
 ];
+const TABS = ACTIVITY.slice(0, 4);
+const MORE = [...ACTIVITY.slice(4), ...AGENT];
 
 function useActive(entry: NavEntry): boolean {
   const { pathname } = useLocation();
@@ -80,6 +84,35 @@ function TabItem({ entry, badge }: { entry: NavEntry; badge: number }) {
   );
 }
 
+function MoreMenu() {
+  const { t } = useI18n();
+  const { pathname } = useLocation();
+  const [open, setOpen] = useState(false);
+  const active = MORE.some((e) => pathname === e.to || pathname.startsWith(`${e.to}/`));
+  return (
+    <PopoverCard
+      label={t("rv.nav.more")}
+      side="top"
+      open={open}
+      onOpenChange={setOpen}
+      trigger={
+        <button type="button" className={cx("rv-tabbar__item", active && "is-active")}>
+          <Ellipsis size={22} aria-hidden />
+          <span className="rv-tabbar__label">{t("rv.nav.more")}</span>
+        </button>
+      }
+    >
+      <div className="rv-more">
+        {MORE.map((e) => (
+          <LinkButton key={e.to} to={e.to} variant="ghost" leading={<e.icon size={18} aria-hidden />} onClick={() => setOpen(false)}>
+            {t(e.key)}
+          </LinkButton>
+        ))}
+      </div>
+    </PopoverCard>
+  );
+}
+
 function AccountMenu({ compact }: { compact?: boolean }) {
   const { t, locale, setLocale } = useI18n();
   const { profile, logout } = useClientAuth();
@@ -94,16 +127,6 @@ function AccountMenu({ compact }: { compact?: boolean }) {
         </div>
       </div>
       <hr className="divider" />
-      {compact ? (
-        <>
-          <LinkButton to="/dashboard" variant="ghost" leading={<LayoutDashboard size={16} aria-hidden />}>
-            {t("rv.nav.dashboard")}
-          </LinkButton>
-          <LinkButton to="/billing" variant="ghost" leading={<Receipt size={16} aria-hidden />}>
-            {t("rv.nav.billing")}
-          </LinkButton>
-        </>
-      ) : null}
       <LinkButton to="/profile" variant="ghost" leading={<UserRound size={16} aria-hidden />}>
         {t("rv.nav.account")}
       </LinkButton>
@@ -170,6 +193,10 @@ export function AppShell() {
   }, [pathname]);
 
   const badgeOf = (entry: NavEntry) => (entry.to === "/review" ? review : entry.to === "/notifications" ? notifications : 0);
+  const groups: Array<{ label: MessageKey; entries: NavEntry[] }> = [
+    { label: "rv.nav.group.activity", entries: ACTIVITY },
+    { label: "rv.nav.group.agent", entries: AGENT },
+  ];
 
   return (
     <div className="rv-shell">
@@ -177,7 +204,7 @@ export function AppShell() {
         {t("rv.nav.skip")}
       </a>
 
-      <aside className="rv-side" aria-label={t("rv.nav.main")}>
+      <aside className="rv-side glass" data-level="2" aria-label={t("rv.nav.main")}>
         <div className="rv-side__brand">
           <Wordmark />
         </div>
@@ -191,20 +218,28 @@ export function AppShell() {
           </span>
         </NavLink>
         <nav className="rv-nav" aria-label={t("rv.nav.main")}>
-          <ul>
-            {NAV.map((entry) => (
-              <SideItem key={entry.to} entry={entry} badge={badgeOf(entry)} />
-            ))}
-          </ul>
+          {groups.map((group) => (
+            <div key={group.label} className="rv-nav__group">
+              <p className="rv-nav__label">{t(group.label)}</p>
+              <ul>
+                {group.entries.map((entry) => (
+                  <SideItem key={entry.to} entry={entry} badge={badgeOf(entry)} />
+                ))}
+              </ul>
+            </div>
+          ))}
         </nav>
         <div className="rv-side__foot">{compact ? null : <AccountMenu />}</div>
       </aside>
 
       <div className="rv-main">
-        <header className="rv-topbar">
+        <header className="rv-topbar glass" data-level="2">
           <BrandMark size={28} />
-          <span className="rv-agent__state" aria-live="polite">
-            {t(agent.statusKey)}
+          <span className="row" style={{ gap: 10 }}>
+            <StatusOrb state={agent.pulse} size={22} />
+            <span className="rv-agent__state" aria-live="polite">
+              {t(agent.statusKey)}
+            </span>
           </span>
           {compact ? (
             <NavLink
@@ -225,10 +260,11 @@ export function AppShell() {
         </main>
       </div>
 
-      <nav className="rv-tabbar" aria-label={t("rv.nav.main")}>
-        {NAV.filter((entry) => !entry.sideOnly).map((entry) => (
+      <nav className="rv-tabbar glass" data-level="2" aria-label={t("rv.nav.main")}>
+        {TABS.map((entry) => (
           <TabItem key={entry.to} entry={entry} badge={badgeOf(entry)} />
         ))}
+        <MoreMenu />
       </nav>
     </div>
   );

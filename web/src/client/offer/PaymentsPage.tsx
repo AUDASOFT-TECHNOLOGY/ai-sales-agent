@@ -202,14 +202,17 @@ export function PaymentsPage() {
           <h3 className="t-h2">{t("rv.pay.title")}</h3>
           <p>{t("rv.pay.intro")}</p>
         </div>
-        <div className="rv-actions">
-          <Button leading={<Link2 size={16} aria-hidden />} onClick={() => start("online")} disabled={editing !== null}>
-            {t("rv.pay.addOnline")}
-          </Button>
-          <Button leading={<Landmark size={16} aria-hidden />} onClick={() => start("offline")} disabled={editing !== null}>
-            {t("rv.pay.addOffline")}
-          </Button>
-        </div>
+        {/* With no method yet, the empty state below carries these two actions: not shown twice. */}
+        {methods.length > 0 ? (
+          <div className="rv-actions">
+            <Button leading={<Link2 size={16} aria-hidden />} onClick={() => start("online")} disabled={editing !== null}>
+              {t("rv.pay.addOnline")}
+            </Button>
+            <Button leading={<Landmark size={16} aria-hidden />} onClick={() => start("offline")} disabled={editing !== null}>
+              {t("rv.pay.addOffline")}
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <Note tone="info" title={t("rv.pay.how.title")}>

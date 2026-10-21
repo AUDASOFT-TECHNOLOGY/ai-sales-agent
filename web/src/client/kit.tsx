@@ -2,7 +2,7 @@
  *  page header, sub-navigation tabs, notes (info / success / warning / error), empty states, cards. */
 
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { Button } from "../ui/Button";
@@ -10,10 +10,11 @@ import { Glass } from "../ui/Glass";
 import { cx } from "../ui/cx";
 import { ClientApiError } from "./api";
 
-export function PageHead({ title, text, actions }: { title: string; text?: string; actions?: ReactNode }) {
+export function PageHead({ title, text, actions, eyebrow }: { title: string; text?: string; actions?: ReactNode; eyebrow?: string }) {
   return (
     <header className="rv-head">
       <div className="rv-head__text">
+        {eyebrow ? <span className="rv-head__eyebrow">{eyebrow}</span> : null}
         <h2>{title}</h2>
         {text ? <p>{text}</p> : null}
       </div>
@@ -23,10 +24,16 @@ export function PageHead({ title, text, actions }: { title: string; text?: strin
 }
 
 export function SubTabs({ label, items }: { label: string; items: Array<{ to: string; label: string; badge?: number }> }) {
+  const { pathname } = useLocation();
+  // A tab stays lit on the pages below it (a product being edited keeps "Products" lit), unless a
+  // sibling tab is the closer match (/review/payments is "Payments", not "Messages").
+  const current = items
+    .filter((item) => pathname === item.to || pathname.startsWith(`${item.to}/`))
+    .sort((a, b) => b.to.length - a.to.length)[0]?.to;
   return (
     <nav className="rv-tabs" aria-label={label}>
       {items.map((item) => (
-        <NavLink key={item.to} to={item.to} end className={({ isActive }) => cx("rv-tabs__item", isActive && "is-active")}>
+        <NavLink key={item.to} to={item.to} end className={cx("rv-tabs__item", item.to === current && "is-active")} aria-current={item.to === current ? "page" : undefined}>
           {item.label}
           {item.badge ? <span className="rv-badge">{item.badge}</span> : null}
         </NavLink>

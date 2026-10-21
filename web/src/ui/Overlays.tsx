@@ -78,14 +78,19 @@ export function PopoverCard({
   children,
   label,
   side = "bottom",
+  open,
+  onOpenChange,
 }: {
   trigger: ReactNode;
   children: ReactNode;
   label: string;
   side?: "top" | "bottom" | "left" | "right";
+  /** Pass both to control the popover (e.g. to close it after a navigation). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <Popover.Root>
+    <Popover.Root open={open} onOpenChange={onOpenChange}>
       <Popover.Trigger asChild>{trigger}</Popover.Trigger>
       <Popover.Portal>
         <Popover.Content className="popover glass" data-level="2" side={side} sideOffset={8} collisionPadding={12} aria-label={label}>
