@@ -4,12 +4,13 @@
 
 import { Suspense, useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { CheckSquare, FileText, House, Link2, LogOut, MessageSquare, Package, UserRound, Users } from "lucide-react";
+import { Bell, CheckSquare, FileText, House, LayoutDashboard, Link2, LogOut, MessageSquare, Package, Receipt, UserRound, Users } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { googleReturnOf } from "../client/ClientGmailCard";
 import { useClientAgentStatus } from "../client/useClientAgentStatus";
 import { useReviewCount } from "../client/useReviewCount";
+import { useNotificationCount } from "../client/useNotificationCount";
 import { StatusOrb } from "../agent/StatusOrb";
 import { Button, LinkButton } from "../ui/Button";
 import { Segmented } from "../ui/Controls";
@@ -25,16 +26,21 @@ interface NavEntry {
   icon: typeof House;
   /** Other paths that belong to this entry. */
   also?: string[];
+  /** Side menu only: on a phone these live in the top bar / account menu, so the tab bar stays short. */
+  sideOnly?: boolean;
 }
 
 const NAV: NavEntry[] = [
   { to: "/home", key: "rv.nav.home", icon: House },
+  { to: "/dashboard", key: "rv.nav.dashboard", icon: LayoutDashboard, sideOnly: true },
   { to: "/prospects", key: "rv.nav.prospects", icon: Users },
   { to: "/conversations", key: "rv.nav.conversations", icon: MessageSquare },
   { to: "/review", key: "rv.nav.review", icon: CheckSquare },
   { to: "/offer", key: "rv.nav.offer", icon: Package },
   { to: "/connections", key: "rv.nav.connections", icon: Link2 },
   { to: "/reports", key: "rv.nav.reports", icon: FileText },
+  { to: "/billing", key: "rv.nav.billing", icon: Receipt, sideOnly: true },
+  { to: "/notifications", key: "rv.nav.notifications", icon: Bell, sideOnly: true },
 ];
 
 function useActive(entry: NavEntry): boolean {
@@ -88,6 +94,16 @@ function AccountMenu({ compact }: { compact?: boolean }) {
         </div>
       </div>
       <hr className="divider" />
+      {compact ? (
+        <>
+          <LinkButton to="/dashboard" variant="ghost" leading={<LayoutDashboard size={16} aria-hidden />}>
+            {t("rv.nav.dashboard")}
+          </LinkButton>
+          <LinkButton to="/billing" variant="ghost" leading={<Receipt size={16} aria-hidden />}>
+            {t("rv.nav.billing")}
+          </LinkButton>
+        </>
+      ) : null}
       <LinkButton to="/profile" variant="ghost" leading={<UserRound size={16} aria-hidden />}>
         {t("rv.nav.account")}
       </LinkButton>
@@ -140,6 +156,7 @@ export function AppShell() {
   const { profile } = useClientAuth();
   const agent = useClientAgentStatus();
   const review = useReviewCount();
+  const notifications = useNotificationCount(pathname);
   const navigate = useNavigate();
   const compact = useMedia("(max-width: 899px)");
 
@@ -152,7 +169,7 @@ export function AppShell() {
     window.scrollTo({ top: 0 });
   }, [pathname]);
 
-  const badgeOf = (entry: NavEntry) => (entry.to === "/review" ? review : 0);
+  const badgeOf = (entry: NavEntry) => (entry.to === "/review" ? review : entry.to === "/notifications" ? notifications : 0);
 
   return (
     <div className="rv-shell">
@@ -189,6 +206,16 @@ export function AppShell() {
           <span className="rv-agent__state" aria-live="polite">
             {t(agent.statusKey)}
           </span>
+          {compact ? (
+            <NavLink
+              to="/notifications"
+              className="rv-topbar__bell"
+              aria-label={notifications > 0 ? t("rv.nav.notificationsUnread", { n: notifications }) : t("rv.nav.notifications")}
+            >
+              <Bell size={22} aria-hidden />
+              {notifications > 0 ? <span className="rv-tabbar__dot">{notifications}</span> : null}
+            </NavLink>
+          ) : null}
           {compact ? <AccountMenu compact /> : null}
         </header>
         <main id="main" tabIndex={-1} className="rv-content">
@@ -199,7 +226,7 @@ export function AppShell() {
       </div>
 
       <nav className="rv-tabbar" aria-label={t("rv.nav.main")}>
-        {NAV.map((entry) => (
+        {NAV.filter((entry) => !entry.sideOnly).map((entry) => (
           <TabItem key={entry.to} entry={entry} badge={badgeOf(entry)} />
         ))}
       </nav>

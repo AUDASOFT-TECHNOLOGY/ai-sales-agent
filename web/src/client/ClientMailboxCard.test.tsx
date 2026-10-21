@@ -76,4 +76,14 @@ describe("ClientMailboxCard", () => {
     await userEvent.click(await screen.findByRole("button", { name: /show the password|afficher le mot de passe/i }));
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
+
+  it("can show a mailbox that was never requested", async () => {
+    stub(info({ status: "not_requested", message: "No mailbox requested.", address: null, login: null, password_revealable: false }));
+    render(
+      <I18nProvider>
+        <ClientMailboxCard showNotRequested />
+      </I18nProvider>,
+    );
+    expect(await screen.findByText("Not requested")).toBeTruthy();
+  });
 });

@@ -878,3 +878,78 @@
   text-align: center;
   color: var(--text-3);
 }
+
+/* ── Notification bell (top bar) and audit filters ─────────────────────── */
+.admin-shell__topbar { position: relative; }
+.admin-bell {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+}
+.admin-bell > button { position: relative; }
+.admin-bell__count {
+  position: absolute;
+  inset-block-start: -4px;
+  inset-inline-end: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding-inline: 5px;
+  border-radius: var(--radius-full);
+  background: var(--danger-text);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.admin-bell__panel {
+  position: absolute;
+  z-index: 40;
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-end: 0;
+  width: min(380px, calc(100vw - 2 * var(--space-4)));
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-2);
+  background: var(--glass-2-solid);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+  display: grid;
+  gap: var(--space-3);
+}
+.admin-bell__panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.admin-bell__panel li { padding-block-end: var(--space-3); border-block-end: 1px solid var(--line-1); }
+.admin-bell__panel li:last-child { border-block-end: 0; padding-block-end: 0; }
+.admin-bell__panel li.is-read { opacity: 0.65; }
+.admin-bell__panel li[data-severity="critical"] { border-inline-start: 3px solid var(--danger-text); padding-inline-start: var(--space-3); }
+.admin-bell__panel p { margin: var(--space-1) 0 0; }
+.admin-bell__panel button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--action-text);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.admin-audit__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  align-items: flex-end;
+  margin-block-end: var(--space-4);
+}
+.admin-audit__filters label {
+  display: grid;
+  gap: var(--space-1);
+  font-size: 13px;
+  color: var(--text-2);
+}
+.admin-audit__filters input {
+  min-height: 40px;
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: inherit;
+}

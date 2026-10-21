@@ -14,6 +14,7 @@ import { ClientApprovalsPage } from "./client/ClientApprovalsPage";
 import { ClientInvoicesPage } from "./client/billing/ClientInvoicesPage";
 import { ClientAuthProvider } from "./client/ClientAuthContext";
 import { ClientDashboardPage } from "./client/dashboard/ClientDashboardPage";
+import { ClientNotificationsPage } from "./client/notifications/ClientNotificationsPage";
 import { ClientHomePage } from "./client/ClientHomePage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
 import { ClientProfilePage } from "./client/ClientProfilePage";
@@ -124,7 +125,7 @@ export function App() {
                 <Route path="dashboard" element={<ClientDashboardPage />} />
                 <Route path="results" element={<Navigate to="/home" replace />} />
                 <Route path="history" element={<Navigate to="/home" replace />} />
-                <Route path="notifications" element={<Navigate to="/home" replace />} />
+                <Route path="notifications" element={<ClientNotificationsPage />} />
                 <Route path="approvals" element={<Navigate to="/review" replace />} />
                 <Route path="settings" element={<Navigate to="/offer/business" replace />} />
                 <Route path="configure/*" element={<Navigate to="/offer/business" replace />} />

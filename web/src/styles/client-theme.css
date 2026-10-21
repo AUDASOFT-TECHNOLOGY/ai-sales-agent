@@ -367,6 +367,17 @@
   padding: 32px var(--gutter) 64px;
   outline: none;
 }
+.rv-topbar__bell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-inline-start: auto;
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+}
+.rv-topbar__bell .rv-tabbar__dot { inset-block-start: 2px; inset-inline-end: 2px; }
 .rv-tabbar {
   display: none;
   position: fixed;

@@ -15,6 +15,8 @@ import { useAdminAuth } from "../AdminAuthContext";
 import {
   AdminApiError,
   adminClientMailboxStatus,
+  adminGetCredentialsSharing,
+  adminSetCredentialsSharing,
   adminListClientCredentials,
   adminRemoveClientCredential,
   adminSaveClientCredential,
@@ -144,6 +146,7 @@ export function AdminClientMailboxCard({ clientId }: { clientId: string }) {
           onChanged={verifyAfterSave}
         />
       ) : null}
+      <CredentialsSharing clientId={clientId} canEdit={canEdit} />
       <MailboxTest clientId={clientId} canEdit={canEdit} onDone={refresh} />
     </div>
   );
@@ -301,6 +304,64 @@ function MailboxTest({ clientId, canEdit, onDone }: { clientId: string; canEdit:
             {result.message}
           </p>
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Owner decision: let this client read the login of its mailbox (the password stays behind an explicit
+ *  request on the Client side). Off by default. */
+function CredentialsSharing({ clientId, canEdit }: { clientId: string; canEdit: boolean }) {
+  const [shared, setShared] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    adminGetCredentialsSharing(clientId)
+      .then((r) => !cancelled && setShared(r.shared))
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof AdminApiError ? err.message : "Could not read the sharing setting.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  async function change(next: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      setShared((await adminSetCredentialsSharing(clientId, next)).shared);
+    } catch (err) {
+      setError(err instanceof AdminApiError ? err.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="admin-settings__row">
+      <label className="t-body-sm">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={shared === true}
+          disabled={!canEdit || busy || shared === null}
+          onChange={(e) => void change(e.target.checked)}
+        />{" "}
+        Share the mailbox login with the client
+        <span className="c-3">
+          {" "}
+          {canEdit
+            ? "The client sees the address and login; the password only on its explicit request."
+            : "Only an owner can change this."}
+        </span>
+      </label>
+      {error ? (
+        <p className="admin-alert admin-alert--danger" role="alert">
+          {error}
+        </p>
       ) : null}
     </div>
   );

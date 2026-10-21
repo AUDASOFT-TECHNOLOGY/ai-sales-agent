@@ -20,6 +20,7 @@ import {
 } from "./api";
 import { ClientGmailCard, googleReturnOf } from "./ClientGmailCard";
 import { ClientTelegramAccountCard } from "./ClientTelegramAccountCard";
+import { ClientMailboxCard } from "./ClientMailboxCard";
 
 interface Failure {
   key: MessageKey;
@@ -419,6 +420,8 @@ export function ClientChannelPage({ embedded = false }: { embedded?: boolean } =
             ) : null}
           </Glass>
         ) : null}
+
+        {current.channel === "email" && isPlatformEmail(current) ? <ClientMailboxCard showNotRequested /> : null}
 
         {listInvitations && invitations ? (
           <Glass level={1} className="client-card">

@@ -27,6 +27,7 @@ function stub(opts: { role?: string; credentials?: unknown[]; state?: Record<str
     if (url.endsWith("/auth/me")) return json(200, { username: "alice", role, client_ids: [] });
     if (url.endsWith("/clients/alpha/integrations") && method === "GET") return json(200, credentials);
     if (url.endsWith("/clients/alpha/integrations/email/status")) return json(200, state);
+    if (url.endsWith("/clients/alpha/email-activation/credentials-sharing")) return json(200, { client_id: "alpha", shared: method === "PUT" ? JSON.parse(String(init?.body)).shared : false });
     throw new Error(`unexpected fetch ${method} ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -170,5 +171,21 @@ describe("AdminClientMailboxCard", () => {
     expect(await screen.findByLabelText("Mailbox address")).toBeDisabled();
     expect(screen.getByLabelText("Mailbox password")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Test mailbox login" })).toBeDisabled();
+  });
+
+  it("lets an owner share the login with the client, and no one else", async () => {
+    stub();
+    renderCard();
+    const box = await screen.findByRole("switch", { name: /share the mailbox login/i });
+    await vi.waitFor(() => expect(box).not.toBeDisabled());
+    await userEvent.click(box);
+    await vi.waitFor(() => expect(box).toBeChecked());
+  });
+
+  it("shows the sharing switch read-only to a non-owner", async () => {
+    stub({ role: "viewer" });
+    renderCard();
+    const box = await screen.findByRole("switch", { name: /share the mailbox login/i });
+    expect(box).toBeDisabled();
   });
 });

@@ -860,3 +860,15 @@ export function adminDashboard(filters: { from?: string; to?: string; client_id?
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   return request(`/dashboard${suffix}`);
 }
+
+const sharingPath = (clientId: string) =>
+  `/clients/${encodeURIComponent(clientId)}/email-activation/credentials-sharing`;
+
+/** Whether this client may read the login of its mailbox (the owner's decision; off by default). */
+export function adminGetCredentialsSharing(clientId: string): Promise<{ client_id: string; shared: boolean }> {
+  return request(sharingPath(clientId));
+}
+
+export function adminSetCredentialsSharing(clientId: string, shared: boolean): Promise<{ client_id: string; shared: boolean }> {
+  return request(sharingPath(clientId), { method: "PUT", body: JSON.stringify({ shared }) });
+}

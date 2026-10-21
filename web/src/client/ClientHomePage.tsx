@@ -27,6 +27,7 @@ import {
   type SourceState,
 } from "./api";
 import { useClientAuth } from "./ClientAuthContext";
+import { HomeLinks } from "./HomeLinks";
 import { Card, FailureNote, Loading, Note, PageHead, failureOf, type Failure as FailureShape } from "./kit";
 import { PLATFORM_CHECKS, buildSteps, platformReasons, progressOf, type Step } from "./setupModel";
 import type { Doc } from "./settingsModel";
@@ -282,6 +283,8 @@ export function ClientHomePage() {
           </div>
         )}
       </section>
+
+      <HomeLinks />
     </div>
   );
 }
