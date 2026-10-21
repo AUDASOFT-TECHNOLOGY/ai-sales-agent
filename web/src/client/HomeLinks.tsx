@@ -1,6 +1,8 @@
 /** Home shortcuts: the dashboard, the invoices that need attention and the open notifications.
  *  Each figure comes from the server; one that cannot be read says so instead of showing 0. */
 
+import { appFetch } from "../demo/transport";
+
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
@@ -21,7 +23,7 @@ export function HomeLinks() {
       (value) => !cancelled && setSub({ state: "ok", value }),
       () => !cancelled && setSub({ state: "failed" }),
     );
-    fetch("/client/v1/notifications", { credentials: "include" })
+    appFetch("/client/v1/notifications", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then(
         (page: { unread_count?: number }) => !cancelled && setUnread({ state: "ok", value: Number(page.unread_count ?? 0) }),

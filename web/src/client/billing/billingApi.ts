@@ -2,6 +2,8 @@
  *  `/client/v1/subscription`; see src/sales_app/api/client_billing.py and docs/finance-contracts.md).
  *  The session is an httpOnly cookie; no client id is ever sent. Nothing here changes an invoice. */
 
+import { appFetch } from "../../demo/transport";
+
 import { ClientApiError } from "../api";
 
 export type InvoiceStatus = "PENDING" | "PAID" | "FAILED" | "FOR_FREE" | "DISCOUNTED_100";
@@ -68,7 +70,7 @@ export interface Subscription {
 async function get<T>(path: string): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/client/v1${path}`, { credentials: "include" });
+    response = await appFetch(`/client/v1${path}`, { credentials: "include" });
   } catch {
     throw new ClientApiError(0, "Could not reach the server.");
   }

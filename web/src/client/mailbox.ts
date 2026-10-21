@@ -2,6 +2,8 @@
  *  mailbox stands, the login the Admin chose to communicate, and the password on explicit request.
  *  Nothing technical (no server, no port) ever comes back, and the password is never stored here. */
 
+import { appFetch } from "../demo/transport";
+
 export type MailboxStatus = "not_requested" | "pending" | "in_progress" | "active" | "error" | "rejected";
 
 export interface MailboxInfo {
@@ -27,7 +29,7 @@ export class MailboxApiError extends Error {
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/client/v1/channel/mailbox${path}`, {
+    response = await appFetch(`/client/v1/channel/mailbox${path}`, {
       ...init,
       credentials: "include",
       cache: "no-store",

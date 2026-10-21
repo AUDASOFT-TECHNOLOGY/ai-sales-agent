@@ -1,5 +1,7 @@
 /** Read-only client for `GET /client/v1/dashboard` (session decides the client; no id is sent). */
 
+import { appFetch } from "../../demo/transport";
+
 import { ClientApiError } from "../api";
 import type { ClientDashboard } from "../../dashboard/types";
 
@@ -10,7 +12,7 @@ export async function clientDashboard(range: { from?: string; to?: string } = {}
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   let response: Response;
   try {
-    response = await fetch(`/client/v1/dashboard${suffix}`, { credentials: "include" });
+    response = await appFetch(`/client/v1/dashboard${suffix}`, { credentials: "include" });
   } catch {
     throw new ClientApiError(0, "Could not reach the server.");
   }

@@ -2,6 +2,8 @@
  *  never a client id) and the Admin's (`/admin/v1/clients/{id}/whatsapp`). No response carries a
  *  token, a PIN or the app secret; the Client's carries no identifier of Meta's either. */
 
+import { appFetch } from "../demo/transport";
+
 export class WhatsAppApiError extends Error {
   status: number;
 
@@ -15,7 +17,7 @@ export class WhatsAppApiError extends Error {
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await appFetch(path, {
       ...init,
       credentials: "include",
       headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },

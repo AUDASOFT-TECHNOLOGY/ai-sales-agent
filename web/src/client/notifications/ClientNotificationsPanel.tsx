@@ -2,6 +2,8 @@
  *  this folder (not in the shared i18n files) and fall back to the server's sentence for a kind it
  *  does not know. The session decides whose notifications these are; nothing here names a client. */
 
+import { appFetch } from "../../demo/transport";
+
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "../../i18n";
 import { notificationText } from "./texts";
@@ -24,7 +26,7 @@ interface Page {
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/client/v1${path}`, { credentials: "include", ...init });
+  const response = await appFetch(`/client/v1${path}`, { credentials: "include", ...init });
   if (!response.ok) throw new Error(String(response.status));
   return (await response.json()) as T;
 }

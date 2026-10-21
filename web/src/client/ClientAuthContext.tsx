@@ -2,7 +2,10 @@
  *  route guard (ClientRoute) and the profile never disagree. Separate from the Admin session. */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { demoProfile, resetDemo } from "../demo/demoApi";
+import { isDemo, isDemoCredentials, isDemoLogin, setDemo } from "../demo/demoMode";
 import {
+  ClientApiError,
   clientChangePassword,
   clientLogin,
   clientLogout,
@@ -46,11 +49,25 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (loginName: string, password: string) => {
+    // The Demo account never reaches the server: it opens the in-memory demonstration (src/demo).
+    if (isDemoLogin(loginName)) {
+      if (!isDemoCredentials(loginName, password)) throw new ClientApiError(401, "Invalid credentials.");
+      resetDemo();
+      setDemo(true);
+      setState({ status: "authenticated", profile: demoProfile() });
+      return;
+    }
     const profile = await clientLogin(loginName, password); // throws ClientApiError on failure
     setState({ status: "authenticated", profile });
   }, []);
 
   const logout = useCallback(async () => {
+    if (isDemo()) {
+      setDemo(false);
+      resetDemo();
+      setState({ status: "anonymous", profile: null });
+      return;
+    }
     try {
       await clientLogout();
     } catch {

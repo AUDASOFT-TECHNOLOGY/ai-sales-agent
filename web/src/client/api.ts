@@ -3,6 +3,9 @@
  *  never sends a client id -- the server knows who is logged in. Passwords only ever travel in the
  *  one POST body that carries them, and no response contains one. */
 
+import { appFetch } from "../demo/transport";
+import { isDemo } from "../demo/demoMode";
+
 const BASE = "/client/v1";
 
 export interface ClientProfile {
@@ -41,7 +44,7 @@ export class ClientApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${BASE}${path}`, {
+    response = await appFetch(`${BASE}${path}`, {
       ...init,
       credentials: "include",
       headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -1035,7 +1038,7 @@ export function clientRetryResource(productId: string, resourceId: string): Prom
 export async function clientUploadResource(productId: string, file: File, title: string): Promise<ProductResource> {
   let response: Response;
   try {
-    response = await fetch(`${BASE}${productPath(productId)}/file`, {
+    response = await appFetch(`${BASE}${productPath(productId)}/file`, {
       method: "POST",
       credentials: "include",
       headers: {
@@ -1056,6 +1059,8 @@ export async function clientUploadResource(productId: string, file: File, title:
 }
 
 export function resourceDownloadUrl(productId: string, resourceId: string): string {
+  // Demo: a link that stays in the browser; the real address would reach the server.
+  if (isDemo()) return "data:text/plain;charset=utf-8,Document%20fictif%20de%20d%C3%A9monstration.";
   return `${BASE}${productPath(productId)}/${encodeURIComponent(resourceId)}/download`;
 }
 
