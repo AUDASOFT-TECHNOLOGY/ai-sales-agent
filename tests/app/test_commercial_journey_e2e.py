@@ -423,15 +423,18 @@ def test_the_commercial_journey_of_two_clients(world):
     # ---- 11. February: the January invoices --------------------------------------------------
     j.clock.set(utc(2, 3, 9))
     root = j.admin()
-    generated = root.post(f"{INVOICES}/generate", json={"period": "2026-01"}).json()
-    created = {i["client_id"]: i for i in generated["created"]}
-    assert set(created) == {"alpha", "beta"} and generated["skipped"] == []
+    # each plan assignment (15 January) issued its invoice at once, dated that day, at the plan price
+    # (no prorata); the next cycle (15 February) is not due yet
+    generated = root.post(f"{INVOICES}/generate", json={}).json()
+    assert generated["created"] == [] and generated["skipped"] == []
+    assert generated["already_invoiced"] == 2  # no duplicate
+    created = {i["client_id"]: i for i in root.get(INVOICES).json()["invoices"]}
+    assert set(created) == {"alpha", "beta"}
     invoice = created["alpha"]
-    assert invoice["number"] == "INV-2026-01-alpha" and invoice["status"] == "PENDING"
-    assert (invoice["amount"], invoice["currency"]) == ("17.00", "USD")  # 17 days of 31 at 31.00
-    assert invoice["lines"][0]["days"] == 17 and invoice["lines"][0]["plan_name"] == "Pro"
-    again = root.post(f"{INVOICES}/generate", json={"period": "2026-01"}).json()
-    assert again["created"] == [] and again["already_invoiced"] == 2  # no duplicate
+    assert invoice["number"] == "INV-2026-01-15-alpha" and invoice["status"] == "PENDING"
+    assert invoice["period"] == "2026-01-15" and invoice["created_by"] == "root"
+    assert (invoice["amount"], invoice["currency"]) == ("31.00", "USD")  # the plan price, whole
+    assert invoice["lines"][0]["plan_name"] == "Pro"
     assert len(root.get(INVOICES).json()["invoices"]) == 2
 
     # the payment provider's signing secret is the Admin's
@@ -439,10 +442,10 @@ def test_the_commercial_journey_of_two_clients(world):
     web = j.http()
 
     def hook(**over):
-        body = body_of(**({"invoice": "INV-2026-01-alpha", "amount": "17.00"} | over))
+        body = body_of(**({"invoice": "INV-2026-01-15-alpha", "amount": "31.00"} | over))
         return web.post(WEBHOOK, content=body, headers=signed_headers(body, when=j.clock.now()))
 
-    wrong = hook(amount="16.00", event_id="evt_wrong", transaction_id="txn_wrong")
+    wrong = hook(amount="30.00", event_id="evt_wrong", transaction_id="txn_wrong")
     assert wrong.status_code == 200 and wrong.json() == {"status": "rejected"}
     assert root.get(f"{INVOICES}/{invoice['invoice_id']}").json()["status"] == "PENDING"
 
@@ -485,7 +488,16 @@ def test_the_commercial_journey_of_two_clients(world):
     kept = root.get(f"{INVOICES}/{invoice['invoice_id']}").json()
     assert kept["status"] == "PAID" and kept["payment_origin"] == "electronic"
     assert hook().json() == {"status": "duplicate"}
-    assert root.post(f"{INVOICES}/generate", json={"period": "2026-01"}).json()["created"] == []
+    assert root.post(f"{INVOICES}/generate", json={}).json()["created"] == []
+    # the next cycle: 15 February, then caught up without duplicates
+    j.clock.set(utc(2, 16, 9))
+    root = j.admin()  # a new session: the clock moved on
+    february = root.post(f"{INVOICES}/generate", json={}).json()
+    assert sorted((i["client_id"], i["period"], i["amount"]) for i in february["created"]) == [
+        ("alpha", "2026-02-15", "31.00"),
+        ("beta", "2026-02-15", "31.00"),
+    ]
+    assert root.post(f"{INVOICES}/generate", json={}).json()["created"] == []
     assert root.get("/admin/v1/clients/alpha/plan").json()["current"]["plan_id"] == "pro"
 
 

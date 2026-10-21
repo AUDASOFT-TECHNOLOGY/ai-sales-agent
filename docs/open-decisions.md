@@ -6,25 +6,34 @@ is a change in one place.
 
 ## Billing (lot 3)
 
-### 1. Prorata of a partial period
+### 1. Billing cycle and plan change (DECIDED, no longer open)
 
-**Question.** A client joins, leaves or changes plan in the middle of a month: is it charged by the
-day, by the half month, a full month from the day it joins, or free until the first full month?
+**Decided by the Product Owner.** There is **no prorata**. The start date is the client's plan
+assignment. An invoice is issued **at once** when the plan is assigned, dated that day, at the plan's
+price; the next one is issued automatically on the **same day of the following month** (assigned on
+2026-10-20: invoices dated 2026-10-20, 2026-11-20, 2026-12-20, ...). When the day does not exist in a
+month (31 in April, 29 to 31 in February) the invoice falls on the month's last day, and the original
+anchor day is kept for the later months (31 Jan, 28 Feb, 31 Mar, 30 Apr). The amount is always the
+plan's price, whatever the day.
 
-**Today.** Daily prorata: `price x days / days in the month`, rounded to the cent per line, from the
-day the plan was assigned. This is the behaviour that existed before the lot; it is kept, not
-endorsed.
+**Plan change.** A new plan assignment is a **new anchor**: an invoice is issued immediately at the
+new plan's price, dated the assignment day, and the cycles of the previous plan stop (nothing is
+credited or refunded for the unused part of the previous cycle). Taking a client off its plan stops
+all invoicing. Only the current assignment is billed.
 
-**Seam.** `sales_app.billing.ProrationPolicy` (`lines(assignments, start, end) -> list[InvoiceLine]`);
-the implementation in force is `DailyProrata` (`DEFAULT_PRORATION`). `build_invoice(...,
-proration=...)` and `AutoBilling(..., proration=...)` take another policy. Invoices already kept carry
-their own lines and never change.
+**Known edge.** An invoice is unique per client and date: a plan changed on a day that already has an
+invoice for that client (for example a second assignment the very same day) does not get a second one
+for that date.
+
+**Where.** `sales_app.billing` (`cycle_dates`, `add_months`, `build_invoice`), `sales_app.billing_service`
+(`AutoBilling.run`, `issue_for_client`). `DailyProrata` and `ProrationPolicy` no longer exist. Invoices
+of the former calendar-month rule keep their `YYYY-MM` period and stay readable. Annual plans are
+still not invoiced (see 4).
 
 ### 2. Currency
 
 **Question.** One currency for the whole platform, or one per plan? What happens when a client changes
-to a plan in another currency in the middle of a month (today: the client is reported, not invoiced,
-and a `BILLING_ERROR` notification asks the Admin to act)? Is there a conversion for the dashboards?
+to a plan in another currency in the middle of a month (a plan change now starts a new cycle in the new plan's currency)? Is there a conversion for the dashboards?
 
 **Today.** Each plan has its own currency; the finance figures are given per currency and never added
 across currencies (`docs/finance-contracts.md`).
@@ -36,7 +45,7 @@ across currencies (`docs/finance-contracts.md`).
 **Today.** None: an invoice's `amount` is the plan price, with no tax line, and the finance figures
 have no tax field. Nothing in the code assumes a rate.
 
-**Seam.** Not built yet. It will be a separate step after `ProrationPolicy` (lines -> taxed lines);
+**Seam.** Not built yet. It will be a separate step after `build_invoice` (lines -> taxed lines);
 the invoice lines are already a copy, so adding a tax column is additive.
 
 ### 4. Annual billing terms

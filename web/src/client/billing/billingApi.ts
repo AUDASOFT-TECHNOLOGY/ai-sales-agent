@@ -9,7 +9,10 @@ export type InvoiceStatus = "PENDING" | "PAID" | "FAILED" | "FOR_FREE" | "DISCOU
 export interface ClientInvoice {
   invoice_id: number;
   number: string;
+  /** The billing cycle date, YYYY-MM-DD (an older monthly invoice: YYYY-MM). */
   period: string;
+  /** The invoice date. */
+  issued_on?: string;
   currency: string;
   /** Billed amount, before any discount (decimal string). */
   amount: string;
@@ -29,8 +32,6 @@ export interface ClientInvoiceLine {
   plan_name: string;
   monthly_price: string;
   currency: string;
-  days: number;
-  days_in_period: number;
   amount: string;
 }
 

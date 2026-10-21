@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 from sales_app.admin_auth import AdminRole, AdminUser
 from sales_app.admin_auth.passwords import hash_password
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency, require_role
+from sales_app.api.admin_billing import issue_after_assignment
 from sales_app.bootstrap import Application
 from sales_app.client_profiles import LOGIN_PATTERN, ClientProfile, normalize_login
 from sales_app.client_records import DEFAULT_ENGINE, ClientRecord
@@ -540,7 +541,9 @@ def _require_assignable_plan(application: Application, plan_id: str) -> None:
 def _assign_new_client(application: Application, client_id: str, plan_id: str, actor: str) -> None:
     assert application.plans is not None  # `_require_assignable_plan`
     try:
-        application.plans.assign(client_id, plan_id, at=application.clock.now(), by=actor)
+        now = application.clock.now()
+        application.plans.assign(client_id, plan_id, at=now, by=actor)
+        issue_after_assignment(application, client_id, actor)  # the first invoice, dated today
     except (StoreUnavailableError, PlanNotFoundError, PlanInactiveError):
         raise HTTPException(
             503,

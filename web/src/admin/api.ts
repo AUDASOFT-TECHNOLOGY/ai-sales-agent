@@ -780,8 +780,6 @@ export interface InvoiceLine {
   currency: string;
   included_credits: number;
   daily_quota: number;
-  days: number;
-  days_in_period: number;
   amount: string;
 }
 
@@ -789,7 +787,10 @@ export interface Invoice {
   invoice_id: number;
   number: string;
   client_id: string;
+  /** The billing cycle date, YYYY-MM-DD (an older monthly invoice: YYYY-MM). */
   period: string;
+  /** The invoice date. */
+  issued_on?: string;
   currency: string;
   amount: string;
   status: InvoiceStatus;
@@ -810,14 +811,14 @@ export interface Invoice {
   discount_reason?: string | null;
   /** Money received: only PAID. */
   collected?: boolean;
-  /** Computed by the server: unpaid (PENDING/FAILED) 15 days after the end of its month. */
+  /** Computed by the server: unpaid (PENDING/FAILED) 15 days after the invoice date. */
   due_at?: string;
   overdue?: boolean;
 }
 
 export interface InvoiceFilters {
   client_id?: string;
-  /** One month, YYYY-MM; takes the place of the range. */
+  /** One month (YYYY-MM) or one cycle date (YYYY-MM-DD); takes the place of the range. */
   period?: string;
   period_from?: string;
   period_to?: string;
@@ -825,7 +826,8 @@ export interface InvoiceFilters {
 }
 
 export interface GenerateInvoicesResult {
-  period: string;
+  /** The invoices due at this moment were issued. */
+  as_of: string;
   created: Invoice[];
   already_invoiced: number;
   skipped: { client_id: string; reason: string }[];
@@ -840,8 +842,9 @@ export async function adminListInvoices(filters: InvoiceFilters = {}): Promise<I
   return (await request<{ invoices: Invoice[] }>(`/billing/invoices${suffix}`)).invoices;
 }
 
-export function adminGenerateInvoices(period: string): Promise<GenerateInvoicesResult> {
-  return request<GenerateInvoicesResult>("/billing/invoices/generate", { method: "POST", body: JSON.stringify({ period }) });
+/** Issues every invoice that is due now and not issued yet (never a duplicate). */
+export function adminGenerateInvoices(): Promise<GenerateInvoicesResult> {
+  return request<GenerateInvoicesResult>("/billing/invoices/generate", { method: "POST", body: JSON.stringify({}) });
 }
 
 export function adminSettleInvoice(invoiceId: number, status: "PAID" | "FOR_FREE" | "DISCOUNTED_100", reason?: string): Promise<Invoice> {

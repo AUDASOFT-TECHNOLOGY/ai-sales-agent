@@ -547,6 +547,7 @@ def _assemble(
         limits=send_limits,
     )
     invoices_store = _invoice_store(account_stores)
+    auto_billing = _auto_billing(plans, invoices_store, notification_service, audit_service)
     return Application(
         settings=settings,
         registry=registry,
@@ -603,9 +604,7 @@ def _assemble(
         metrics_readers=_metrics_readers(account_stores),
         quotas=quotas,
         costs=_cost_service(account_stores, clock),
-        billing_loop=_billing_loop(
-            plans, invoices_store, notification_service, audit_service, clock, shared.leases
-        ),
+        billing_loop=_billing_loop(auto_billing, clock, shared.leases),
         finance=_finance(account_stores),
         conversation_controls=builders.conversation_control,
     )
@@ -686,19 +685,21 @@ def _invoice_store(account_stores: AccountStores | None) -> InvoiceStore | None:
     return SqlInvoiceStore(engine) if engine is not None else None
 
 
-def _billing_loop(
+def _auto_billing(
     plans: PlanStore | None,
     invoices: InvoiceStore | None,
     notifications: NotificationService,
     audit: AuditService,
-    clock: Clock,
-    leases: JobLeaseGuard | None,
-) -> BillingLoop | None:
+) -> AutoBilling | None:
     if plans is None or invoices is None:
         return None
-    return BillingLoop(
-        AutoBilling(plans, invoices, notifications, audit), clock.now, leases=leases
-    )
+    return AutoBilling(plans, invoices, notifications, audit)
+
+
+def _billing_loop(
+    billing: AutoBilling | None, clock: Clock, leases: JobLeaseGuard | None
+) -> BillingLoop | None:
+    return None if billing is None else BillingLoop(billing, clock.now, leases=leases)
 
 
 def _finance(account_stores: AccountStores | None) -> FinanceService | None:

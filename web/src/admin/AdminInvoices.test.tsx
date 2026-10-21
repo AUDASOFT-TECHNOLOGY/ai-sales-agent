@@ -17,6 +17,7 @@ interface TestInvoice {
   number: string;
   client_id: string;
   period: string;
+  issued_on?: string;
   currency: string;
   amount: string;
   status: string;
@@ -41,7 +42,8 @@ function invoice(over: Partial<TestInvoice> = {}): TestInvoice {
     invoice_id: 1,
     number: "INV-2026-04-alpha",
     client_id: "alpha",
-    period: "2026-04",
+    period: "2026-04-20",
+    issued_on: "2026-04-20",
     currency: "USD",
     amount: "30.00",
     status: "PENDING",
@@ -53,8 +55,6 @@ function invoice(over: Partial<TestInvoice> = {}): TestInvoice {
         currency: "USD",
         included_credits: 1000,
         daily_quota: 50,
-        days: 30,
-        days_in_period: 30,
         amount: "30.00",
       },
     ],
@@ -88,9 +88,9 @@ function stubFetch({ role = "owner", invoices = [invoice()], generate, settle }:
     if (url.endsWith("/admin/v1/clients")) return jsonResponse(200, CLIENTS);
     if (url.endsWith("/billing/invoices/generate") && method === "POST") {
       if (generate) return generate();
-      const created = invoice({ invoice_id: 9, number: "INV-2026-03-alpha", period: "2026-03" });
+      const created = invoice({ invoice_id: 9, number: "INV-2026-03-20-alpha", period: "2026-03-20", issued_on: "2026-03-20" });
       list = [...list, created];
-      return jsonResponse(200, { period: "2026-03", created: [created], already_invoiced: 1, skipped: [{ client_id: "beta", reason: "plans in different currencies during the month" }] });
+      return jsonResponse(200, { as_of: "2026-05-01T00:00:00Z", created: [created], already_invoiced: 1, skipped: [{ client_id: "beta", reason: "annual plan: not invoiced automatically yet" }] });
     }
     const settleMatch = url.match(/\/billing\/invoices\/(\d+)\/status$/);
     if (settleMatch && method === "PUT") {
@@ -157,7 +157,7 @@ describe("Billing: invoices", () => {
     await renderInvoices();
     const row = (await screen.findByRole("rowheader", { name: "INV-2026-04-alpha" })).closest("tr") as HTMLElement;
     expect(within(row).getByText("Alpha")).toBeInTheDocument();
-    expect(within(row).getByText("2026-04")).toBeInTheDocument();
+    expect(within(row).getByText("2026-04-20")).toBeInTheDocument();
     expect(within(row).getByText("30.00 USD")).toBeInTheDocument();
     expect(within(row).getByText("Pending")).toBeInTheDocument();
     const paid = screen.getByRole("rowheader", { name: "INV-2026-04-beta" }).closest("tr") as HTMLElement;
@@ -197,7 +197,7 @@ describe("Billing: invoices", () => {
     await user.click(await screen.findByRole("button", { name: "Details of INV-2026-04-alpha" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Pro")).toBeInTheDocument();
-    expect(within(dialog).getByText("30/30")).toBeInTheDocument();
+    expect(within(dialog).getByText("Plan price")).toBeInTheDocument();
     expect(within(dialog).getByText("1000")).toBeInTheDocument();
     expect(within(dialog).getByText("50")).toBeInTheDocument();
     expect(within(dialog).getByText(/Total/)).toHaveTextContent("30.00 USD");
@@ -271,33 +271,31 @@ describe("Billing: invoices", () => {
     expect(within(row).getByText("Pending")).toBeInTheDocument();
   });
 
-  it("generates a finished month and reports what was created, kept and skipped", async () => {
+  it("issues the invoices due now and reports what was created, kept and skipped", async () => {
     const fetchMock = stubFetch();
     const user = await renderInvoices();
-    const generate = await screen.findByRole("button", { name: "Generate invoices" });
-    expect(generate).toBeDisabled();
-    await user.type(screen.getByLabelText("Month to invoice"), "2026-03");
-    await user.click(generate);
-    const status = await screen.findByText(/1 invoice\(s\) created for 2026-03/);
+    const issue = await screen.findByRole("button", { name: "Issue due invoices" });
+    expect(issue).toBeEnabled();
+    await user.click(issue);
+    const status = await screen.findByText(/1 invoice\(s\) issued/);
     expect(status).toHaveTextContent("1 already invoiced (left as they were)");
-    expect(status).toHaveTextContent("beta (plans in different currencies during the month)");
-    expect(await screen.findByRole("rowheader", { name: "INV-2026-03-alpha" })).toBeInTheDocument();
-    expect(JSON.parse(String(calls(fetchMock, "/generate", "POST")[0][1]?.body))).toEqual({ period: "2026-03" });
+    expect(status).toHaveTextContent("beta (annual plan: not invoiced automatically yet)");
+    expect(await screen.findByRole("rowheader", { name: "INV-2026-03-20-alpha" })).toBeInTheDocument();
+    expect(JSON.parse(String(calls(fetchMock, "/generate", "POST")[0][1]?.body))).toEqual({});
   });
 
-  it("shows the server's refusal to generate an unfinished month", async () => {
-    stubFetch({ generate: () => jsonResponse(422, { detail: "only a month that has ended can be invoiced" }) });
+  it("shows the server's refusal to issue the invoices", async () => {
+    stubFetch({ generate: () => jsonResponse(503, { detail: "the invoices are unavailable" }) });
     const user = await renderInvoices();
-    await user.type(await screen.findByLabelText("Month to invoice"), "2099-01");
-    await user.click(screen.getByRole("button", { name: "Generate invoices" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("only a month that has ended");
+    await user.click(await screen.findByRole("button", { name: "Issue due invoices" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("the invoices are unavailable");
   });
 
   it("is read-only for anyone but an owner", async () => {
     stubFetch({ role: "viewer" });
     await renderInvoices();
     expect(await screen.findByRole("rowheader", { name: "INV-2026-04-alpha" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Generate invoices" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Issue due invoices" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Mark/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Details of INV-2026-04-alpha" })).toBeInTheDocument();
   });

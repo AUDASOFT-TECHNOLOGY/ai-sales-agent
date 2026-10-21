@@ -1,4 +1,4 @@
-"""Admin API: generating, reading, filtering and settling monthly invoices."""
+"""Admin API: issuing, reading, filtering and settling invoices (one per billing cycle)."""
 
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -10,7 +10,6 @@ from sales_app.billing import InMemoryInvoiceStore
 from sales_app.plans import InMemoryPlanStore, Plan
 
 BASE = "/admin/v1/billing/invoices"
-APRIL = "2026-04"  # the fixture's clock is 2026-05-01: April has just ended
 
 
 def at(month, day):
@@ -45,51 +44,53 @@ def put_on(fx, client, plan="pro", when=None):  # noqa: F811
     fx.application.plans.assign(client, plan, at=when, by="seed")
 
 
-def generate(client, period=APRIL):
-    return client.post(f"{BASE}/generate", json={"period": period})
+def generate(client):
+    return client.post(f"{BASE}/generate", json={})
 
 
 class TestGenerate:
     def test_it_requires_an_owner(self, fx):  # noqa: F811
-        assert fx.client.post(f"{BASE}/generate", json={"period": APRIL}).status_code == 401
+        assert fx.client.post(f"{BASE}/generate", json={}).status_code == 401
         assert generate(as_alice(fx)).status_code == 403
 
-    def test_it_invoices_every_client_that_was_on_a_plan_that_month(self, fx):  # noqa: F811
-        put_on(fx, "alpha")
+    def test_it_issues_every_invoice_that_is_due_at_the_plan_price(self, fx):  # noqa: F811
+        put_on(fx, "alpha")  # 1 Mar: due 1 Mar, 1 Apr, 1 May (the fixture's clock is 2026-05-01)
         put_on(fx, "beta", "eu")
         body = generate(as_root(fx)).json()
-        assert body["period"] == APRIL and body["already_invoiced"] == 0 and body["skipped"] == []
-        got = {i["client_id"]: i for i in body["created"]}
-        assert set(got) == {"alpha", "beta"}
-        alpha = got["alpha"]
+        assert body["already_invoiced"] == 0 and body["skipped"] == []
+        assert "as_of" in body
+        got = {(i["client_id"], i["period"]): i for i in body["created"]}
+        assert {k[1] for k in got} == {"2026-03-01", "2026-04-01", "2026-05-01"}
+        assert len(got) == 6
+        alpha = got["alpha", "2026-04-01"]
         assert (alpha["amount"], alpha["currency"], alpha["status"]) == ("30.00", "USD", "PENDING")
-        assert (alpha["number"], alpha["created_by"]) == ("INV-2026-04-alpha", "root")
-        assert alpha["lines"][0]["days"] == 30 and alpha["lines"][0]["plan_name"] == "Pro"
-        assert got["beta"]["currency"] == "EUR" and got["beta"]["amount"] == "40.00"
+        assert (alpha["number"], alpha["created_by"]) == ("INV-2026-04-01-alpha", "root")
+        assert alpha["issued_on"] == "2026-04-01"
+        assert alpha["lines"][0]["plan_name"] == "Pro" and "days" not in alpha["lines"][0]
+        assert got["beta", "2026-04-01"]["currency"] == "EUR"
+        assert got["beta", "2026-04-01"]["amount"] == "40.00"
 
-    def test_a_client_that_joined_mid_month_is_prorated(self, fx):  # noqa: F811
-        put_on(fx, "alpha", when=at(4, 16))  # days 16..30 = 15 of 30
-        [created] = generate(as_root(fx)).json()["created"]
-        assert (created["amount"], created["lines"][0]["days"]) == ("15.00", 15)
+    def test_an_assignment_day_in_the_middle_of_a_month_is_never_prorated(self, fx):  # noqa: F811
+        put_on(fx, "alpha", when=at(4, 16))
+        created = generate(as_root(fx)).json()["created"]
+        assert [(i["period"], i["amount"]) for i in created] == [("2026-04-16", "30.00")]
 
-    def test_a_client_that_changed_plan_gets_one_line_per_plan(self, fx):  # noqa: F811
+    def test_a_plan_change_stops_the_old_cycles_and_starts_new_ones(self, fx):  # noqa: F811
         put_on(fx, "alpha", "pro", at(3, 1))
         put_on(fx, "alpha", "eu", at(4, 11))
-        # EUR after USD in the same month cannot be added up: reported, not invoiced
         body = generate(as_root(fx)).json()
-        assert body["created"] == []
-        assert body["skipped"] == [
-            {"client_id": "alpha", "reason": "plans in different currencies during the month"}
-        ]
+        assert [(i["period"], i["currency"], i["amount"]) for i in body["created"]] == [
+            ("2026-04-11", "EUR", "40.00")
+        ]  # the EUR plan's cycle date is the 11th: nothing else is due on 2026-05-01
 
-    def test_a_client_without_a_plan_that_month_gets_nothing(self, fx):  # noqa: F811
-        put_on(fx, "alpha", when=at(5, 1))
+    def test_a_client_without_a_current_plan_gets_nothing(self, fx):  # noqa: F811
         fx.application.plans.assign("beta", "pro", at=at(3, 1), by="s")
         fx.application.plans.assign("beta", None, at=at(4, 1), by="s")
+        put_on(fx, "alpha", when=at(5, 2))  # its first cycle is tomorrow
         assert generate(as_root(fx)).json()["created"] == []
 
     def test_generating_again_never_touches_an_existing_invoice(self, fx):  # noqa: F811
-        put_on(fx, "alpha")
+        put_on(fx, "alpha", when=at(4, 20))
         client = as_root(fx)
         first = generate(client).json()["created"][0]
         client.put(f"{BASE}/{first['invoice_id']}/status", json={"status": "PAID"})
@@ -98,12 +99,10 @@ class TestGenerate:
         kept = client.get(f"{BASE}/{first['invoice_id']}").json()
         assert kept["status"] == "PAID" and kept["amount"] == "30.00"
 
-    def test_an_unfinished_or_malformed_month_is_refused(self, fx):  # noqa: F811
-        put_on(fx, "alpha")
-        client = as_root(fx)
-        for period in ("2026-05", "2027-01", "2026-13", "April"):
-            assert generate(client, period).status_code == 422
-        assert client.get(BASE).json() == {"invoices": []}
+    def test_the_former_monthly_body_is_still_accepted_and_ignored(self, fx):  # noqa: F811
+        put_on(fx, "alpha", when=at(4, 20))
+        body = as_root(fx).post(f"{BASE}/generate", json={"period": "2026-04"}).json()
+        assert [i["period"] for i in body["created"]] == ["2026-04-20"]
 
     def test_without_a_database_it_says_so(self, fx):  # noqa: F811
         fx.application.invoices = None
@@ -113,7 +112,7 @@ class TestGenerate:
 
 class TestHistoryDoesNotMove:
     def test_editing_or_deactivating_a_plan_changes_no_existing_invoice(self, fx):  # noqa: F811
-        put_on(fx, "alpha")
+        put_on(fx, "alpha", when=at(4, 20))
         client = as_root(fx)
         made = generate(client).json()["created"][0]
         fx.application.plans.update_plan(
@@ -127,11 +126,10 @@ class TestHistoryDoesNotMove:
 
 class TestRead:
     def seed(self, fx):  # noqa: F811
-        put_on(fx, "alpha")
-        put_on(fx, "beta")
+        put_on(fx, "alpha", when=at(3, 10))  # 10 Mar, 10 Apr
+        put_on(fx, "beta", when=at(3, 10))
         client = as_root(fx)
-        generate(client, APRIL)
-        generate(client, "2026-03")
+        generate(client)
         return client
 
     def test_it_requires_authentication(self, fx):  # noqa: F811
@@ -144,20 +142,21 @@ class TestRead:
             (i["client_id"], i["period"]) for i in client.get(BASE, params=q).json()["invoices"]
         ]
         assert listing() == [
-            ("alpha", APRIL),
-            ("beta", APRIL),
-            ("alpha", "2026-03"),
-            ("beta", "2026-03"),
+            ("alpha", "2026-04-10"),
+            ("beta", "2026-04-10"),
+            ("alpha", "2026-03-10"),
+            ("beta", "2026-03-10"),
         ]
-        assert listing(client_id="beta") == [("beta", APRIL), ("beta", "2026-03")]
-        assert listing(period="2026-03") == [("alpha", "2026-03"), ("beta", "2026-03")]
-        assert listing(period_from=APRIL) == [("alpha", APRIL), ("beta", APRIL)]
-        assert listing(period_to="2026-03", client_id="alpha") == [("alpha", "2026-03")]
-        first = client.get(BASE, params={"client_id": "alpha", "period": APRIL}).json()["invoices"][
-            0
-        ]
+        assert listing(client_id="beta") == [("beta", "2026-04-10"), ("beta", "2026-03-10")]
+        assert listing(period="2026-03") == [("alpha", "2026-03-10"), ("beta", "2026-03-10")]
+        assert listing(period="2026-03-10", client_id="beta") == [("beta", "2026-03-10")]
+        assert listing(period_from="2026-04") == [("alpha", "2026-04-10"), ("beta", "2026-04-10")]
+        assert listing(period_to="2026-03", client_id="alpha") == [("alpha", "2026-03-10")]
+        first = client.get(BASE, params={"client_id": "alpha", "period": "2026-04"}).json()[
+            "invoices"
+        ][0]
         client.put(f"{BASE}/{first['invoice_id']}/status", json={"status": "FOR_FREE"})
-        assert listing(status="FOR_FREE") == [("alpha", APRIL)]
+        assert listing(status="FOR_FREE") == [("alpha", "2026-04-10")]
         assert len(listing(status="PENDING")) == 3
         assert listing(status="PAID") == []
 
@@ -180,7 +179,7 @@ class TestRead:
 
 class TestSettle:
     def one(self, fx):  # noqa: F811
-        put_on(fx, "alpha")
+        put_on(fx, "alpha", when=at(4, 20))
         client = as_root(fx)
         return client, generate(client).json()["created"][0]["invoice_id"]
 
@@ -245,7 +244,7 @@ class TestSettle:
         assert client.put(f"{BASE}/{invoice_id}/status", json={"status": "LATE"}).status_code == 422
 
     def test_only_an_owner_settles_and_an_unknown_invoice_is_a_404(self, fx):  # noqa: F811
-        put_on(fx, "alpha")
+        put_on(fx, "alpha", when=at(4, 20))
         invoice_id = generate(as_root(fx)).json()["created"][0]["invoice_id"]
         fx.client.cookies.clear()
         status = {"status": "PAID"}
@@ -254,3 +253,32 @@ class TestSettle:
         client = as_root(fx)
         assert client.put(f"{BASE}/9999/status", json=status).status_code == 404
         assert client.get(f"{BASE}/{invoice_id}").json()["status"] == "PENDING"
+
+
+class TestImmediateInvoiceOnAssignment:
+    """The plan assignment endpoints issue the invoice of that day at once (clock: 2026-05-01)."""
+
+    def test_putting_a_client_on_a_plan_invoices_today_at_the_plan_price(self, fx):  # noqa: F811
+        root = as_root(fx)
+        response = root.put("/admin/v1/clients/alpha/plan", json={"plan_id": "pro"})
+        assert response.status_code == 200, response.text
+        [mine] = root.get(BASE, params={"client_id": "alpha"}).json()["invoices"]
+        assert (mine["period"], mine["amount"], mine["status"]) == ("2026-05-01", "30.00", "PENDING")
+
+    def test_changing_plan_invoices_the_new_plan_now_and_stops_the_old_cycles(self, fx):  # noqa: F811
+        root = as_root(fx)
+        put_on(fx, "alpha", "pro", at(3, 15))
+        root.put("/admin/v1/clients/alpha/plan", json={"plan_id": "eu"})
+        periods = {
+            i["period"]: (i["currency"], i["amount"])
+            for i in root.get(BASE, params={"client_id": "alpha"}).json()["invoices"]
+        }
+        assert periods == {"2026-05-01": ("EUR", "40.00")}  # no prorata, no 15th cycle afterwards
+        generate(root)
+        assert len(root.get(BASE, params={"client_id": "alpha"}).json()["invoices"]) == 1
+
+    def test_taking_a_client_off_its_plan_invoices_nothing(self, fx):  # noqa: F811
+        root = as_root(fx)
+        put_on(fx, "alpha", "pro", at(5, 1))
+        root.put("/admin/v1/clients/alpha/plan", json={"plan_id": None})
+        assert root.get(BASE, params={"client_id": "alpha"}).json() == {"invoices": []}

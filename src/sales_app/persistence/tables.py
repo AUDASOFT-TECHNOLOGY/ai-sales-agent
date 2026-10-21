@@ -408,7 +408,7 @@ client_plan_assignments = Table(
     ),
 )
 
-# Monthly invoices. One per client and period (the database refuses a second). An invoice carries its
+# Invoices, one per billing cycle. One per client and period = cycle date `YYYY-MM-DD` (legacy: `YYYY-MM`; the database refuses a second). An invoice carries its
 # own copy of every line (plan name, price, currency, credits, quota, days, amount), so editing a plan
 # afterwards changes nothing already invoiced. `status` is PENDING, FAILED, PAID, FOR_FREE or
 # DISCOUNTED_100: FOR_FREE and the discount are declarations by the Admin, never a payment received.
@@ -418,7 +418,7 @@ invoices = Table(
     metadata,
     Column("invoice_id", Integer, primary_key=True, autoincrement=True),
     Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
-    Column("period", String(7), nullable=False),
+    Column("period", String(10), nullable=False),
     Column("currency", String(3), nullable=False),
     Column("amount", Numeric(18, 2), nullable=False),
     Column("status", String(16), nullable=False),

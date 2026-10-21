@@ -1,18 +1,19 @@
-"""Admin API for monthly invoices (see `sales_app.billing`).
+"""Admin API for invoices, one per billing cycle (see `sales_app.billing`).
 
 Any admin reads the invoices of the clients they can reach (a client outside their scope does not
-appear, and its invoice is a 404). Only an owner generates invoices or settles them. Generating a
-month builds, for every client that was on a plan that month, one invoice from the terms recorded in
-its plan assignments; an invoice that already exists is never rebuilt. Marking an invoice PAID,
+appear, and its invoice is a 404). Only an owner generates invoices or settles them. Invoices are issued
+automatically (on a plan assignment, then every month on the same day; `BillingLoop`); "generate"
+issues, now, every cycle that is due and not invoiced yet, at the plan's price: an invoice that
+already exists is never rebuilt or duplicated. Marking an invoice PAID,
 FOR_FREE or DISCOUNTED_100 (a 100% discount: billed amount kept, amount after discount 0, amounts
 discounted and free recorded, who and when traced, optional reason) is the owner's declaration, once (origin `manual`, traced); an invoice already paid by a
 verified electronic confirmation (`POST /api/payments/webhook`, see `sales_app.payment_confirmation`)
-refuses it with a 409. `overdue` is computed: unpaid (PENDING/FAILED) `DUE_DAYS` after its month.
+refuses it with a 409. `overdue` is computed: unpaid (PENDING/FAILED) `DUE_DAYS` after the invoice date.
 
 Amounts travel as decimal strings, never floats.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
@@ -27,12 +28,10 @@ from sales_app.billing import (
     InvoiceNotFoundError,
     InvoiceStatus,
     InvoiceStatusError,
-    MixedCurrenciesError,
     PaymentRecord,
-    build_invoice,
-    ensure_closed,
     parse_period,
 )
+from sales_app.billing_service import AutoBilling
 from sales_app.bootstrap import Application
 from sales_app.sourcing.errors import StoreUnavailableError
 
@@ -44,8 +43,6 @@ class InvoiceLineResponse(BaseModel):
     currency: str
     included_credits: int
     daily_quota: int
-    days: int
-    days_in_period: int
     amount: str
 
 
@@ -53,7 +50,8 @@ class InvoiceResponse(BaseModel):
     invoice_id: int
     number: str
     client_id: str
-    period: str
+    period: str  # the cycle date YYYY-MM-DD (legacy invoices: the month, YYYY-MM)
+    issued_on: date  # the invoice date
     currency: str
     amount: str
     status: InvoiceStatus
@@ -99,7 +97,10 @@ class InvoicesResponse(BaseModel):
 
 
 class GenerateBody(BaseModel):
-    period: str  # YYYY-MM, a month that has ended
+    """Nothing is needed: the invoices due now are issued. `period` is accepted and ignored (the
+    former monthly form), so older callers keep working."""
+
+    period: str | None = None
 
 
 class SkippedClient(BaseModel):
@@ -108,9 +109,9 @@ class SkippedClient(BaseModel):
 
 
 class GenerateResponse(BaseModel):
-    period: str
+    as_of: datetime  # the invoices due at this moment were issued
     created: list[InvoiceResponse]
-    already_invoiced: int  # clients whose invoice for the month existed: left untouched
+    already_invoiced: int  # due cycles whose invoice existed: left untouched
     skipped: list[SkippedClient]
 
 
@@ -129,6 +130,7 @@ def _response(invoice: Invoice, now: datetime) -> InvoiceResponse:
         number=invoice.number,
         client_id=invoice.client_id,
         period=invoice.period,
+        issued_on=invoice.issued_on,
         currency=invoice.currency,
         amount=format(invoice.amount, "f"),
         status=invoice.status,
@@ -140,8 +142,6 @@ def _response(invoice: Invoice, now: datetime) -> InvoiceResponse:
                 currency=line.currency,
                 included_credits=line.included_credits,
                 daily_quota=line.daily_quota,
-                days=line.days,
-                days_in_period=line.days_in_period,
                 amount=format(line.amount, "f"),
             )
             for line in invoice.lines
@@ -181,6 +181,24 @@ def _event_response(record: PaymentRecord) -> PaymentEventResponse:
     )
 
 
+def auto_billing_of(application: Application) -> AutoBilling | None:
+    """The invoicing service over the application's current plan and invoice stores (None without
+    them)."""
+    if application.plans is None or application.invoices is None:
+        return None
+    return AutoBilling(
+        application.plans, application.invoices, application.notifications, application.audit
+    )
+
+
+def issue_after_assignment(application: Application, client_id: str, by: str) -> None:
+    """Right after a plan assignment: the invoice of that day, at the new plan's price. A failure
+    never undoes the assignment (it is reported and the periodic run retries)."""
+    billing = auto_billing_of(application)
+    if billing is not None:
+        billing.issue_for_client(client_id, application.clock.now(), created_by=by)
+
+
 def create_admin_billing_router(application: Application) -> APIRouter:
     get_current_admin = make_current_admin_dependency(application.admin_auth)
     require_owner = require_role(get_current_admin, AdminRole.OWNER)
@@ -203,7 +221,7 @@ def create_admin_billing_router(application: Application) -> APIRouter:
     @router.get("/invoices", response_model=InvoicesResponse)
     def list_invoices(
         client_id: str | None = None,
-        period: str | None = Query(default=None, description="One month, YYYY-MM"),
+        period: str | None = Query(default=None, description="One cycle date YYYY-MM-DD, or one month YYYY-MM"),
         period_from: str | None = None,
         period_to: str | None = None,
         status: InvoiceStatus | None = None,
@@ -265,52 +283,23 @@ def create_admin_billing_router(application: Application) -> APIRouter:
 
     @router.post("/invoices/generate", response_model=GenerateResponse)
     async def generate(
-        body: GenerateBody, admin: AdminUser = Depends(require_owner)
+        body: GenerateBody | None = None, admin: AdminUser = Depends(require_owner)
     ) -> GenerateResponse:
-        store = invoices()
-        plans = application.plans
-        assert plans is not None
+        """Issues, now, every invoice that is due and not issued yet (idempotent)."""
+        invoices()
+        billing = auto_billing_of(application)
+        if billing is None:
+            raise HTTPException(503, "billing needs the database (set SALES_AGENT_DATABASE_URL)")
         now = application.clock.now()
-        try:
-            start, end = ensure_closed(body.period, now)
-        except InvalidPeriodError as error:
-            raise HTTPException(422, str(error)) from None
-
-        def run() -> GenerateResponse:
-            assignments = plans.assignments_between(start, end)
-            created, skipped, existing = [], [], 0
-            for client_id in sorted({a.client_id for a in assignments}):
-                try:
-                    invoice = build_invoice(
-                        client_id,
-                        body.period,
-                        assignments,
-                        now=now,
-                        created_by=admin.username,
-                    )
-                except MixedCurrenciesError:
-                    skipped.append(
-                        SkippedClient(
-                            client_id=client_id,
-                            reason="plans in different currencies during the month",
-                        )
-                    )
-                    continue
-                if invoice is None:
-                    continue
-                kept = store.create(invoice)
-                if kept is None:
-                    existing += 1
-                else:
-                    created.append(_response(kept, now))
-            return GenerateResponse(
-                period=body.period, created=created, already_invoiced=existing, skipped=skipped
-            )
-
-        try:
-            return await run_in_threadpool(run)
-        except StoreUnavailableError as error:
-            raise HTTPException(503, str(error)) from None
+        report = await run_in_threadpool(lambda: billing.run(now, created_by=admin.username))
+        if report.errors and not report.invoices and not report.already_invoiced:
+            raise HTTPException(503, "the invoices are unavailable")
+        return GenerateResponse(
+            as_of=now,
+            created=[_response(i, now) for i in report.invoices],
+            already_invoiced=report.already_invoiced,
+            skipped=[SkippedClient(client_id=k.client_id, reason=k.reason) for k in report.skipped],
+        )
 
     @router.put("/invoices/{invoice_id}/status", response_model=InvoiceResponse)
     async def settle(

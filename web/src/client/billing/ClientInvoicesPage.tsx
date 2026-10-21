@@ -176,7 +176,7 @@ export function ClientInvoicesPage() {
             <thead>
               <tr>
                 <th>{tx.number}</th>
-                <th>{tx.period}</th>
+                <th>{tx.invoiceDate}</th>
                 <th>{tx.amount}</th>
                 <th>{tx.afterDiscount}</th>
                 <th>{tx.status}</th>
@@ -188,7 +188,7 @@ export function ClientInvoicesPage() {
               {invoices.map((i) => (
                 <tr key={i.invoice_id}>
                   <td>{i.number}</td>
-                  <td>{i.period}</td>
+                  <td>{i.issued_on ?? i.period}</td>
                   <td>{money(i.amount, i.currency)}</td>
                   <td>{money(i.amount_after_discount ?? i.amount, i.currency)}</td>
                   <td>
@@ -215,7 +215,6 @@ export function ClientInvoicesPage() {
             <thead>
               <tr>
                 <th>{tx.plan_line}</th>
-                <th>{tx.days}</th>
                 <th>{tx.lineAmount}</th>
               </tr>
             </thead>
@@ -223,9 +222,6 @@ export function ClientInvoicesPage() {
               {selected.lines.map((line, index) => (
                 <tr key={index}>
                   <td>{line.plan_name}</td>
-                  <td>
-                    {line.days} / {line.days_in_period}
-                  </td>
                   <td>{money(line.amount, line.currency)}</td>
                 </tr>
               ))}

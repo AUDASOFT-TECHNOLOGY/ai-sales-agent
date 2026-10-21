@@ -235,6 +235,7 @@ export interface ClientDashboard {
       recent: {
         number: string;
         period: string;
+        issued_on?: string;
         currency: string;
         amount: string;
         amount_after_discount: string | null;

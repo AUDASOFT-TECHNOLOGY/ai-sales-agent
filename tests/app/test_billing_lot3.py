@@ -15,15 +15,12 @@ from test_audit_notifications import admin_session, client_session, fx  # noqa: 
 
 from sales_app.audit_log import AuditQuery, AuditService, InMemoryAuditLog
 from sales_app.billing import (
-    DEFAULT_PRORATION,
-    DailyProrata,
     InMemoryInvoiceStore,
     InvalidPeriodError,
     InvoiceFilter,
-    InvoiceLine,
     InvoiceStatus,
 )
-from sales_app.billing_service import AutoBilling, BillingLoop, last_closed_periods
+from sales_app.billing_service import AutoBilling, BillingLoop, last_closed_periods, recent_months
 from sales_app.finance.service import FinanceService, StoreFinanceReader
 from sales_app.notifications import (
     ADMIN,
@@ -84,18 +81,79 @@ class World:
 # ---- automatic invoicing -------------------------------------------------------------------------
 
 
+class Flaky(InMemoryInvoiceStore):
+    """Refuses to keep client `alpha`'s invoices while `broken`."""
+
+    broken = True
+
+    def create(self, invoice):
+        if self.broken and invoice.client_id == "alpha":
+            raise RuntimeError("boom")
+        return super().create(invoice)
+
+
+def periods_of(w, client=None):
+    return sorted(i.period for i in w.invoices.list_invoices(InvoiceFilter(client_id=client)))
+
+
 class TestAutoBilling:
-    def test_it_invoices_every_closed_month_from_the_assignment_date(self):
+    def test_an_invoice_is_issued_on_the_assignment_day_then_every_month_on_the_same_day(self):
         w = World()
         w.plans.assign("alpha", "pro", at=at(3, 16), by="seed")
         report = w.billing().run(NOW)
         assert (report.created, report.already_invoiced, report.errors) == (2, 0, 0)
         invoices = {i.period: i for i in w.invoices.list_invoices(InvoiceFilter())}
-        assert set(invoices) == {"2026-03", "2026-04"}  # May has not ended; Feb is before sign-up
-        assert invoices["2026-03"].amount == Decimal("15.48")  # 16 of 31 days
-        assert invoices["2026-04"].amount == Decimal("30.00")
+        assert set(invoices) == {"2026-03-16", "2026-04-16"}  # 16 May is not due yet
+        assert all(i.amount == Decimal("30.00") for i in invoices.values())  # never prorated
         assert {i.created_by for i in invoices.values()} == {"system:billing"}
         assert all(i.status is InvoiceStatus.PENDING for i in invoices.values())
+
+    def test_months_already_invoiced_under_the_former_calendar_rule_are_not_billed_twice(self):
+        from dataclasses import replace
+
+        from sales_app.billing import Invoice
+
+        w = World()
+        w.plans.assign("alpha", "pro", at=at(1, 20), by="seed")
+        legacy = Invoice(0, "alpha", "2026-02", "USD", Decimal("30.00"), InvoiceStatus.PAID, (), at(3, 1), "admin")
+        w.invoices.create(legacy)
+        w.billing().run(datetime(2026, 4, 25, tzinfo=UTC))
+        # 20 Jan and 20 Feb are covered by the legacy invoice of 2026-02 (and earlier months); March, April are due
+        assert periods_of(w) == ["2026-02", "2026-03-20", "2026-04-20"]
+
+    def test_the_20th_anchor_gives_the_20th_each_month(self):
+        w = World()
+        w.plans.assign("alpha", "pro", at=datetime(2026, 10, 20, 8, tzinfo=UTC), by="seed")
+        run = w.billing().run
+        assert run(datetime(2026, 10, 20, 8, tzinfo=UTC)).created == 1
+        assert run(datetime(2026, 11, 19, tzinfo=UTC)).created == 0
+        assert run(datetime(2026, 11, 20, tzinfo=UTC)).created == 1
+        assert run(datetime(2026, 12, 20, 1, tzinfo=UTC)).created == 1
+        assert periods_of(w) == ["2026-10-20", "2026-11-20", "2026-12-20"]
+
+    def test_a_31st_anchor_falls_on_the_last_day_of_short_months_and_is_kept_after(self):
+        w = World()
+        w.plans.assign("alpha", "pro", at=datetime(2026, 1, 31, tzinfo=UTC), by="seed")
+        w.billing().run(datetime(2026, 5, 31, tzinfo=UTC))
+        assert periods_of(w) == [
+            "2026-01-31",
+            "2026-02-28",
+            "2026-03-31",
+            "2026-04-30",
+            "2026-05-31",
+        ]
+
+    def test_issue_for_client_invoices_the_assignment_day_at_once_and_only_once(self):
+        w = World()
+        w.plans.assign("alpha", "pro", at=NOW, by="seed")
+        w.plans.assign("beta", "pro", at=NOW, by="seed")
+        first = w.billing().issue_for_client("alpha", NOW, created_by="root")
+        assert (first.created, [i.period for i in first.invoices]) == (1, ["2026-05-01"])
+        assert first.invoices[0].created_by == "root"
+        again = w.billing().issue_for_client("alpha", NOW)
+        assert (again.created, again.already_invoiced) == (0, 1)
+        assert periods_of(w, "beta") == []  # only the asked client
+        assert w.billing().issue_for_client("nobody", NOW).created == 0
 
     def test_running_again_or_after_a_restart_never_duplicates(self):
         w = World()
@@ -108,13 +166,42 @@ class TestAutoBilling:
     def test_a_downtime_is_caught_up_on_the_next_run(self):
         w = World()
         w.plans.assign("alpha", "pro", at=at(1, 1), by="seed")
-        w.billing().run(datetime(2026, 2, 5, tzinfo=UTC))  # only January had ended
+        w.billing().run(datetime(2026, 2, 5, tzinfo=UTC))  # 1 Jan and 1 Feb
         later = w.billing().run(NOW)  # the process was down for three months
-        assert later.created == 3 and later.already_invoiced == 1  # Feb, Mar, Apr; Jan existed
+        assert later.created == 3 and later.already_invoiced == 2  # Mar, Apr, 1 May
+        assert len(periods_of(w)) == 5
+
+    def test_a_plan_change_is_a_new_anchor_and_the_old_cycles_stop(self):
+        w = World()
+        w.plans.assign("alpha", "pro", at=at(1, 20), by="seed")
+        w.billing().run(at(3, 1))  # 20 Jan, 20 Feb at 30.00
+        w.plans.assign("alpha", "eu", at=at(3, 5), by="seed")  # EUR 40.00, anchor the 5th
+        report = w.billing().issue_for_client("alpha", at(3, 5))
+        assert [(i.period, i.amount, i.currency) for i in report.invoices] == [
+            ("2026-03-05", Decimal("40.00"), "EUR")
+        ]
+        w.billing().run(datetime(2026, 5, 10, tzinfo=UTC))
+        assert periods_of(w) == [
+            "2026-01-20",
+            "2026-02-20",
+            "2026-03-05",
+            "2026-04-05",
+            "2026-05-05",
+        ]  # no more 20th for the old plan; no prorata for the part month either
+        amounts = {i.period: i.amount for i in w.invoices.list_invoices(InvoiceFilter())}
+        assert amounts["2026-04-05"] == Decimal("40.00")
+
+    def test_a_client_taken_off_its_plan_is_not_billed_afterwards(self):
+        w = World()
+        w.plans.assign("alpha", "pro", at=at(1, 20), by="seed")
+        w.billing().run(at(2, 25))
+        w.plans.assign("alpha", None, at=at(2, 26), by="seed")
+        w.billing().run(datetime(2026, 9, 1, tzinfo=UTC))
+        assert periods_of(w) == ["2026-01-20", "2026-02-20"]
 
     def test_each_invoice_is_audited_and_nothing_is_notified_on_success(self):
         w = World()
-        w.plans.assign("alpha", "pro", at=at(4, 1), by="seed")
+        w.plans.assign("alpha", "pro", at=at(4, 20), by="seed")
         w.billing().run(NOW)
         [entry] = w.audit_entries()
         assert (entry.action, entry.actor, entry.client_id, entry.outcome) == (
@@ -123,14 +210,13 @@ class TestAutoBilling:
             "alpha",
             "success",
         )
-        assert entry.target == "INV-2026-04-alpha"
+        assert entry.target == "INV-2026-04-20-alpha"
         assert w.admin_notifications() == []
 
     def test_a_failure_notifies_the_admin_once_and_does_not_stop_the_others(self):
-        w = World()
-        w.plans.assign("alpha", "pro", at=at(4, 1), by="seed")
-        w.plans.assign("alpha", "eu", at=at(4, 11), by="seed")  # USD then EUR in April
-        w.plans.assign("beta", "pro", at=at(4, 1), by="seed")
+        w = World(invoices=Flaky())
+        w.plans.assign("alpha", "pro", at=at(4, 20), by="seed")
+        w.plans.assign("beta", "pro", at=at(4, 20), by="seed")
         for _ in range(2):
             report = w.billing().run(NOW)
         assert [i.client_id for i in w.invoices.list_invoices(InvoiceFilter())] == ["beta"]
@@ -141,11 +227,11 @@ class TestAutoBilling:
         assert rejected and rejected[0].client_id == "alpha"
 
     def test_the_notification_closes_once_the_invoice_exists(self):
-        w = World()
-        w.plans.assign("alpha", "pro", at=at(4, 1), by="seed")
-        failing = w.billing(proration=_Broken())
-        assert failing.run(NOW).errors == 1
+        w = World(invoices=Flaky())
+        w.plans.assign("alpha", "pro", at=at(4, 20), by="seed")
+        assert w.billing().run(NOW).errors == 1
         assert w.admin_notifications()[0].resolved_at is None
+        w.invoices.broken = False
         assert w.billing().run(NOW).created == 1
         assert w.admin_notifications()[0].resolved_at is not None
 
@@ -154,9 +240,7 @@ class TestAutoBilling:
         w.plans.assign("alpha", "yearly", at=at(1, 1), by="seed")
         report = w.billing().run(NOW)
         assert report.created == 0
-        assert [(s.client_id, s.period) for s in report.skipped] == [
-            ("alpha", p) for p in ("2026-01", "2026-02", "2026-03", "2026-04")
-        ]
+        assert [(s.client_id, s.period) for s in report.skipped] == [("alpha", "2026-01-01")]
         assert w.invoices.list_invoices(InvoiceFilter()) == []
 
     def test_an_unreadable_store_notifies_and_audits(self):
@@ -173,33 +257,15 @@ class TestAutoBilling:
         assert (note.kind, note.client_id) == (BILLING_ERROR, None)
         assert w.audit_entries()[0].outcome == "error"
 
-    def test_the_proration_rule_is_a_replaceable_policy(self):
-        w = World()
-        w.plans.assign("alpha", "pro", at=at(3, 16), by="seed")
+    def test_there_is_no_prorata_policy_any_more(self):
+        import sales_app.billing as billing
 
-        class FullMonth:
-            def lines(self, assignments, start, end):
-                a = assignments[0]
-                n = (end - start).days
-                return [
-                    InvoiceLine(a.plan_id, a.plan_name, a.monthly_price, a.currency, 0, 1, n, n, a.monthly_price)
-                ]
+        assert not hasattr(billing, "DailyProrata") and not hasattr(billing, "ProrationPolicy")
 
-        w.billing(proration=FullMonth()).run(NOW)
-        amounts = {i.period: i.amount for i in w.invoices.list_invoices(InvoiceFilter())}
-        assert amounts == {"2026-03": Decimal("30.00"), "2026-04": Decimal("30.00")}
-
-    def test_the_current_policy_is_the_existing_daily_prorata(self):
-        assert isinstance(DEFAULT_PRORATION, DailyProrata)
-
-    def test_last_closed_periods(self):
+    def test_last_closed_periods_and_recent_months(self):
         assert last_closed_periods(NOW, 3) == ["2026-02", "2026-03", "2026-04"]
         assert last_closed_periods(datetime(2026, 1, 3, tzinfo=UTC), 2) == ["2025-11", "2025-12"]
-
-
-class _Broken:
-    def lines(self, assignments, start, end):
-        raise RuntimeError("boom")
+        assert recent_months(NOW, 3) == ["2026-03", "2026-04", "2026-05"]
 
 
 class _Leases:
@@ -220,7 +286,7 @@ class TestBillingLoop:
         w.plans.assign("alpha", "pro", at=at(4, 1), by="seed")
         leases = _Leases(True)
         report = BillingLoop(w.billing(), lambda: NOW, leases=leases).run_once()
-        assert report is not None and report.created == 1
+        assert report is not None and report.created == 2
         assert leases.taken == leases.released == [("platform", "billing")]
 
     def test_it_does_nothing_when_another_process_holds_the_lease(self):
@@ -244,7 +310,7 @@ class TestBillingLoop:
             await asyncio.wait_for(task, 2)
 
         asyncio.run(go())
-        assert len(w.invoices.list_invoices(InvoiceFilter())) == 1
+        assert len(w.invoices.list_invoices(InvoiceFilter())) == 2
 
 
 # ---- the Client's invoices and subscription -------------------------------------------------------
@@ -276,12 +342,19 @@ class TestClientInvoices:
         alpha = client_session(billed, "alpha")
         body = alpha.get("/client/v1/invoices")
         assert body.status_code == 200 and body.headers["cache-control"] == "no-store"
-        assert [i["number"] for i in body.json()["invoices"]] == ["INV-2026-04-alpha", "INV-2026-03-alpha"]
-        assert set(ids_of(client_session(billed, "beta"))) == {"INV-2026-04-beta"}
+        assert [i["number"] for i in body.json()["invoices"]] == [
+            "INV-2026-05-01-alpha",
+            "INV-2026-04-01-alpha",
+            "INV-2026-03-01-alpha",
+        ]
+        assert set(ids_of(client_session(billed, "beta"))) == {
+            "INV-2026-04-01-beta",
+            "INV-2026-05-01-beta",
+        }
 
     def test_another_clients_invoice_is_a_404_like_an_unknown_one(self, billed):
-        mine = ids_of(client_session(billed, "alpha"))["INV-2026-04-alpha"]
-        theirs = ids_of(client_session(billed, "beta"))["INV-2026-04-beta"]
+        mine = ids_of(client_session(billed, "alpha"))["INV-2026-04-01-alpha"]
+        theirs = ids_of(client_session(billed, "beta"))["INV-2026-04-01-beta"]
         alpha = client_session(billed, "alpha")
         assert alpha.get(f"/client/v1/invoices/{mine}").status_code == 200
         assert alpha.get(f"/client/v1/invoices/{theirs}").status_code == 404
@@ -289,15 +362,15 @@ class TestClientInvoices:
 
     def test_the_detail_has_lines_and_hides_internal_traces(self, billed):
         alpha = client_session(billed, "alpha")
-        detail = alpha.get(f"/client/v1/invoices/{ids_of(alpha)['INV-2026-04-alpha']}").json()
+        detail = alpha.get(f"/client/v1/invoices/{ids_of(alpha)['INV-2026-04-01-alpha']}").json()
         assert detail["amount"] == "30.00" and detail["status"] == "PENDING"
-        assert detail["lines"][0]["plan_name"] == "Pro" and detail["lines"][0]["days"] == 30
-        assert detail["collected"] is False and detail["overdue"] is False
+        assert detail["lines"][0]["plan_name"] == "Pro" and "days" not in detail["lines"][0]
+        assert detail["collected"] is False and detail["overdue"] is True  # dated 1 Apr, due 16 Apr
         assert "created_by" not in detail and "payment_transaction_id" not in detail
 
     def test_it_is_read_only(self, billed):
         alpha = client_session(billed, "alpha")
-        n = ids_of(alpha)["INV-2026-04-alpha"]
+        n = ids_of(alpha)["INV-2026-04-01-alpha"]
         for verb in ("put", "post", "patch", "delete"):
             assert getattr(alpha, verb)(f"/client/v1/invoices/{n}").status_code in (404, 405)
             assert getattr(alpha, verb)(f"/client/v1/invoices/{n}/status").status_code in (404, 405)
@@ -311,7 +384,7 @@ class TestClientInvoices:
 
     def test_a_discount_is_shown_but_not_as_collected(self, billed):
         alpha = client_session(billed, "alpha")
-        n = ids_of(alpha)["INV-2026-04-alpha"]
+        n = ids_of(alpha)["INV-2026-04-01-alpha"]
         billed.application.invoices.settle(
             n, InvoiceStatus.DISCOUNTED_100, at=NOW, by="root", reason="promo"
         )
@@ -332,13 +405,13 @@ class TestClientSubscription:
         assert body["plan"]["name"] == "Pro" and body["plan"]["billing_period"] == "monthly"
         assert (body["plan"]["daily_quota"], body["plan"]["included_credits"]) == (50, 1000)
         assert body["next_billing_at"].startswith("2026-06-01")
-        assert (body["unpaid_invoices"], body["overdue_invoices"]) == (2, 1)  # March was due on 16 April
-        assert body["last_payment"]["invoice_number"] == "INV-2026-04-alpha"
+        assert (body["unpaid_invoices"], body["overdue_invoices"]) == (3, 2)  # 1 Mar and 1 Apr are late
+        assert body["last_payment"]["invoice_number"] == "INV-2026-05-01-alpha"
         assert body["last_payment"]["collected"] is False
 
     def test_a_paid_invoice_is_the_last_payment_state(self, billed):
         alpha = client_session(billed, "alpha")
-        n = ids_of(alpha)["INV-2026-04-alpha"]
+        n = ids_of(alpha)["INV-2026-05-01-alpha"]
         billed.application.invoices.settle(n, InvoiceStatus.PAID, at=NOW, by="root")
         last = alpha.get("/client/v1/subscription").json()["last_payment"]
         assert (last["status"], last["collected"]) == ("PAID", True)
@@ -363,19 +436,19 @@ def seed_finance(plans, invoices):
         plans.create_plan(plan)
     plans.assign("alpha", "pro", at=at(3, 1), by="s")
     plans.assign("beta", "pro", at=at(3, 1), by="s")
-    plans.assign("beta", None, at=at(4, 16), by="s")
     plans.assign("gamma", "eu", at=at(4, 1), by="s")
     AutoBilling(
         plans, invoices, NotificationService(InMemoryNotificationStore()), AuditService(InMemoryAuditLog())
-    ).run(NOW)
+    ).run(datetime(2026, 4, 30, 12, tzinfo=UTC))  # the 1 Mar and 1 Apr cycles, not yet 1 May
+    plans.assign("beta", None, at=at(4, 16), by="s")  # beta leaves; its invoices stand
     by = {(i.client_id, i.period): i for i in invoices.list_invoices(InvoiceFilter())}
-    invoices.settle(by["alpha", "2026-03"].invoice_id, InvoiceStatus.PAID, at=NOW, by="r")
-    invoices.settle(by["beta", "2026-03"].invoice_id, InvoiceStatus.FOR_FREE, at=NOW, by="r")
-    invoices.settle(by["beta", "2026-04"].invoice_id, InvoiceStatus.DISCOUNTED_100, at=NOW, by="r")
-    invoices.settle(by["gamma", "2026-04"].invoice_id, InvoiceStatus.PAID, at=NOW, by="r")
+    invoices.settle(by["alpha", "2026-03-01"].invoice_id, InvoiceStatus.PAID, at=NOW, by="r")
+    invoices.settle(by["beta", "2026-03-01"].invoice_id, InvoiceStatus.FOR_FREE, at=NOW, by="r")
+    invoices.settle(by["beta", "2026-04-01"].invoice_id, InvoiceStatus.DISCOUNTED_100, at=NOW, by="r")
+    invoices.settle(by["gamma", "2026-04-01"].invoice_id, InvoiceStatus.PAID, at=NOW, by="r")
 
 
-LATE = datetime(2026, 5, 20, tzinfo=UTC)  # April's invoices are due on 2026-05-16
+LATE = datetime(2026, 5, 20, tzinfo=UTC)  # invoices dated 2026-04-01 were due on 2026-04-16
 
 
 def usd(summary):
@@ -391,16 +464,16 @@ class TestFinanceService:
     def test_figures(self):
         s = self.make().summary(period_from="2026-03", period_to="2026-04", now=LATE)
         t = usd(s)
-        assert t.billed == Decimal("105.00")
+        assert t.billed == Decimal("120.00")
         assert t.collected == Decimal("30.00")  # alpha March only
-        assert t.free == Decimal("45.00")  # beta: 30.00 for free + 15.00 discounted
-        assert t.discounted == Decimal("15.00")
-        assert t.after_discount == Decimal("90.00")  # 105 minus the 15.00 discount
+        assert t.free == Decimal("60.00")  # beta: 30.00 for free + 30.00 discounted
+        assert t.discounted == Decimal("30.00")
+        assert t.after_discount == Decimal("90.00")  # 120 minus the 30.00 discount
         assert (t.pending, t.overdue) == (Decimal("0"), Decimal("30.00"))  # alpha April is late
         assert (t.issued, t.paid, t.free_count, t.discounted_count, t.overdue_count) == (4, 1, 1, 1, 1)
 
     def test_it_is_pending_before_the_due_date(self):
-        s = self.make().summary(period_from="2026-03", period_to="2026-04", now=NOW)
+        s = self.make().summary(period_from="2026-03", period_to="2026-04", now=at(4, 10))
         t = usd(s)
         assert (t.pending, t.overdue, t.pending_count) == (Decimal("30.00"), Decimal("0"), 1)
 
@@ -414,7 +487,7 @@ class TestFinanceService:
         s = self.make().summary(period_from="2026-03", period_to="2026-04", now=LATE, client_id="beta")
         assert [t.currency for t in s.totals] == ["USD"]
         t = usd(s)
-        assert (t.billed, t.collected, t.issued) == (Decimal("45.00"), Decimal("0"), 2)
+        assert (t.billed, t.collected, t.issued) == (Decimal("60.00"), Decimal("0"), 2)
         s = self.make().summary(
             period_from="2026-03", period_to="2026-04", now=LATE, client_ids=frozenset({"gamma"})
         )
@@ -424,7 +497,7 @@ class TestFinanceService:
         s = self.make().summary(period_from="2026-03", period_to="2026-04", now=LATE)
         got = {(p.period, p.currency): (p.billed, p.collected) for p in s.timeline}
         assert got["2026-03", "USD"] == (Decimal("60.00"), Decimal("30.00"))
-        assert got["2026-04", "USD"] == (Decimal("45.00"), Decimal("0"))
+        assert got["2026-04", "USD"] == (Decimal("60.00"), Decimal("0"))
         assert got["2026-04", "EUR"] == (Decimal("40.00"), Decimal("40.00"))
 
     def test_active_and_inactive_subscriptions_over_time(self):
@@ -475,15 +548,15 @@ class TestFinanceApi:
         body = root.get(self.URL, params={"from": "2026-03", "to": "2026-04"}).json()
         assert (body["period_from"], body["period_to"], body["client_id"]) == ("2026-03", "2026-04", None)
         usd_totals = next(t for t in body["totals"] if t["currency"] == "USD")
-        assert usd_totals["billed"] == "105.00" and usd_totals["collected"] == "30.00"
+        assert usd_totals["billed"] == "120.00" and usd_totals["collected"] == "30.00"
         assert usd_totals["invoices_issued"] == 4 and usd_totals["invoices_paid"] == 1
-        assert usd_totals["free"] == "45.00" and usd_totals["discounted"] == "15.00"
+        assert usd_totals["free"] == "60.00" and usd_totals["discounted"] == "30.00"
         assert body["subscriptions"][-1] == {"period": "2026-04", "active": 2, "inactive": 1}
         assert body["profitability"]["status"] == "not_connected"
 
-    def test_default_range_is_the_last_twelve_closed_months(self, seeded):
+    def test_default_range_is_the_last_twelve_months_up_to_the_current_one(self, seeded):
         body = admin_session(seeded, "root").get(self.URL).json()
-        assert (body["period_from"], body["period_to"]) == ("2025-05", "2026-04")
+        assert (body["period_from"], body["period_to"]) == ("2025-06", "2026-05")
 
     def test_a_scoped_admin_sees_only_its_clients(self, seeded):
         alice = admin_session(seeded, "alice")  # reaches alpha only

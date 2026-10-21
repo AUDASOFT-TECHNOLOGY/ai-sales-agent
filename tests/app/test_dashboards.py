@@ -146,8 +146,8 @@ class TestAdminDashboard:
         )
         f = body["finance"]
         usd = next(t for t in f["totals"] if t["currency"] == "USD")
-        assert usd["billed"] == "105.00" and usd["collected"] == "30.00"
-        assert usd["free"] == "45.00" and usd["discounted"] == "15.00"
+        assert usd["billed"] == "120.00" and usd["collected"] == "30.00"
+        assert usd["free"] == "60.00" and usd["discounted"] == "30.00"
         assert f["availability"] == "measured"
         assert body["series"]["subscriptions"]["points"][-1]["period"] == "2026-04"
         assert body["series"]["finance"]["timeline"]

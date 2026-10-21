@@ -3,11 +3,11 @@
 conflict between a manual and an electronic settlement."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
-from test_admin_billing_api import APRIL, BASE, generate, make_plan, put_on
+from test_admin_billing_api import BASE, generate, make_plan, put_on
 from test_admin_clients_api import as_alice, as_root, fx, fx_secrets
 
 from sales_app.billing import (
@@ -40,7 +40,7 @@ NOW = datetime(2026, 5, 1, 12, tzinfo=UTC)
 def body_of(**over):
     data = {
         "event_id": "evt_1",
-        "invoice": "INV-2026-04-alpha",
+        "invoice": "INV-2026-05-01-alpha",
         "amount": "30.00",
         "currency": "USD",
         "transaction_id": "txn_1",
@@ -58,7 +58,7 @@ def signed_headers(body, *, secret=SECRET, when=NOW):
 def event(**over):
     base = dict(
         event_id="evt_1",
-        invoice_reference="INV-2026-04-alpha",
+        invoice_reference="INV-2026-04-01-alpha",
         amount=Decimal("30.00"),
         currency="USD",
         transaction_id="txn_1",
@@ -77,7 +77,7 @@ class TestSignedWebhookProvider:
     def test_a_valid_signature_gives_the_normalised_event(self):
         body = body_of()
         got = self.provider.parse_webhook(body, signed_headers(body), now=NOW)
-        assert got == event()
+        assert got == event(invoice_reference="INV-2026-05-01-alpha")
 
     def test_header_names_are_case_insensitive(self):
         body = body_of()
@@ -140,7 +140,9 @@ class TestSignedWebhookProvider:
 
     def test_the_fake_provider_trusts_only_its_header(self):
         fake = FakePaymentProvider()
-        assert fake.parse_webhook(body_of(), {"x-fake-signature": "valid"}, now=NOW) == event()
+        assert fake.parse_webhook(body_of(), {"x-fake-signature": "valid"}, now=NOW) == event(
+            invoice_reference="INV-2026-05-01-alpha"
+        )
         with pytest.raises(InvalidSignatureError):
             fake.parse_webhook(body_of(), {}, now=NOW)
 
@@ -152,7 +154,7 @@ class TestSignedWebhookProvider:
 # ---- the store contract (memory and SQL) --------------------------------------------------------
 
 
-def make_invoice(client="alpha", period="2026-04", price="30"):
+def make_invoice(client="alpha", period="2026-04-01", price="30"):
     a = PlanAssignment(
         client_id=client,
         plan_id="pro",
@@ -164,7 +166,7 @@ def make_invoice(client="alpha", period="2026-04", price="30"):
         started_at=datetime(2026, 1, 1, tzinfo=UTC),
         assigned_by="root",
     )
-    return build_invoice(client, period, [a], now=NOW, created_by="root")
+    return build_invoice(a, date.fromisoformat(period), now=NOW, created_by="root")
 
 
 @pytest.fixture(params=["memory", "sql"])
@@ -215,7 +217,7 @@ def test_replaying_the_same_event_or_the_same_transaction_changes_nothing(store)
         ({"amount": Decimal("29.99")}, PaymentOutcome.AMOUNT_MISMATCH),
         ({"amount": Decimal("31.00")}, PaymentOutcome.AMOUNT_MISMATCH),
         ({"currency": "EUR"}, PaymentOutcome.CURRENCY_MISMATCH),
-        ({"invoice_reference": "INV-2026-04-ghost"}, PaymentOutcome.UNKNOWN_INVOICE),
+        ({"invoice_reference": "INV-2026-04-01-ghost"}, PaymentOutcome.UNKNOWN_INVOICE),
         ({"invoice_reference": "garbage"}, PaymentOutcome.UNKNOWN_INVOICE),
     ],
 )
@@ -246,7 +248,7 @@ def test_a_failure_never_undoes_a_payment(store):
 
 def test_clients_are_isolated_a_transaction_cannot_pay_two_invoices(store):
     pay(store)
-    other = pay(store, event_id="evt_2", invoice_reference="INV-2026-04-beta")
+    other = pay(store, event_id="evt_2", invoice_reference="INV-2026-04-01-beta")
     assert other.outcome is PaymentOutcome.TRANSACTION_REUSED
     [beta] = store.list_invoices(InvoiceFilter(client_id="beta"))
     assert beta.status is InvoiceStatus.PENDING and beta.payment_origin is None
@@ -286,10 +288,10 @@ def test_a_manual_payment_can_follow_a_failed_one_and_an_electronic_one_cannot_b
         store.settle(beta.invoice_id, InvoiceStatus.PAID, at=NOW, by="root")
 
 
-def test_overdue_is_computed_from_the_end_of_the_month(store):
-    invoice = alpha(store)  # April: due 15 days after 2026-05-01
-    assert not invoice.is_overdue(datetime(2026, 5, 15, 23, tzinfo=UTC))
-    assert invoice.is_overdue(datetime(2026, 5, 16, tzinfo=UTC))
+def test_overdue_is_computed_from_the_invoice_date(store):
+    invoice = alpha(store)  # dated 2026-04-01: due 15 days after
+    assert not invoice.is_overdue(datetime(2026, 4, 15, 23, tzinfo=UTC))
+    assert invoice.is_overdue(datetime(2026, 4, 16, tzinfo=UTC))
     pay(store, status=PaymentStatus.FAILED)
     assert alpha(store).is_overdue(datetime(2026, 6, 1, tzinfo=UTC))
     pay(store, event_id="e2", transaction_id="t2")
@@ -350,8 +352,8 @@ def api(fx):
     fx.application.plans = InMemoryPlanStore()
     fx.application.invoices = InMemoryInvoiceStore()
     fx.application.plans.create_plan(make_plan())
-    put_on(fx, "alpha")
-    put_on(fx, "beta")
+    put_on(fx, "alpha", when=datetime(2026, 5, 1, tzinfo=UTC))
+    put_on(fx, "beta", when=datetime(2026, 5, 1, tzinfo=UTC))
     assert generate(as_root(fx)).status_code == 200
     fx.client.cookies.clear()
     fx.application.payment_provider = lambda: SignedWebhookProvider(SECRET)
@@ -487,9 +489,9 @@ class TestManualVersusElectronic:
         )
 
     def test_payment_events_are_scoped_to_the_clients_an_admin_reaches(self, api):
-        body = body_of(invoice="INV-2026-04-beta", transaction_id="txn_b", event_id="evt_b")
+        body = body_of(invoice="INV-2026-05-01-beta", transaction_id="txn_b", event_id="evt_b")
         post(api, body, now_headers(api, body))
-        ghost = body_of(invoice="INV-2026-04-ghost", event_id="evt_g")
+        ghost = body_of(invoice="INV-2026-05-01-ghost", event_id="evt_g")
         post(api, ghost, now_headers(api, ghost))
         assert (
             len(as_root(api).get(f"{BASE.rsplit('/', 1)[0]}/payment-events").json()["events"]) == 2
@@ -507,10 +509,25 @@ class TestBillingStartAndGeneration:
         fx.application.plans = InMemoryPlanStore()
         fx.application.invoices = InMemoryInvoiceStore()
         fx.application.plans.create_plan(make_plan())
-        put_on(fx, "alpha", when=datetime(2026, 4, 16, tzinfo=UTC))  # 15 of 30 days
+        put_on(fx, "alpha", when=datetime(2026, 4, 16, tzinfo=UTC))  # full price, no prorata
         root = as_root(fx)
         first = generate(root).json()
         second = generate(root).json()
-        assert [i["amount"] for i in first["created"]] == ["15.00"]
+        assert [i["amount"] for i in first["created"]] == ["30.00"]
         assert second["created"] == [] and second["already_invoiced"] == 1
         assert len(root.get(BASE).json()["invoices"]) == 1
+
+
+def test_a_payment_reference_of_a_legacy_monthly_invoice_still_matches(store):
+    from dataclasses import replace
+
+    store.create(replace(make_invoice("alpha"), period="2026-03"))
+    store.create(make_invoice("alpha", "2026-04-01"))
+    legacy = store.process_payment(
+        event(invoice_reference="INV-2026-03-alpha"), at=NOW, by="webhook"
+    )
+    assert legacy.outcome is PaymentOutcome.APPLIED and legacy.invoice.period == "2026-03"
+    dated = store.process_payment(
+        event(event_id="evt_d", transaction_id="txn_d"), at=NOW, by="webhook"
+    )
+    assert dated.outcome is PaymentOutcome.APPLIED and dated.invoice.period == "2026-04-01"

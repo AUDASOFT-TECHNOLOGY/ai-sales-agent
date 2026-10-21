@@ -11,7 +11,8 @@ function invoice(over: Record<string, unknown> = {}) {
   return {
     invoice_id: 1,
     number: "INV-2026-04-alpha",
-    period: "2026-04",
+    period: "2026-04-20",
+    issued_on: "2026-04-20",
     currency: "USD",
     amount: "30.00",
     amount_after_discount: null,
@@ -128,12 +129,12 @@ describe("ClientInvoicesPage", () => {
       "/client/v1/subscription": { body: SUBSCRIPTION },
       "/client/v1/invoices": { body: { invoices: [invoice()] } },
       "/client/v1/invoices/1": {
-        body: { ...invoice(), lines: [{ plan_name: "Pro", monthly_price: "30.00", currency: "USD", days: 30, days_in_period: 30, amount: "30.00" }] },
+        body: { ...invoice(), lines: [{ plan_name: "Pro", monthly_price: "30.00", currency: "USD", amount: "30.00" }] },
       },
     });
     show();
     await userEvent.click(await screen.findByRole("button", { name: /Details INV-2026-04-alpha/ }));
-    expect(await screen.findByText("30 / 30")).toBeInTheDocument();
+    expect((await screen.findAllByText("Pro")).length).toBeGreaterThan(1);
     expect(calls.every((c) => c.method === "GET")).toBe(true);
     expect(screen.queryByRole("button", { name: /pay|mark|settle/i })).toBeNull();
   });

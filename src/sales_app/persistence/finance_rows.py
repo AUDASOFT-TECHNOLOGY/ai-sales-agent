@@ -12,7 +12,7 @@ from decimal import Decimal
 from sqlalchemy import Engine, and_, case, distinct, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from sales_app.billing import InvoiceStatus, parse_period
+from sales_app.billing import InvoiceStatus, parse_period, period_upper_bound
 from sales_app.finance.contracts import InvoiceAggregate, SubscriptionPoint
 from sales_app.persistence.tables import client_plan_assignments as assignments
 from sales_app.persistence.tables import invoices
@@ -57,7 +57,7 @@ class SqlFinanceReader:
                 func.sum(func.coalesce(invoices.c.discount_amount, 0)),
                 func.sum(free),
             )
-            .where(invoices.c.period >= period_from, invoices.c.period <= period_to)
+            .where(invoices.c.period >= period_from, invoices.c.period <= period_upper_bound(period_to))
             .group_by(invoices.c.period, invoices.c.currency, invoices.c.status)
             .order_by(invoices.c.period, invoices.c.currency, invoices.c.status)
         )

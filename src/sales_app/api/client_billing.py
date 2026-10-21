@@ -14,7 +14,7 @@ transaction and event ids) are not shown. Amounts are decimal strings. Every ans
 `Cache-Control: no-store`.
 """
 
-from datetime import datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -22,7 +22,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from sales_app.api.client import make_current_client_dependency
-from sales_app.billing import Invoice, InvoiceFilter, InvoiceStatus, parse_period
+from sales_app.billing import Invoice, InvoiceFilter, InvoiceStatus, next_cycle_date
 from sales_app.bootstrap import Application
 from sales_app.client_profiles import ClientProfile
 from sales_app.sourcing.errors import StoreUnavailableError
@@ -34,8 +34,6 @@ class ClientInvoiceLine(BaseModel):
     plan_name: str
     monthly_price: str
     currency: str
-    days: int
-    days_in_period: int
     amount: str
 
 
@@ -43,6 +41,7 @@ class ClientInvoice(BaseModel):
     invoice_id: int
     number: str
     period: str
+    issued_on: date
     currency: str
     amount: str  # billed, before any discount
     amount_after_discount: str | None
@@ -101,6 +100,7 @@ def _invoice(invoice: Invoice, now: datetime) -> dict:
         "invoice_id": invoice.invoice_id,
         "number": invoice.number,
         "period": invoice.period,
+        "issued_on": invoice.issued_on,
         "currency": invoice.currency,
         "amount": format(invoice.amount, "f"),
         "amount_after_discount": _money(invoice.amount_after_discount),
@@ -162,8 +162,6 @@ def create_client_billing_router(application: Application) -> APIRouter:
                     plan_name=line.plan_name,
                     monthly_price=format(line.monthly_price, "f"),
                     currency=line.currency,
-                    days=line.days,
-                    days_in_period=line.days_in_period,
                     amount=format(line.amount, "f"),
                 )
                 for line in invoice.lines
@@ -195,12 +193,15 @@ def create_client_billing_router(application: Application) -> APIRouter:
                     since=assignment.started_at,
                 )
             unpaid = [i for i in mine if i.status in (InvoiceStatus.PENDING, InvoiceStatus.FAILED)]
-            last = mine[0] if mine else None  # newest period first
-            this_month = f"{now.year:04d}-{now.month:02d}"
+            last = mine[0] if mine else None  # newest first
             return Subscription(
                 status="active" if assignment is not None else "no_plan",
                 plan=plan,
-                next_billing_at=parse_period(this_month)[1] if assignment is not None else None,
+                next_billing_at=datetime.combine(
+                    next_cycle_date(assignment.started_at, now), time.min, tzinfo=UTC
+                )
+                if assignment is not None
+                else None,
                 unpaid_invoices=len(unpaid),
                 overdue_invoices=sum(1 for i in unpaid if i.is_overdue(now)),
                 last_payment=None

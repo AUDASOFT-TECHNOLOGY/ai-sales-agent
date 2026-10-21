@@ -27,7 +27,7 @@ from sales_app.api.dashboard_support import (
     incident_series,
     read_notifications,
 )
-from sales_app.billing import InvoiceFilter, InvoiceStatus, parse_period
+from sales_app.billing import InvoiceFilter, InvoiceStatus, next_cycle_date
 from sales_app.bootstrap import Application
 from sales_app.client_profiles import ClientProfile
 from sales_app.dashboards import assemble
@@ -123,7 +123,6 @@ class _ClientBuilder:
         except StoreUnavailableError:
             return {"availability": "not_tracked", "reason": UNREADABLE}
         unpaid = [i for i in mine if i.status in (InvoiceStatus.PENDING, InvoiceStatus.FAILED)]
-        this_month = f"{self.today.year:04d}-{self.today.month:02d}"
         return {
             "availability": MEASURED,
             "subscription": {
@@ -131,7 +130,9 @@ class _ClientBuilder:
                 "plan_name": assignment.plan_name if assignment is not None else None,
                 "monthly_price": format(assignment.monthly_price, "f") if assignment else None,
                 "currency": assignment.currency if assignment is not None else None,
-                "next_billing_at": parse_period(this_month)[1].isoformat() if assignment else None,
+                "next_billing_at": next_cycle_date(assignment.started_at, self.now).isoformat()
+                if assignment
+                else None,
             },
             "invoices": {
                 "issued": indicator(len(mine)),
@@ -146,6 +147,7 @@ class _ClientBuilder:
                         in (
                             "number",
                             "period",
+                            "issued_on",
                             "currency",
                             "amount",
                             "amount_after_discount",

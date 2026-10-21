@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from sales_app.admin_auth import AdminRole, AdminUser
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency, require_role
+from sales_app.api.admin_billing import issue_after_assignment
 from sales_app.api.admin_clients import client_wiring_and_document
 from sales_app.bootstrap import Application
 from sales_app.plans import (
@@ -264,7 +265,11 @@ def create_admin_plans_router(application: Application) -> APIRouter:
         plans = store()
 
         def assign() -> ClientPlanResponse:
-            plans.assign(client_id, body.plan_id, at=application.clock.now(), by=admin.username)
+            now = application.clock.now()
+            plans.assign(client_id, body.plan_id, at=now, by=admin.username)
+            if body.plan_id is not None:
+                # A new assignment is a new anchor: invoice at once, at the new plan's price.
+                issue_after_assignment(application, client_id, admin.username)
             return client_plan(client_id, plans)
 
         try:

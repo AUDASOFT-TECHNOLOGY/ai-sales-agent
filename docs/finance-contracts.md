@@ -14,10 +14,10 @@ What the Admin dashboards (lot 4) read. Code: `src/sales_app/finance/` (pure rul
 - **Free** (`free`): what was given free: a `FOR_FREE` invoice's whole amount plus the free amount of
   discounted invoices. **Discounted** (`discounted`): the sum of the discounts.
 - **Pending** / **overdue**: `PENDING` and `FAILED` invoices, by their `after_discount` amount. They
-  are overdue from `due_at` (the end of the invoice's month plus 15 days), computed against the
+  are overdue from `due_at` (the invoice date plus 15 days; the end of the month plus 15 days for a legacy monthly invoice), computed against the
   clock at the time of the request; otherwise pending.
 - **Currencies are never added.** Every total and timeline point is per currency.
-- The **timeline** is by invoice period: for each month, what was billed for it and how much of that
+- The **timeline** is by month of the invoice date: for each month, what was billed in it and how much of that
   is collected (by the time of the request, not by payment date).
 - A **subscription** is active at the end of a month if the client had a plan assignment in force at
   the end of that month's last day; inactive if it had been on a plan before but was not then.
@@ -65,14 +65,14 @@ Amounts are decimal strings. `totals` has one entry per currency that has invoic
 
 - `GET /client/v1/invoices` -> `{ "invoices": [ClientInvoice] }`, newest period first.
 - `GET /client/v1/invoices/{invoice_id}` -> `ClientInvoice` + `lines` (`plan_name`, `monthly_price`,
-  `currency`, `days`, `days_in_period`, `amount`). Another client's invoice and an unknown one are the
+  `currency`, `amount`). Another client's invoice and an unknown one are the
   same 404.
 - `GET /client/v1/subscription` -> `status` (`active` | `no_plan`), `plan` (`plan_id`, `name`,
   `monthly_price`, `currency`, `billing_period`, `included_credits`, `daily_quota`, `since`),
-  `next_billing_at`, `unpaid_invoices`, `overdue_invoices`, `last_payment` (the most recent invoice:
+  `next_billing_at` (the next cycle date), `unpaid_invoices`, `overdue_invoices`, `last_payment` (the most recent invoice:
   `invoice_number`, `period`, `status`, `collected`, `settled_at`).
 
-`ClientInvoice`: `invoice_id`, `number`, `period`, `currency`, `amount` (billed),
+`ClientInvoice`: `invoice_id`, `number`, `period` (cycle date `YYYY-MM-DD`), `issued_on`, `currency`, `amount` (billed),
 `amount_after_discount`, `discount_amount`, `free_amount`, `status`, `collected`, `due_at`,
 `overdue`, `created_at`, `status_changed_at`. No internal trace (who settled it, provider ids) is
 shown, and nothing here changes an invoice.
@@ -80,8 +80,9 @@ shown, and nothing here changes an invoice.
 ## Automatic invoicing
 
 `sales_app.billing_service.AutoBilling` (run every hour by `BillingLoop` under the `platform` /
-`billing` lease): invoices the closed months that are due and missing, from the month of each
-client's first plan assignment, at most 12 months back. Idempotent and restart-safe (nothing is
+`billing` lease): issues every invoice that is due (cycle date <= today) and missing, from each
+client's current plan assignment (immediately on assignment, then the same day each month, at the
+plan's price, no prorata). Idempotent and restart-safe (nothing is
 remembered: what is missing is recomputed; the database refuses a second invoice per client and
 period). Failures open a `billing_error` notification for the Admin (once per client and period while
 open, closed when the invoice is made) and an audit entry (`billing.invoice.auto_generated`,

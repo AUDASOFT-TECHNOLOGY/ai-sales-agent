@@ -28,13 +28,17 @@ Revansa never collects money. An invoice becomes `PAID` in one of two ways, and 
   invoice the Admin already settled is refused and traced (outcome `already_settled`); it changes
   nothing.
 - **Overdue is computed, not stored**: an invoice still `PENDING` or `FAILED` 15 days (`DUE_DAYS`) after
-  the end of its month. The API returns `due_at` and `overdue`; it never goes stale and needs no job.
+  the invoice date (the end of the month for a legacy `YYYY-MM` invoice). The API returns `due_at` and `overdue`; it never goes stale and needs no job.
 
 ## When billing starts
 
-A client is billed from the day its plan was assigned (`plans.assign`, `started_at`): earlier days cost
-nothing and the first invoice is prorated from that day. Generating a month
-(`POST /admin/v1/billing/invoices/generate`) is idempotent: a second call creates nothing and reports
+A client is billed from the day its plan was assigned (`plans.assign`, `started_at`). An invoice
+dated that day is issued **at once** (the Admin endpoints that assign a plan call the billing service),
+then one on the same day of every following month (day clamped to the month's last day, anchor day
+kept). The amount is always the plan's price: no prorata. A new plan assignment is a new anchor
+(immediate invoice at the new price, old cycles stop). An invoice's `period` is its cycle date
+`YYYY-MM-DD` (older invoices keep `YYYY-MM`). `POST /admin/v1/billing/invoices/generate` (no body
+needed) issues every invoice due now and is idempotent: a second call creates nothing and reports
 `already_invoiced`; the database also refuses a second invoice per client and period.
 
 ## The webhook

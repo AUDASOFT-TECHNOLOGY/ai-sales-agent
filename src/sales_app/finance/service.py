@@ -8,7 +8,7 @@ the in-memory stores) into the contract of `sales_app.finance.contracts`. The ru
 - collected = `PAID` invoices only. `FOR_FREE` and `DISCOUNTED_100` add to `free` / `discounted`
   and are never collected;
 - pending = `PENDING` / `FAILED` before `due_at`, overdue = the same from `due_at` on
-  (`Invoice.due_at`: `DUE_DAYS` after the end of the month), computed from the clock;
+  (`Invoice.due_at`: `DUE_DAYS` after the invoice date), computed from the clock;
 - the timeline is by invoice period (what was billed that month, and how much of it is collected);
 - profitability is an extension point (`CostSource`): without one it says `not_connected`. Nothing
   is estimated.
@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
-from sales_app.billing import DUE_DAYS, InvalidPeriodError, InvoiceFilter, InvoiceStatus, parse_period
+from sales_app.billing import InvalidPeriodError, due_at_of, InvoiceFilter, InvoiceStatus, parse_period
 from sales_app.finance.contracts import (
     FinanceSummary,
     InvoiceAggregate,
@@ -110,9 +110,8 @@ class FinanceService:
         timeline: dict[tuple[str, str], TimelinePoint] = {}
         for row in rows:
             t = totals.setdefault(row.currency, Totals(currency=row.currency))
-            point = timeline.setdefault(
-                (row.period, row.currency), TimelinePoint(row.period, row.currency)
-            )
+            month = row.period[:7]  # an invoice counts in the month of its date
+            point = timeline.setdefault((month, row.currency), TimelinePoint(month, row.currency))
             t.issued += row.count
             t.billed += row.billed
             t.after_discount += row.after_discount
@@ -128,7 +127,7 @@ class FinanceService:
             elif row.status == InvoiceStatus.DISCOUNTED_100.value:
                 t.discounted_count += row.count
             elif row.status in UNPAID:
-                if now >= month_end(row.period) + timedelta(days=DUE_DAYS):
+                if now >= due_at_of(row.period):
                     t.overdue += row.after_discount
                     t.overdue_count += row.count
                 else:

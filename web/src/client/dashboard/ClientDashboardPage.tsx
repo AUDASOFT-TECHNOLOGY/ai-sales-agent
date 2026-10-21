@@ -297,7 +297,7 @@ function Body({
                     {bill.invoices.recent.map((i) => (
                       <tr key={i.number}>
                         <th scope="row">{i.number}</th>
-                        <td>{i.period}</td>
+                        <td>{i.issued_on ?? i.period}</td>
                         <td>{money(i.amount, i.currency, locale)}</td>
                         <td>{money(i.amount_after_discount ?? i.amount, i.currency, locale)}</td>
                         <td>{(tx as unknown as Record<string, string>)[`s_${i.status}`] ?? i.status}</td>

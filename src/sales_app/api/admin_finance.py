@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sales_app.admin_auth import AdminRole, AdminUser
 from sales_app.api.admin import make_current_admin_dependency
 from sales_app.billing import InvalidPeriodError, parse_period
-from sales_app.billing_service import last_closed_periods
+from sales_app.billing_service import recent_months
 from sales_app.bootstrap import Application
 from sales_app.finance.contracts import FinanceSummary
 from sales_app.finance.service import FinanceService, StoreFinanceReader
@@ -140,8 +140,8 @@ def create_admin_finance_router(application: Application) -> APIRouter:
     ) -> FinanceSummaryResponse:
         finance = service()
         now = application.clock.now()
-        last = last_closed_periods(now, 1)[0]
-        first = last_closed_periods(now, 12)[0]
+        last = recent_months(now, 1)[0]
+        first = recent_months(now, 12)[0]
         period_to, period_from = to or last, from_ or (first if to is None else None)
         try:
             for value in (period_from, period_to):

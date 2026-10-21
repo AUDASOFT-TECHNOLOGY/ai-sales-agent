@@ -1,6 +1,7 @@
-"""Monthly invoices: periods, amounts, statuses, history, migration 0009 and the two stores."""
+"""Invoices: cycles, fixed amounts, statuses, history, migration 0009/0026 and the two stores."""
 
-from datetime import UTC, datetime, timedelta
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -13,9 +14,13 @@ from sales_app.billing import (
     InvoiceNotFoundError,
     InvoiceStatus,
     InvoiceStatusError,
-    MixedCurrenciesError,
+    add_months,
     build_invoice,
+    cycle_dates,
+    due_at_of,
+    next_cycle_date,
     parse_period,
+    parse_reference,
 )
 from sales_app.persistence import create_database_engine, upgrade_database
 from sales_app.persistence.invoice_rows import SqlInvoiceStore
@@ -57,128 +62,113 @@ def assignment(
     )
 
 
-def build(assignments, period="2026-05", client="alpha", now=NOW):
-    return build_invoice(client, period, assignments, now=now, created_by="root")
+def build(a=None, cycle=date(2026, 5, 20), now=NOW):
+    return build_invoice(a or assignment(at(5, 20)), cycle, now=now, created_by="root")
 
 
 # ---- periods ------------------------------------------------------------------------------------
 
 
-def test_a_period_is_a_calendar_month_in_utc():
+def test_a_period_is_a_cycle_day_or_a_legacy_calendar_month_in_utc():
+    assert parse_period("2026-10-20") == (at(10, 20), at(10, 21))
     assert parse_period("2026-02") == (at(2, 1), at(3, 1))
     assert parse_period("2026-12") == (at(12, 1), datetime(2027, 1, 1, tzinfo=UTC))
 
 
-@pytest.mark.parametrize("bad", ["2026-13", "2026-00", "26-05", "2026/05", "2026-5", "", "May"])
+@pytest.mark.parametrize(
+    "bad", ["2026-13", "2026-00", "26-05", "2026/05", "2026-5", "", "May", "2026-02-30", "2026-05-1"]
+)
 def test_a_malformed_period_is_refused(bad):
     with pytest.raises(InvalidPeriodError):
         parse_period(bad)
 
 
-def test_only_a_month_that_has_ended_can_be_invoiced():
-    on_plan = [assignment(at(1, 1))]
-    with pytest.raises(InvalidPeriodError):
-        build(on_plan, period="2026-07")  # NOW is 2026-07-10: July is not over
-    with pytest.raises(InvalidPeriodError):
-        build(on_plan, period="2026-08")
-    assert build(on_plan, period="2026-06") is not None
-    just_after = datetime(2026, 8, 1, tzinfo=UTC)
-    assert build(on_plan, period="2026-07", now=just_after) is not None  # exactly at month end
+def test_the_reference_of_an_invoice_reads_back_in_both_forms():
+    assert parse_reference("INV-2026-10-20-alpha") == ("alpha", "2026-10-20")
+    assert parse_reference("INV-2026-05-alpha") == ("alpha", "2026-05")
+    assert parse_reference("INV-2026-05-alpha-2") == ("alpha-2", "2026-05")
+    assert parse_reference("nonsense") is None
 
 
-# ---- amounts ------------------------------------------------------------------------------------
+# ---- cycles -------------------------------------------------------------------------------------
 
 
-def test_a_full_month_costs_exactly_the_monthly_price():
-    invoice = build([assignment(at(1, 1), price="49.90")])
+def test_the_anchor_day_is_kept_and_clamped_to_the_end_of_short_months():
+    anchor = date(2026, 1, 31)
+    assert [add_months(anchor, n) for n in range(5)] == [
+        date(2026, 1, 31),
+        date(2026, 2, 28),  # clamped, but...
+        date(2026, 3, 31),  # ...the original anchor is kept
+        date(2026, 4, 30),
+        date(2026, 5, 31),
+    ]
+    assert add_months(date(2024, 1, 30), 1) == date(2024, 2, 29)
+    assert add_months(date(2026, 11, 20), 2) == date(2027, 1, 20)
+
+
+def test_the_first_cycle_is_the_assignment_day_then_the_same_day_each_month():
+    start = datetime(2026, 10, 20, 15, tzinfo=UTC)
+    assert cycle_dates(start, None, datetime(2026, 10, 20, 15, tzinfo=UTC)) == [date(2026, 10, 20)]
+    assert cycle_dates(start, None, datetime(2026, 11, 19, 23, tzinfo=UTC)) == [date(2026, 10, 20)]
+    assert cycle_dates(start, None, datetime(2026, 12, 21, tzinfo=UTC)) == [
+        date(2026, 10, 20),
+        date(2026, 11, 20),
+        date(2026, 12, 20),
+    ]
+    assert cycle_dates(start, None, datetime(2026, 10, 19, tzinfo=UTC)) == []
+
+
+def test_the_cycles_of_an_ended_assignment_stop():
+    start, end = at(1, 20), at(3, 20, 10)
+    assert cycle_dates(start, end, at(8, 1)) == [date(2026, 1, 20), date(2026, 2, 20)]
+
+
+def test_the_next_cycle_date_is_the_next_anchor_day():
+    assert next_cycle_date(at(10, 20), datetime(2026, 10, 20, 9, tzinfo=UTC)) == date(2026, 11, 20)
+    assert next_cycle_date(at(1, 31), at(2, 10)) == date(2026, 2, 28)
+
+
+def test_an_invoice_falls_due_after_its_date_and_a_legacy_one_after_its_month():
+    assert due_at_of("2026-10-20") == at(10, 20) + (at(11, 4) - at(10, 20))  # 15 days
+    assert due_at_of("2026-05") == at(6, 1) + (at(6, 16) - at(6, 1))
+
+
+# ---- amounts: always the plan's price -----------------------------------------------------------
+
+
+def test_the_invoice_is_dated_by_its_cycle_and_costs_the_plan_price():
+    invoice = build(assignment(at(5, 20), price="49.90"))
     assert invoice.amount == Decimal("49.90")
+    assert invoice.period == "2026-05-20" and invoice.issued_on == date(2026, 5, 20)
     [line] = invoice.lines
-    assert (line.days, line.days_in_period, line.amount) == (31, 31, Decimal("49.90"))
+    assert (line.plan_id, line.monthly_price, line.currency, line.amount) == (
+        "pro",
+        Decimal("49.90"),
+        "USD",
+        Decimal("49.90"),
+    )
     assert (invoice.status, invoice.currency, invoice.number) == (
         InvoiceStatus.PENDING,
         "USD",
-        "INV-2026-05-alpha",
+        "INV-2026-05-20-alpha",
     )
 
 
-def test_every_month_length_is_a_full_month():
-    for period, days in (("2026-02", 28), ("2024-02", 29), ("2026-04", 30)):
-        invoice = build([assignment(datetime(2023, 1, 1, tzinfo=UTC), price="30")], period=period)
-        assert invoice.lines[0].days == invoice.lines[0].days_in_period == days
-        assert invoice.amount == Decimal("30.00")
+def test_there_is_no_prorata_whatever_the_day_of_the_month():
+    for cycle in (date(2026, 2, 28), date(2026, 5, 31), date(2026, 6, 1)):
+        assert build(assignment(at(1, 1), price="30"), cycle=cycle).amount == Decimal("30")
 
 
-def test_joining_mid_month_is_prorated_from_the_day_it_started():
-    # started on 21 May at any hour: the day belongs to the plan in force at its end -> 11 days
-    invoice = build([assignment(at(5, 21, 14), price="31")])
-    assert invoice.lines[0].days == 11
-    assert invoice.amount == Decimal("11.00")
+def test_a_free_plan_gives_a_zero_invoice():
+    invoice = build(assignment(at(5, 20), price="0"))
+    assert invoice.amount == Decimal("0") and invoice.status is InvoiceStatus.PENDING
 
 
-def test_leaving_mid_month_stops_at_the_day_before():
-    # ended at 10 May 00:00: the 10th ends with no plan -> days 1..9
-    invoice = build([assignment(at(1, 1), at(5, 10))])
-    assert invoice.lines[0].days == 9
-
-
-def test_a_plan_change_splits_the_month_into_lines_that_add_up():
-    old = assignment(at(1, 1), at(5, 11), plan="basic", price="31", credits=100, quota=10)
-    new = assignment(at(5, 11), plan="pro", price="62", credits=900, quota=90)
-    invoice = build([new, old])
-    assert [(l.plan_id, l.days, l.amount) for l in invoice.lines] == [
-        ("basic", 10, Decimal("10.00")),
-        ("pro", 21, Decimal("42.00")),
-    ]
-    assert invoice.amount == Decimal("52.00")
-    assert (invoice.lines[0].included_credits, invoice.lines[1].daily_quota) == (100, 90)
-
-
-def test_a_same_instant_handover_gives_each_day_to_one_plan_only():
-    old = assignment(at(1, 1), at(5, 15, 12), plan="a", price="31")
-    new = assignment(at(5, 15, 12), plan="b", price="31")
-    invoice = build([old, new])
-    assert sum(l.days for l in invoice.lines) == 31
-
-
-def test_a_gap_without_a_plan_costs_nothing():
-    first = assignment(at(5, 1), at(5, 6))  # days 1..5
-    second = assignment(at(5, 21))  # days 21..31
-    invoice = build([first, second])
-    assert sum(l.days for l in invoice.lines) == 5 + 11
-    assert invoice.amount == Decimal("5.00") + Decimal("11.00")
-
-
-def test_rounding_is_to_the_cent_per_line_half_up():
-    invoice = build([assignment(at(5, 1), at(5, 2), price="10")])  # 1 day of 31
-    assert invoice.lines[0].amount == Decimal("0.32")  # 0.3225...
-    # 0.14 / 28 = 0.005 exactly: half-up gives a cent where banker's rounding would give none
-    february = build([assignment(at(2, 1), at(2, 2), price="0.14")], period="2026-02")
-    assert february.lines[0].amount == Decimal("0.01")
-
-
-def test_no_plan_day_means_no_invoice():
-    assert build([]) is None
-    assert build([assignment(at(7, 1))]) is None  # starts after May
-    assert build([assignment(at(1, 1), at(5, 1))]) is None  # ended before May 1st ended
-    assert build([assignment(at(1, 1))], client="beta") is None  # someone else's plan
-
-
-def test_a_free_plan_gives_a_zero_invoice_not_no_invoice():
-    invoice = build([assignment(at(1, 1), price="0")])
-    assert invoice.amount == Decimal("0.00") and invoice.status is InvoiceStatus.PENDING
-
-
-def test_mixed_currencies_are_not_added_up():
-    usd = assignment(at(1, 1), at(5, 11), currency="USD")
-    eur = assignment(at(5, 11), plan="eu", currency="EUR")
-    with pytest.raises(MixedCurrenciesError):
-        build([usd, eur])
-
-
-def test_only_the_clients_own_assignments_count():
-    mine = assignment(at(1, 1), price="31")
-    theirs = assignment(at(1, 1), client="beta", price="1000")
-    assert build([theirs, mine]).amount == Decimal("31.00")
+def test_a_legacy_monthly_invoice_stays_readable():
+    legacy = replace(build(), period="2026-05")
+    assert legacy.number == "INV-2026-05-alpha"
+    assert legacy.issued_on == date(2026, 5, 1)
+    assert legacy.due_at == at(6, 16)
 
 
 # ---- the stores (one contract) ------------------------------------------------------------------
@@ -194,14 +184,15 @@ def store(request):
 
 
 def invoice(client="alpha", period="2026-05", price="31"):
-    return build([assignment(at(1, 1), client=client, price=price)], period=period, client=client)
+    made = build(assignment(at(1, 1), client=client, price=price))
+    return replace(made, period=period)  # "2026-05" is a legacy month: both forms are kept
 
 
 def test_an_invoice_is_kept_with_its_lines_and_an_id(store):
     kept = store.create(invoice())
     assert kept.invoice_id > 0
     assert store.get(kept.invoice_id) == kept
-    assert store.get(kept.invoice_id).lines[0].days == 31
+    assert store.get(kept.invoice_id).lines[0].amount == Decimal("31.00")
     assert store.get(999) is None
 
 
@@ -286,8 +277,7 @@ def test_editing_a_plan_afterwards_changes_no_invoice_and_no_assignment_snapshot
         Plan("pro", "Pro", Decimal(31), "USD", 100, 10, True, at(1, 1), at(1, 1), "r")
     )
     plans.assign("alpha", "pro", at=at(1, 1), by="root")
-    start, end = parse_period("2026-05")
-    kept = invoices.create(build(plans.assignments_between(start, end)))
+    kept = invoices.create(build(plans.current_assignment("alpha")))
 
     plans.update_plan(
         Plan("pro", "Pro v2", Decimal(999), "EUR", 1, 1, False, at(1, 1), at(6, 1), "r")
@@ -301,9 +291,9 @@ def test_editing_a_plan_afterwards_changes_no_invoice_and_no_assignment_snapshot
         "USD",
         "Pro",
     )
-    # and rebuilding the same month from what the plans now say gives the same figures
-    rebuilt = build(plans.assignments_between(start, end))
-    assert rebuilt.amount == kept.amount and rebuilt.lines == kept.lines
+    # and the assignment still carries the terms it recorded
+    [old] = plans.assignment_history("alpha")
+    assert build(old).lines == kept.lines
 
 
 def test_assignments_between_returns_only_those_in_force_in_the_window():
@@ -391,3 +381,30 @@ def test_a_paid_invoice_cannot_be_discounted(store):
         store.settle(paid.invoice_id, InvoiceStatus.DISCOUNTED_100, at=NOW, by="root")
     assert store.get(paid.invoice_id).discount_percent == 0
     assert store.get(paid.invoice_id).is_collected
+
+
+def test_a_month_filter_covers_cycle_dates_and_legacy_months(store):
+    store.create(invoice("alpha", "2026-05"))
+    store.create(invoice("alpha", "2026-06-20"))
+    store.create(invoice("alpha", "2026-07-20"))
+
+    def periods(**kw):
+        return [i.period for i in store.list_invoices(InvoiceFilter(**kw))]
+
+    assert periods() == ["2026-07-20", "2026-06-20", "2026-05"]
+    assert periods(period_from="2026-06", period_to="2026-06") == ["2026-06-20"]
+    assert periods(period_to="2026-06") == ["2026-06-20", "2026-05"]
+    assert periods(period_from="2026-06-21") == ["2026-07-20"]
+
+
+def test_0026_widens_the_period_to_hold_a_cycle_date_and_keeps_old_invoices():
+    engine = create_database_engine("sqlite://")
+    upgrade_database(engine, "0025")
+    legacy_store = SqlInvoiceStore(engine)
+    legacy_store.create(invoice(period="2026-05"))
+    upgrade_database(engine, "0026")
+    assert current_revision(engine) == "0026"
+    kept = SqlInvoiceStore(engine)
+    assert kept.create(invoice(period="2026-10-20")) is not None
+    assert kept.create(invoice(period="2026-10-20")) is None  # still unique per client and period
+    assert [i.period for i in kept.list_invoices(InvoiceFilter())] == ["2026-10-20", "2026-05"]

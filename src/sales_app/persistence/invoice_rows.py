@@ -29,6 +29,7 @@ from sales_app.billing import (
     decide,
     discount_100,
     manual_record,
+    period_upper_bound,
     parse_reference,
     webhook_record,
 )
@@ -153,7 +154,7 @@ class SqlInvoiceStore:
         if where.period_from is not None:
             query = query.where(invoices.c.period >= where.period_from)
         if where.period_to is not None:
-            query = query.where(invoices.c.period <= where.period_to)
+            query = query.where(invoices.c.period <= period_upper_bound(where.period_to))
         if where.status is not None:
             query = query.where(invoices.c.status == where.status.value)
         query = query.order_by(invoices.c.period.desc(), invoices.c.client_id)

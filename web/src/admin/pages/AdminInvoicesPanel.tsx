@@ -1,5 +1,5 @@
-/** Billing > Invoices: the monthly invoices (GET /admin/v1/billing/invoices -- real data, no fixtures).
- *  Filter by client, period and status. An owner generates a finished month (invoices already issued
+/** Billing > Invoices: the invoices, one per billing cycle (GET /admin/v1/billing/invoices -- real data, no fixtures).
+ *  Filter by client, period and status. An owner issues the invoices that are due now (invoices already issued
  *  are never rebuilt) and declares an unpaid invoice PAID or FOR FREE, once. A payment can also be
  *  confirmed electronically (signed webhook, see docs/billing-payments.md): the invoice then shows the
  *  origin and transaction, and "Mark PAID" is no longer offered (the server refuses it with a 409).
@@ -48,7 +48,7 @@ function StatusChips({ invoice }: { invoice: Invoice }) {
 type LoadState = "loading" | "ready" | "error";
 
 function generateNotice(result: GenerateInvoicesResult): string {
-  const parts = [`${result.created.length} invoice(s) created for ${result.period}`];
+  const parts = [`${result.created.length} invoice(s) issued`];
   if (result.already_invoiced > 0) parts.push(`${result.already_invoiced} already invoiced (left as they were)`);
   if (result.skipped.length > 0) {
     parts.push(`not invoiced: ${result.skipped.map((s) => `${s.client_id} (${s.reason})`).join(", ")}`);
@@ -67,7 +67,6 @@ export function AdminInvoicesPanel() {
   const [state, setState] = useState<LoadState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const [period, setPeriod] = useState("");
   const [generating, setGenerating] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
   const [viewing, setViewing] = useState<Invoice | null>(null);
@@ -117,11 +116,11 @@ export function AdminInvoicesPanel() {
     setGenerating(true);
     setNotice(null);
     try {
-      const result = await adminGenerateInvoices(period);
+      const result = await adminGenerateInvoices();
       setNotice({ tone: "success", text: generateNotice(result) });
       setReload((n) => n + 1);
     } catch (err) {
-      setNotice({ tone: "danger", text: err instanceof AdminApiError ? err.message : "Could not generate the invoices." });
+      setNotice({ tone: "danger", text: err instanceof AdminApiError ? err.message : "Could not issue the invoices." });
     } finally {
       setGenerating(false);
     }
@@ -154,17 +153,14 @@ export function AdminInvoicesPanel() {
 
       {canEdit ? (
         <Glass level={1} className="admin-detail-card">
-          <h3 className="t-label c-2">Generate invoices</h3>
+          <h3 className="t-label c-2">Issue due invoices</h3>
           <div className="admin-form">
-            <TextInput
-              label="Month to invoice"
-              type="month"
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              helper="A month that has ended. Invoices already issued for it are left untouched."
-            />
-            <Button variant="primary" size="sm" loading={generating} disabled={!period} onClick={() => void onGenerate()}>
-              Generate invoices
+            <p className="c-2 t-body-sm">
+              Invoices are issued automatically when a plan is assigned, then every month on the same day, at the plan price.
+              Use this to issue any that are due now; invoices already issued are left untouched.
+            </p>
+            <Button variant="primary" size="sm" loading={generating} onClick={() => void onGenerate()}>
+              Issue due invoices
             </Button>
           </div>
         </Glass>
@@ -222,7 +218,7 @@ export function AdminInvoicesPanel() {
 
       {state === "ready" && invoices.length === 0 ? (
         <Glass level={1} className="admin-placeholder admin-placeholder--center">
-          <p className="c-2">No invoices match.{canEdit ? " Generate a finished month to create them." : ""}</p>
+          <p className="c-2">No invoices match.</p>
         </Glass>
       ) : null}
 
@@ -233,7 +229,7 @@ export function AdminInvoicesPanel() {
               <tr>
                 <th scope="col">Invoice</th>
                 <th scope="col">Client</th>
-                <th scope="col">Period</th>
+                <th scope="col">Invoice date</th>
                 <th scope="col" className="admin-table__num">
                   Amount
                 </th>
@@ -251,7 +247,7 @@ export function AdminInvoicesPanel() {
                     {i.number}
                   </th>
                   <td className="c-2">{clientName(i.client_id)}</td>
-                  <td className="tabular">{i.period}</td>
+                  <td className="tabular">{i.issued_on ?? i.period}</td>
                   <td className="admin-table__num tabular">
                     {i.amount} {i.currency}
                   </td>
@@ -322,17 +318,14 @@ function InvoiceModal({ invoice, clientName, onClose }: { invoice: Invoice; clie
       }
     >
       <p className="c-2">
-        {clientName} · {invoice.period} · <StatusChips invoice={invoice} />
+        {clientName} · {invoice.issued_on ?? invoice.period} · <StatusChips invoice={invoice} />
       </p>
       <table className="admin-table">
         <thead>
           <tr>
             <th scope="col">Plan</th>
             <th scope="col" className="admin-table__num">
-              Monthly price
-            </th>
-            <th scope="col" className="admin-table__num">
-              Days
+              Plan price
             </th>
             <th scope="col" className="admin-table__num">
               Credits
@@ -353,9 +346,6 @@ function InvoiceModal({ invoice, clientName, onClose }: { invoice: Invoice; clie
               </th>
               <td className="admin-table__num tabular">
                 {l.monthly_price} {l.currency}
-              </td>
-              <td className="admin-table__num tabular">
-                {l.days}/{l.days_in_period}
               </td>
               <td className="admin-table__num tabular">{l.included_credits}</td>
               <td className="admin-table__num tabular">{l.daily_quota}</td>
