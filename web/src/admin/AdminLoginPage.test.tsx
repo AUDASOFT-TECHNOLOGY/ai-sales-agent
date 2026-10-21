@@ -197,10 +197,10 @@ describe("AdminShell navigation", () => {
     for (const label of ["Clients", "LLM Models configured", "Active Agents", "Total Revenue"]) {
       expect(within(statGrid).getByText(label)).toBeInTheDocument();
     }
-    for (const label of ["Prospects contacted", "Conversations", "Conversions", "Revenue", "LLM cost", "WhatsApp cost"]) {
+    for (const label of ["Prospects contacted", "Conversations", "Conversions declared", "Conversions confirmed", "Revenue", "LLM cost", "WhatsApp cost"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
-    expect(screen.getAllByText("—")).toHaveLength(7);
+    expect(screen.getAllByText("—")).toHaveLength(8);
   });
 });
 
