@@ -76,6 +76,11 @@ class ChannelRouter:
     def lane(self, lane_id: LaneId | None) -> LaneRoute | None:
         return self._lanes.get(lane_id) if lane_id is not None else None
 
+    def lane_or_default(self, lane_id: LaneId | None) -> LaneRoute | None:
+        """The lane called `lane_id`, or the default lane when none is named (None: there is none)."""
+        key = lane_id if lane_id is not None else self._default
+        return self._lanes.get(key) if key is not None else None
+
     def lane_for(self, prospect: Prospect) -> LaneRoute | None:
         """The lane of a prospect, attributed or not yet; None if there are no lanes or the
         prospect is in none that the client runs."""

@@ -41,6 +41,7 @@ from sales_app.api.client_agent import create_client_agent_router
 from sales_app.api.client_approvals import create_client_approvals_router
 from sales_app.api.client_channel import create_client_channel_router
 from sales_app.api.client_dashboard import create_client_dashboard_router
+from sales_app.api.client_agent_test import create_client_agent_test_router
 from sales_app.api.client_conversation_control import create_client_conversation_control_router
 from sales_app.api.client_followup import create_client_followup_router
 from sales_app.api.client_gmail import create_application_gmail_router
@@ -166,6 +167,7 @@ def create_app(
     app.include_router(create_client_resources_router(application))
     app.include_router(create_client_prospects_router(application))
     app.include_router(create_client_conversation_control_router(application))
+    app.include_router(create_client_agent_test_router(application))
     app.include_router(create_client_followup_router(application))
     app.include_router(create_client_source_router(application, connection_http, sheets_probe))
     sheets_oauth_router = create_client_sheets_oauth_router(application)

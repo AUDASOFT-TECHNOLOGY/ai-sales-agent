@@ -17,6 +17,7 @@ Inbound conversations (Phase C) are outside the daily outbound quota and are ask
 with `ContactOrigin.INBOUND`. What happens with a sender who is not a prospect is `InboundPolicy`.
 """
 
+import re
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -39,6 +40,7 @@ from sales_core.contracts import (
     Direction,
     Fact,
     InboundMessage,
+    LaneId,
     Message,
     MessageDraft,
     MessageId,
@@ -108,6 +110,8 @@ from sales_core.safety import (
     recipient_for,
 )
 
+TEST_ID_PREFIX = "inbound-test-"  # ids of people the client asked the agent to write to as a test
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 _RELINK_AFTER = timedelta(days=1)  # a number Telegram did not know is not asked again before
 UNCONFIRMED = "unconfirmed send"  # prefix of `last_error` on actions stuck in SENDING
 _ACTIVE_STATUSES = (ProspectStatus.NEW, ProspectStatus.ACTIVE)
@@ -162,11 +166,11 @@ class Engine:
         facts: FactsReader | None = None,
         facts_writer: FactsWriter | None = None,
         control: ConversationControlStore | None = None,
+        exchange_rates: Callable[[], tuple[Mapping[str, float], datetime] | None] | None = None,
     ) -> None:
         if repository.client_id != client.client_id:
             raise ValueError("repository is bound to a different client than the engine")
         if control is not None and control.client_id != client.client_id:
-        exchange_rates: Callable[[], tuple[Mapping[str, float], datetime] | None] | None = None,
             raise ValueError("conversation control is bound to a different client than the engine")
         if (channel is None) == (router is None):
             raise ValueError("an engine needs exactly one of `channel` and `router`")
@@ -178,11 +182,11 @@ class Engine:
                 # back would never reach the Brain.
                 raise ValueError("a facts writer needs a facts reader")
         self._client = client
+        self._exchange_rates = exchange_rates  # None: nothing is ever converted from one currency
         self._repo = repository
         self._brain = brain
         # `channel=` is the client with no lanes: one channel for everyone, as it always was.
         self._router = router if router is not None else ChannelRouter.single(channel)  # type: ignore[arg-type]
-        self._exchange_rates = exchange_rates  # None: nothing is ever converted from one currency
         self._clock = clock
         self._config = config
         self._facts = facts  # None: no facts are known, the Brain gets an empty collection
@@ -535,22 +539,18 @@ class Engine:
         conversation = self._repo.get_conversation(action.prospect_id)
         origin = self._origin_of(action, conversation)
         facts = tuple(self._facts.get_facts(prospect.prospect_id)) if self._facts else ()
+        rates = self._read_rates()
         return BrainRequest(
             client=self._client,
             prospect=prospect,
             conversation=replace(conversation, origin=origin),
-        rates = self._read_rates()
             action=action,
             now=now,
             facts=facts,
             lane=self._router.lane_for(prospect),
-        )
-
-    @staticmethod
-    def _origin_of(action: SalesAction, conversation: Conversation) -> ContactOrigin:
             exchange_rates=rates[0] if rates else {},
             exchange_rates_at=rates[1] if rates else None,
-        """Who started the conversation, from what the Engine itself knows, never from content.
+        )
 
     def _read_rates(self) -> tuple[Mapping[str, float], datetime] | None:
         """Today's rates, or None: a rate source that fails never stops a conversation."""
@@ -560,6 +560,10 @@ class Engine:
             return self._exchange_rates()
         except Exception:  # noqa: BLE001 - the source is outside the Engine; the reply goes on
             return None
+
+    @staticmethod
+    def _origin_of(action: SalesAction, conversation: Conversation) -> ContactOrigin:
+        """Who started the conversation, from what the Engine itself knows, never from content.
 
         A REPLY is the Engine handling an inbound message. A FIRST_CONTACT is the agent writing
         first. Other outreach keeps whatever the repository says: nothing persists the origin yet,
@@ -665,6 +669,99 @@ class Engine:
             return RunReport(
                 outcomes=first.outcomes + second.outcomes, errors=first.errors + second.errors
             )
+
+    def start_test(
+        self, *, contact: str, name: str, lane_id: LaneId | None, actor: str
+    ) -> tuple[Prospect, RunReport]:
+        """Open a conversation with a person the client names, before the agent runs on its own.
+
+        The person is a prospect like any other: same quota, same Brain, same safety checks, same
+        channel (the one of the lane `lane_id`, or of the default lane). Only two things differ:
+        the contact comes from the client, not from a source, and the first contact is made now,
+        not at the next daily run. The client asking for the test is the approval, so a proposal
+        waiting for one is approved on the spot. Nothing is planned if the day's quota is spent or
+        the person has to open the conversation first (Telegram): the report then has no outcome.
+
+        Raises `ManualSendError` with the code `dry_run` (an agent in test mode), `unknown_lane`,
+        `no_channel`, `invalid_contact` or `contact_in_use` (the contact is already a prospect)."""
+        with self._lock:
+            if self._dry_run:
+                raise ManualSendError("dry_run", "This agent is in test mode: nothing is sent.")
+            prospect = self._test_prospect(contact, name, lane_id)
+            run = RunCollector()
+            now = self._clock.now()
+            try:
+                self._repo.create_prospects([prospect])
+            except ValueError:
+                raise ManualSendError(
+                    "contact_in_use", "This contact is already one of your prospects."
+                ) from None
+            self._emit(
+                ev.PROSPECT_CREATED, actor=actor, prospect_id=prospect.prospect_id, origin="test"
+            )
+            [placed] = self._assign_lanes([prospect], run)
+            explicit = self._router.explicit
+            plan = plan_daily_actions(
+                client=self._client,
+                prospects=[placed],
+                existing_actions=list(self._repo.list_actions()),
+                now=now,
+                daily_limit=self._config.daily_action_limit,
+                channel=None if explicit else self._router.any_channel,
+                route_of=self._router.lane_for if explicit else None,
+                held_by_human=self._held_by_human(),
+            )
+            if not plan.actions:
+                self._flush(run)
+                return placed, run.report()
+            action = plan.actions[0]
+            self._repo.save_actions([action])
+            self._emit_for(ev.ACTION_PLANNED, action, type=action.action_type)
+            self._flush(run)
+            self._guard(run, action, self._prepare_one, action, placed, now, run)
+            stored = self._repo.find_action_by_idempotency_key(action.idempotency_key)
+            if stored is not None and stored.status is ActionStatus.PROPOSED:
+                self._guard(
+                    run, stored, lambda: self.approve_proposal(stored.action_id, actor=actor)
+                )
+                stored = self._repo.find_action_by_idempotency_key(action.idempotency_key)
+            if stored is not None and stored.status is ActionStatus.APPROVED:
+                self._guard(run, stored, self._dispatch_one, stored, run)
+            return placed, run.report()
+
+    def _test_prospect(self, contact: str, name: str, lane_id: LaneId | None) -> Prospect:
+        """The prospect a test makes: the contact is filed where the lane's channel reads it."""
+        route = self._router.lane_or_default(lane_id)
+        if self._router.explicit:
+            if route is None:
+                code = "unknown_lane" if lane_id is not None else "no_channel"
+                raise ManualSendError(code, "This circuit does not exist or has no channel.")
+            channel = route.channel
+        else:
+            channel = self._router.any_channel
+        address = contact.strip()
+        if channel is Channel.EMAIL:
+            valid = _EMAIL.fullmatch(address) is not None
+            key = address.casefold()
+        else:
+            digits = "".join(c for c in address if c.isdigit())
+            valid = 7 <= len(digits) <= 15
+            key = digits
+        if not valid:
+            raise ManualSendError("invalid_contact", "This contact is not valid for this channel.")
+        return Prospect(
+            client_id=self._client.client_id,
+            prospect_id=ProspectId(f"{TEST_ID_PREFIX}{key}"),
+            display_name=name.strip() or address,
+            contact=ContactInfo(
+                email=address if channel is Channel.EMAIL else None,
+                phone=None if channel is Channel.EMAIL else address,
+                preferred_channel=channel,
+            ),
+            status=ProspectStatus.NEW,
+            attributes={"test": "1"},
+            lane_id=route.lane_id if route is not None else None,
+        )
 
     def _dispatch_one(
         self, action: SalesAction, run: RunCollector, *, manual: bool = False
