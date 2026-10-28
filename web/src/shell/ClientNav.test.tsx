@@ -52,21 +52,22 @@ beforeEach(() => vi.stubGlobal("scrollTo", vi.fn()));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Client menu", () => {
-  it("offers dashboard, billing and notifications with the unread count", async () => {
+  it("offers results, subscription and notifications with the unread count", async () => {
     stub({ unread: 3 });
     renderShell();
     const side = (await screen.findAllByRole("navigation", { name: "Main menu" }))[0]!;
-    expect(await within(side).findByRole("link", { name: /Dashboard/ })).toHaveAttribute("href", "/dashboard");
-    expect(within(side).getByRole("link", { name: /Billing/ })).toHaveAttribute("href", "/billing");
-    const bell = await within(side).findByRole("link", { name: /Notifications/ });
-    expect(bell).toHaveAttribute("href", "/notifications");
+    expect(await within(side).findByRole("link", { name: /Results/ })).toHaveAttribute("href", "/results");
+    expect(within(side).getByRole("link", { name: /Subscription/ })).toHaveAttribute("href", "/account");
+    // Notifications are not a menu entry: a bell shows the unread count.
+    expect(within(side).queryByRole("link", { name: /Notifications/ })).toBeNull();
+    const bell = (await screen.findAllByRole("button", { name: /Notifications, .*3.* unread/ }))[0]!;
     expect(await within(bell).findByText("3")).toBeInTheDocument();
   });
 
   it("shows no badge when nothing is unread", async () => {
     stub({ unread: 0 });
     renderShell();
-    const bell = await screen.findAllByRole("link", { name: "Notifications" });
+    const bell = await screen.findAllByRole("button", { name: "Notifications" });
     expect(bell.length).toBeGreaterThan(0);
     expect(screen.queryByText("0")).toBeNull();
   });

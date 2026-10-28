@@ -86,6 +86,7 @@ function renderApp(path: string) {
               <Route element={<AppShell />}>
                 <Route index element={<h2>Home page</h2>} />
                 <Route path="profile" element={<ClientProfilePage />} />
+                <Route path="account/profile" element={<ClientProfilePage />} />
               </Route>
             </Route>
           </Routes>

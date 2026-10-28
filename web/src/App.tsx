@@ -21,10 +21,11 @@ import { ClientProfilePage } from "./client/ClientProfilePage";
 import { ClientReportingPage } from "./client/ClientReportingPage";
 import { ClientRoute } from "./client/ClientRoute";
 import { ClientTheme } from "./client/ClientTheme";
-import { ChannelsPage } from "./client/connections/ChannelsPage";
-import { ConnectionsLayout } from "./client/connections/ConnectionsLayout";
-import { SourcesPage } from "./client/connections/SourcesPage";
-import { BusinessPage } from "./client/offer/BusinessPage";
+import { AccountLayout } from "./client/account/AccountLayout";
+import { CircuitsPage } from "./client/circuits/CircuitsPage";
+import { ResultsLayout } from "./client/results/ResultsLayout";
+import { SetupPage } from "./client/setup/SetupPage";
+import { RulesPage } from "./client/offer/RulesPage";
 import { OfferLayout } from "./client/offer/OfferLayout";
 import { PaymentsPage } from "./client/offer/PaymentsPage";
 import { ProductEditor } from "./client/offer/ProductEditor";
@@ -91,14 +92,7 @@ export function App() {
               <Route element={<AppShell />}>
                 <Route index element={<Navigate to="/home" replace />} />
                 <Route path="home" element={<ClientHomePage />} />
-                <Route path="prospects" element={<Prospects />} />
-                <Route path="conversations" element={<Conversations />} />
-                <Route path="conversations/:id" element={<Conversations />} />
-
-                <Route path="review" element={<ReviewLayout />}>
-                  <Route index element={<ClientApprovalsPage embedded />} />
-                  <Route path="payments" element={<ReviewPaymentsPage />} />
-                </Route>
+                <Route path="setup" element={<SetupPage />} />
 
                 <Route path="offer" element={<OfferLayout />}>
                   <Route index element={<Navigate to="products" replace />} />
@@ -106,32 +100,46 @@ export function App() {
                   <Route path="products/new" element={<ProductEditor />} />
                   <Route path="products/:id" element={<ProductEditor />} />
                   <Route path="payments" element={<PaymentsPage />} />
-                  <Route path="business" element={<BusinessPage />} />
+                  <Route path="rules" element={<RulesPage />} />
+                  <Route path="business" element={<Navigate to="/offer/rules" replace />} />
                 </Route>
 
-                <Route path="connections" element={<ConnectionsLayout />}>
-                  <Route index element={<Navigate to="sources" replace />} />
-                  <Route path="sources" element={<SourcesPage />} />
-                  <Route path="channels" element={<ChannelsPage />} />
+                <Route path="circuits" element={<CircuitsPage />} />
+
+                <Route path="conversations" element={<Conversations />} />
+                <Route path="conversations/:id" element={<Conversations />} />
+                <Route path="prospects" element={<Prospects />} />
+
+                <Route path="review" element={<ReviewLayout />}>
+                  <Route index element={<ClientApprovalsPage embedded />} />
+                  <Route path="payments" element={<ReviewPaymentsPage />} />
                 </Route>
 
-                <Route path="reports" element={<ClientReportingPage />} />
-                <Route path="billing" element={<ClientInvoicesPage />} />
-                <Route path="profile" element={<ClientProfilePage />} />
+                <Route path="results" element={<ResultsLayout />}>
+                  <Route index element={<ClientDashboardPage />} />
+                  <Route path="daily" element={<ClientReportingPage />} />
+                </Route>
 
-                {/* Addresses of the previous menu keep working. */}
-                <Route path="agent" element={<Navigate to="/home" replace />} />
-                <Route path="setup" element={<Navigate to="/home" replace />} />
-                <Route path="dashboard" element={<ClientDashboardPage />} />
-                <Route path="results" element={<Navigate to="/home" replace />} />
-                <Route path="history" element={<Navigate to="/home" replace />} />
+                <Route path="account" element={<AccountLayout />}>
+                  <Route index element={<ClientInvoicesPage />} />
+                  <Route path="profile" element={<ClientProfilePage />} />
+                </Route>
                 <Route path="notifications" element={<ClientNotificationsPage />} />
+
+                {/* Addresses of the previous menus keep working. */}
+                <Route path="connections/*" element={<Navigate to="/circuits" replace />} />
+                <Route path="channel" element={<Navigate to="/circuits" replace />} />
+                <Route path="lanes" element={<Navigate to="/circuits" replace />} />
+                <Route path="reports" element={<Navigate to="/results/daily" replace />} />
+                <Route path="reporting" element={<Navigate to="/results/daily" replace />} />
+                <Route path="dashboard" element={<Navigate to="/results" replace />} />
+                <Route path="billing" element={<Navigate to="/account" replace />} />
+                <Route path="profile" element={<Navigate to="/account/profile" replace />} />
+                <Route path="agent" element={<Navigate to="/home" replace />} />
+                <Route path="history" element={<Navigate to="/home" replace />} />
                 <Route path="approvals" element={<Navigate to="/review" replace />} />
-                <Route path="settings" element={<Navigate to="/offer/business" replace />} />
-                <Route path="configure/*" element={<Navigate to="/offer/business" replace />} />
-                <Route path="channel" element={<Navigate to="/connections/channels" replace />} />
-                <Route path="lanes" element={<Navigate to="/connections/sources" replace />} />
-                <Route path="reporting" element={<Navigate to="/reports" replace />} />
+                <Route path="settings" element={<Navigate to="/offer/rules" replace />} />
+                <Route path="configure/*" element={<Navigate to="/offer/rules" replace />} />
                 <Route path="*" element={<Navigate to="/home" replace />} />
               </Route>
             </Route>
