@@ -91,7 +91,7 @@ export function OfferLayout() {
         items={[
           { to: "/offer/products", label: t("rv.offer.tab.products") },
           { to: "/offer/payments", label: t("rv.offer.tab.payments") },
-          { to: "/offer/business", label: t("rv.offer.tab.business") },
+          { to: "/offer/rules", label: t("rv.offer.tab.business") },
         ]}
       />
       {loadFailure ? <FailureNote failure={loadFailure} onRetry={() => void reload()} /> : null}
