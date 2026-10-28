@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from sales_brain_kit.consultative.context import CommercialContext
 from sales_brain_kit.consultative.exact import Placeholder
 from sales_brain_kit.consultative.language import localize
-from sales_brain_kit.consultative.payment import render_instruction
+from sales_brain_kit.consultative.payment import local_equivalent, render_instruction
 from sales_brain_kit.consultative.pricing import PriceResolution, resolve_price
 from sales_brain_kit.consultative.workflow import WorkflowStatus
 from sales_brain_kit.settings.catalog import Product
@@ -53,12 +53,22 @@ def exact_values(context: CommercialContext, language: str) -> dict[Placeholder,
         return values
     step = state.current
     if step.kind in PAYMENT_KINDS:
+        focus = context.selection.focus
+        price = price_of(context, focus[0]) if focus else None
         for offer in state.methods:
             placeholder = Placeholder("payment", offer.method.id)
             label = localize(offer.method.label, language, default) or offer.method.id
+            text = render_instruction(offer.instruction, language, default)
+            # An offline buyer is told what the price comes to in their own currency, at today's
+            # rate; paying online by card keeps the price as configured.
+            equivalent = (
+                local_equivalent(price, offer.method, context.request.exchange_rates, language)
+                if price is not None
+                else None
+            )
             values[placeholder] = ExactValue(
                 placeholder,
-                render_instruction(offer.instruction, language, default),
+                "\n".join((equivalent, text)) if equivalent else text,
                 f"the payment instructions for {label}",
             )
     appointment = state.appointment

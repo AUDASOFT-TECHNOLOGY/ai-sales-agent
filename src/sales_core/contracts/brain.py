@@ -41,9 +41,14 @@ class BrainRequest:
     now: datetime  # injected so decisions are reproducible
     facts: tuple[Fact, ...] = ()  # what is known about the prospect
     lane: LaneRoute | None = None  # the products in scope for this prospect; None: all of them
+    # Today's exchange rates, as units of each currency for one US dollar, and when they were read.
+    # Empty when no rate source is wired or it could not be reached: nothing is then converted.
+    exchange_rates: Mapping[str, float] = field(default_factory=dict)
+    exchange_rates_at: datetime | None = None
 
     def __post_init__(self) -> None:
         require_aware(self.now, "now")
+        object.__setattr__(self, "exchange_rates", freeze_mapping(self.exchange_rates))
         object.__setattr__(self, "facts", tuple(self.facts))
         client_id = self.client.client_id
         if (

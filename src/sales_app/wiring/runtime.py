@@ -1,5 +1,6 @@
 """One client's runtime: its Engine plus the bookkeeping the scheduler and /health need."""
 
+import json
 import logging
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -17,6 +18,7 @@ from sales_app.config.runtime_config import (
 )
 from sales_app.config.schema import BrainSection
 from sales_app.config.telegram_settings import account_mode_of
+from sales_app.exchange_rates import today_rates
 from sales_app.errors import ClientNotReadyError, ClientUnavailableError, RuntimeBuildError
 from sales_app.llm_usage import RecordingLLMProvider
 from sales_app.operational_signals import NotifyingChannel, NotifyingLLMProvider
@@ -414,6 +416,12 @@ def _build_repository(config: ClientConfig, builders: IntegrationBuilders) -> Sa
     return _stage(client_id, "repository", lambda: CompositeRepository(source, store, consent))
 
 
+def _converts_prices(settings: object) -> bool:
+    """Whether a payment method names the currency its buyers pay in (`pay_currency`): only then is
+    a rate ever needed, so only then is the rate source consulted."""
+    return "pay_currency" in json.dumps(settings, default=str)
+
+
 def _telegram_first_contact(config: ClientConfig) -> bool:
     """Whether a client on its own Telegram account may be written to first: that is the account mode
     (a bot cannot write to someone who never started it)."""
@@ -597,6 +605,7 @@ def build_runtime(
                 ),
                 telegram_first_contact=_telegram_first_contact(config),
             ),
+            exchange_rates=today_rates if _converts_prices(spec.brain.settings) else None,
             control=(
                 builders.conversation_control(client_id)
                 if builders.conversation_control is not None

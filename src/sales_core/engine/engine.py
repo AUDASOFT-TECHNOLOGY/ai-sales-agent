@@ -18,7 +18,7 @@ with `ContactOrigin.INBOUND`. What happens with a sender who is not a prospect i
 """
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -166,6 +166,7 @@ class Engine:
         if repository.client_id != client.client_id:
             raise ValueError("repository is bound to a different client than the engine")
         if control is not None and control.client_id != client.client_id:
+        exchange_rates: Callable[[], tuple[Mapping[str, float], datetime] | None] | None = None,
             raise ValueError("conversation control is bound to a different client than the engine")
         if (channel is None) == (router is None):
             raise ValueError("an engine needs exactly one of `channel` and `router`")
@@ -181,6 +182,7 @@ class Engine:
         self._brain = brain
         # `channel=` is the client with no lanes: one channel for everyone, as it always was.
         self._router = router if router is not None else ChannelRouter.single(channel)  # type: ignore[arg-type]
+        self._exchange_rates = exchange_rates  # None: nothing is ever converted from one currency
         self._clock = clock
         self._config = config
         self._facts = facts  # None: no facts are known, the Brain gets an empty collection
@@ -537,6 +539,7 @@ class Engine:
             client=self._client,
             prospect=prospect,
             conversation=replace(conversation, origin=origin),
+        rates = self._read_rates()
             action=action,
             now=now,
             facts=facts,
@@ -545,7 +548,18 @@ class Engine:
 
     @staticmethod
     def _origin_of(action: SalesAction, conversation: Conversation) -> ContactOrigin:
+            exchange_rates=rates[0] if rates else {},
+            exchange_rates_at=rates[1] if rates else None,
         """Who started the conversation, from what the Engine itself knows, never from content.
+
+    def _read_rates(self) -> tuple[Mapping[str, float], datetime] | None:
+        """Today's rates, or None: a rate source that fails never stops a conversation."""
+        if self._exchange_rates is None:
+            return None
+        try:
+            return self._exchange_rates()
+        except Exception:  # noqa: BLE001 - the source is outside the Engine; the reply goes on
+            return None
 
         A REPLY is the Engine handling an inbound message. A FIRST_CONTACT is the agent writing
         first. Other outreach keeps whatever the repository says: nothing persists the origin yet,

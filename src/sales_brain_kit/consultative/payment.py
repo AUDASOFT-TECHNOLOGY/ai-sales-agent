@@ -9,11 +9,13 @@ Rendering never rewrites configured values. The instruction's own text, each `la
 and the payment URL are put together exactly as the client wrote them, in the message language.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 
 from sales_brain_kit.consultative.applicability import Place, specificity
 from sales_brain_kit.consultative.language import localize
+from sales_brain_kit.consultative.pricing import PriceResolution, PriceStatus, format_number
 from sales_brain_kit.settings.catalog import Product
 from sales_brain_kit.settings.payment import PaymentInstruction, PaymentMethod, PaymentSettings
 
@@ -93,3 +95,53 @@ def receipt_required(product: Product | None, offers: Sequence[MethodOffer]) -> 
         and offline.receipt_required
         and any(o.method.kind != "online" for o in offers)
     )
+
+
+# The metadata key under which a method records the currency its buyers pay in.
+PAY_CURRENCY = "pay_currency"
+
+_EQUIVALENT = {
+    "fr": "Prix : {price}, soit environ {local} au taux du jour.",
+    "en": "Price: {price}, about {local} at today's rate.",
+}
+
+
+def local_equivalent(
+    price: PriceResolution,
+    method: PaymentMethod,
+    rates: Mapping[str, float],
+    language: str | None,
+) -> str | None:
+    """The price as configured, then what it comes to in the currency the buyer pays an offline
+    method in, at today's rate. None when it does not apply: an online method (the price stays as
+    configured), a price that is not an amount, the same currency, or no rate for either currency.
+    The amount is worked out here, in code; the model never converts or types it."""
+    pay = method.metadata.get(PAY_CURRENCY)
+    terms = price.terms
+    if (
+        method.kind == "online"
+        or pay is None
+        or terms is None
+        or price.status is not PriceStatus.STATED
+    ):
+        return None
+    pay, own = pay.upper(), (terms.currency or "").upper()
+    if pay == own or not rates.get(pay) or not rates.get(own):
+        return None
+    factor = Decimal(str(rates[pay])) / Decimal(str(rates[own]))
+
+    def converted(amount: float) -> str:
+        value = (Decimal(str(amount)) * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return format_number(float(value))
+
+    assert terms.amount is not None
+    match terms.model:
+        case "from":
+            local = f"{converted(terms.amount)}+ {pay}"
+        case "range":
+            assert terms.max_amount is not None
+            local = f"{converted(terms.amount)}–{converted(terms.max_amount)} {pay}"
+        case _:
+            local = f"{converted(terms.amount)} {pay}"
+    template = _EQUIVALENT.get((language or "en").split("-")[0].lower(), _EQUIVALENT["en"])
+    return template.format(price=price.text, local=local)
