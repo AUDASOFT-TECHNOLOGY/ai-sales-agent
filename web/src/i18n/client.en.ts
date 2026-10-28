@@ -47,11 +47,23 @@ const shell = {
   "rv.convo.allChannels": "All channels",
   "rv.nav.conversations": "Conversations",
   "rv.nav.review": "To review",
-  "rv.nav.offer": "My offer",
-  "rv.nav.connections": "Connections",
+  "rv.nav.offer": "Offers",
+  "rv.nav.connections": "Circuits",
+  "rv.nav.circuits": "Circuits",
+  "rv.nav.setup": "Get started",
+  "rv.results.title": "Results",
+  "rv.results.intro": "What your agent achieved: by product, source and channel.",
+  "rv.results.tab.figures": "Figures",
+  "rv.results.tab.daily": "Daily summary",
+  "rv.account.title": "Subscription and account",
+  "rv.account.intro": "Your plan, your invoices and your details.",
+  "rv.account.tab.billing": "Subscription and invoices",
+  "rv.account.tab.profile": "My profile",
+  "rv.nav.results": "Results",
   "rv.nav.reports": "Reports",
-  "rv.nav.group.activity": "Activity",
-  "rv.nav.group.agent": "My agent",
+  "rv.nav.group.prepare": "Prepare",
+  "rv.nav.group.follow": "Follow",
+  "rv.nav.group.account": "Account",
   "rv.nav.more": "More",
   "rv.nav.account": "My account",
   "rv.nav.main": "Main menu",
@@ -67,7 +79,7 @@ const shell = {
   "rv.agent.active": "Working for you",
   "rv.agent.name": "Your agent",
   "rv.nav.dashboard": "Dashboard",
-  "rv.nav.billing": "Billing",
+  "rv.nav.billing": "Subscription",
   "rv.nav.notifications": "Notifications",
   "rv.nav.notificationsUnread": "Notifications, {n} unread",
   "rv.mailbox.title": "Your mailbox",
@@ -166,5 +178,6 @@ const home = {
 
 import { enConnect } from "./client.connect.en";
 import { enOffer } from "./client.offer.en";
+import { enV2 } from "./client.v2.en";
 
-export const enClient = { ...common, ...shell, ...home, ...enOffer, ...enConnect } as const;
+export const enClient = { ...common, ...shell, ...home, ...enOffer, ...enConnect, ...enV2 } as const;

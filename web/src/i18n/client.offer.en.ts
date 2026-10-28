@@ -3,11 +3,11 @@
 
 const offer = {
   "rv.common.upToDate": "Everything is up to date.",
-  "rv.offer.title": "My offer",
+  "rv.offer.title": "Offers",
   "rv.offer.intro": "Everything your agent knows and sells: your products, how you get paid, and how you speak.",
   "rv.offer.tab.products": "Products",
-  "rv.offer.tab.payments": "Payments",
-  "rv.offer.tab.business": "Business & messages",
+  "rv.offer.tab.payments": "Payment methods",
+  "rv.offer.tab.business": "Business and rules",
   "rv.day.mon": "Mon",
   "rv.day.tue": "Tue",
   "rv.day.wed": "Wed",

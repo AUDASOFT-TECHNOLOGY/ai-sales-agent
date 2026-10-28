@@ -5,6 +5,7 @@
 import type { enClient } from "./client.en";
 import { frConnect } from "./client.connect.fr";
 import { frOffer } from "./client.offer.fr";
+import { frV2 } from "./client.v2.fr";
 
 export type ClientCopy = Record<keyof typeof enClient, string>;
 
@@ -53,11 +54,23 @@ const shell = {
   "rv.convo.allChannels": "Tous les canaux",
   "rv.nav.conversations": "Conversations",
   "rv.nav.review": "À valider",
-  "rv.nav.offer": "Mon offre",
-  "rv.nav.connections": "Connexions",
+  "rv.nav.offer": "Offres",
+  "rv.nav.connections": "Circuits",
+  "rv.nav.circuits": "Circuits",
+  "rv.nav.setup": "Mise en route",
+  "rv.results.title": "Résultats",
+  "rv.results.intro": "Ce que votre agent a obtenu : par produit, par source et par canal.",
+  "rv.results.tab.figures": "Chiffres",
+  "rv.results.tab.daily": "Résumé quotidien",
+  "rv.account.title": "Abonnement et compte",
+  "rv.account.intro": "Votre formule, vos factures et vos informations.",
+  "rv.account.tab.billing": "Abonnement et factures",
+  "rv.account.tab.profile": "Mon profil",
+  "rv.nav.results": "Résultats",
   "rv.nav.reports": "Rapports",
-  "rv.nav.group.activity": "Activité",
-  "rv.nav.group.agent": "Mon agent",
+  "rv.nav.group.prepare": "Préparer",
+  "rv.nav.group.follow": "Suivre",
+  "rv.nav.group.account": "Compte",
   "rv.nav.more": "Plus",
   "rv.nav.account": "Mon compte",
   "rv.nav.main": "Menu principal",
@@ -73,7 +86,7 @@ const shell = {
   "rv.agent.active": "Au travail",
   "rv.agent.name": "Votre agent",
   "rv.nav.dashboard": "Tableau de bord",
-  "rv.nav.billing": "Facturation",
+  "rv.nav.billing": "Abonnement",
   "rv.nav.notifications": "Notifications",
   "rv.nav.notificationsUnread": "Notifications, {n} non lue(s)",
   "rv.mailbox.title": "Votre boîte email",
@@ -170,4 +183,4 @@ const home = {
   "rv.home.next": "Prochaine relance prévue : {date}",
 } satisfies Partial<ClientCopy>;
 
-export const frClient: ClientCopy = { ...common, ...shell, ...home, ...frOffer, ...frConnect };
+export const frClient: ClientCopy = { ...common, ...shell, ...home, ...frOffer, ...frConnect, ...frV2 };

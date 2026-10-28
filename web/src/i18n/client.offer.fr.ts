@@ -7,11 +7,11 @@ type Copy = Record<keyof typeof enOffer, string>;
 
 const offer = {
   "rv.common.upToDate": "Tout est à jour.",
-  "rv.offer.title": "Mon offre",
-  "rv.offer.intro": "Tout ce que votre agent sait et vend : vos produits, vos moyens de paiement et sa façon de parler.",
+  "rv.offer.title": "Offres",
+  "rv.offer.intro": "Tout ce que votre agent sait et vend : vos produits, comment on vous paie, et ses règles de vente. Il n’invente ni prix ni promesse.",
   "rv.offer.tab.products": "Produits",
-  "rv.offer.tab.payments": "Paiements",
-  "rv.offer.tab.business": "Entreprise et messages",
+  "rv.offer.tab.payments": "Moyens de paiement",
+  "rv.offer.tab.business": "Entreprise et règles",
   "rv.day.mon": "Lun",
   "rv.day.tue": "Mar",
   "rv.day.wed": "Mer",
