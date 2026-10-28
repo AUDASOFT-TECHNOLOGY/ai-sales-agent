@@ -55,7 +55,7 @@ const shell = {
   "rv.nav.conversations": "Conversations",
   "rv.nav.review": "À valider",
   "rv.nav.offer": "Offres",
-  "rv.nav.connections": "Circuits",
+  "rv.nav.connections": "Connexions",
   "rv.nav.circuits": "Circuits",
   "rv.nav.setup": "Mise en route",
   "rv.results.title": "Résultats",

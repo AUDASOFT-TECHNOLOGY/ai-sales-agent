@@ -100,7 +100,7 @@ export function guideSteps(o: Overview): GuideStep[] {
     { ...byId("products"), to: "/offer/products" },
     { ...byId("payments"), to: "/offer/payments" },
     { ...prospects, to: "/circuits" },
-    { ...channel, to: "/circuits" },
+    { ...channel, to: "/connections" },
     { id: "circuit", state: circuitDone ? "done" : "todo", required: true, to: "/circuits" },
     { id: "start", state: started ? "done" : "todo", required: true, to: "/home" },
   ];

@@ -16,6 +16,9 @@ import {
   ALL_PRODUCTS,
   clientChannel,
   clientDeleteLane,
+  clientGmailStatus,
+  clientSaveChannel,
+  clientTelegramAccount,
   clientLanes,
   clientReadiness,
   clientSourceState,
@@ -30,10 +33,10 @@ import {
 } from "../api";
 import { useClientAuth } from "../ClientAuthContext";
 import { FailureNote, Loading, Note, PageHead, failureOf, type Failure } from "../kit";
-import { ChannelsPage } from "../connections/ChannelsPage";
+import { ConnectionNeeded, SourceConnectionNeeded } from "../connections/ConnectionNeeded";
 import { SingleSource, SourceForm, TestCard } from "../connections/SourcesPage";
+import { channelChoices, useSelectable } from "../connections/useSelectable";
 import { SyncCard } from "../connections/SyncCard";
-import { HubSpotAccessCard } from "../connections/HubSpotAccessCard";
 
 function ChannelIcon({ channel, size = 18 }: { channel: string | undefined; size?: number }) {
   if (channel === "email") return <Mail size={size} aria-hidden />;
@@ -99,6 +102,8 @@ function CircuitCard({
 }) {
   const { t } = useI18n();
   const { logout } = useClientAuth();
+  const selectable = useSelectable();
+  const choices = channelChoices(state.channel_options, selectable, lane.channel.channel, (key) => t(`rv.chan.name.${key}` as MessageKey));
   const chosenAll = lane.offers_all_products || lane.products.includes(ALL_PRODUCTS);
   const [imposed, setImposed] = useState(!chosenAll);
   const [saving, setSaving] = useState(false);
@@ -182,14 +187,15 @@ function CircuitCard({
         <Arrow />
         <Block ent="chn" label={t("rv.circ.label.chn")}>
           <div role="radiogroup" aria-label={t("rv.circ.label.chn")} className="stack" style={{ gap: 8 }}>
-            {state.channel_options.map((o) => {
+            {choices.map((o) => {
               const on = lane.channel.channel === o.key;
               return (
-                <button key={o.key} type="button" role="radio" aria-checked={on} className="rv-opt" disabled={saving || busy} onClick={() => !on && void save({ channel: o.key })}>
+                <button key={o.key} type="button" role="radio" aria-checked={on} className="rv-opt" data-pending={o.pending || undefined} style={o.pending ? { opacity: 0.55 } : undefined} disabled={saving || busy || o.pending} onClick={() => !on && void save({ channel: o.key })}>
                   <Mark shape="radio" on={on} />
                   <ChannelIcon channel={o.key} />
                   <span className="rv-opt__text">
                     <strong>{o.label}</strong>
+                    {o.pending ? <small dir="auto">{t("rv.circ.chan.pending")}</small> : null}
                     {on ? <small dir="auto">{ready ? t("rv.circ.chan.ready") : (lane.channel.problem ?? t("rv.circ.chan.todo"))}</small> : null}
                   </span>
                   {on ? <Chip tint={ready ? "success" : "attention"}>{t(ready ? "rv.circ.chan.ready" : "rv.circ.chan.todo")}</Chip> : null}
@@ -242,6 +248,8 @@ function CircuitCard({
         </Block>
       </div>
 
+      {ready ? null : <ConnectionNeeded text={lane.channel.problem ?? undefined} />}
+
       <div className="rv-sum">
         <Route size={18} aria-hidden />
         <span dir="auto">{sentence}</span>
@@ -256,12 +264,71 @@ function CircuitCard({
   );
 }
 
+/* ── The channel of the account's only circuit ────────────────────────────────────────────── */
+
+/** The client chooses here how the agent writes; connecting that channel is done on the Connections screen.
+ *  A Gmail or a Telegram account already connected there is the one the channel then uses. */
+function ChannelPicker({ channel, onChanged }: { channel: ChannelState; onChanged: () => Promise<void> }) {
+  const { t } = useI18n();
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const ready = channel.status === "ready";
+  const selectable = useSelectable();
+  const choices = channelChoices(channel.options, selectable, channel.channel, (key) => t(`rv.chan.name.${key}` as MessageKey));
+
+  async function choose(key: string) {
+    setSaving(true);
+    setFailure(null);
+    try {
+      const update: Parameters<typeof clientSaveChannel>[0] = { expected_version: channel.version, channel: key };
+      if (key === "email") {
+        const gmail = await clientGmailStatus().catch(() => null);
+        if (gmail && (gmail.state === "connected" || gmail.state === "reauth_required")) update.email = { use_gmail: true };
+      }
+      if (key === "telegram") {
+        const account = await clientTelegramAccount().catch(() => null);
+        if (account && (account.state === "connected" || account.state === "reauth_required")) update.telegram = { use_account: true };
+      }
+      await clientSaveChannel(update);
+      await onChanged();
+    } catch (err) {
+      const problem = failureOf(err);
+      setFailure(problem);
+      if (problem.reload) await onChanged();
+    }
+    setSaving(false);
+  }
+
+  return (
+    <>
+      <div role="radiogroup" aria-label={t("rv.circ.label.chn")} className="stack" style={{ gap: 8 }}>
+        {choices.map((o) => {
+          const on = channel.channel === o.key;
+          return (
+            <button key={o.key} type="button" role="radio" aria-checked={on} className="rv-opt" data-pending={o.pending || undefined} style={o.pending ? { opacity: 0.55 } : undefined} disabled={saving || o.pending} onClick={() => !on && void choose(o.key)}>
+              <Mark shape="radio" on={on} />
+              <ChannelIcon channel={o.key} />
+              <span className="rv-opt__text">
+                <strong>{o.label}</strong>
+                {o.pending ? <small dir="auto">{t("rv.circ.chan.pending")}</small> : null}
+              </span>
+              {on ? <Chip tint={ready ? "success" : "attention"}>{t(ready ? "rv.circ.chan.ready" : "rv.circ.chan.todo")}</Chip> : null}
+            </button>
+          );
+        })}
+      </div>
+      {choices.some((o) => o.pending) ? <span className="c-3 t-body-sm">{t("rv.circ.chan.pendingHelp")}</span> : null}
+      {channel.options.length > 1 ? <span className="c-3 t-body-sm">{t("channel.switch.warning")}</span> : null}
+      {failure ? <FailureNote failure={failure} /> : null}
+    </>
+  );
+}
+
 /* ── The account's only source, shown as one circuit ──────────────────────────────────────── */
 
 function SingleCircuit({ source, channel, readiness, onChanged }: { source: SourceState; channel: ChannelState | null; readiness: Readiness | null; onChanged: () => Promise<void> }) {
   const { t } = useI18n();
   const option = source.options.find((o) => o.key === source.source);
-  const chosen = channel?.options.find((o) => o.key === channel.channel);
   const channelReady = channel?.status === "ready";
   const connected = readiness?.checks.find((c) => c.id === "source_connected")?.ok === true;
   return (
@@ -286,16 +353,7 @@ function SingleCircuit({ source, channel, readiness, onChanged }: { source: Sour
           </Block>
           <Arrow />
           <Block ent="chn" label={t("rv.circ.label.chn")}>
-            <div className="rv-opt" style={{ cursor: "default" }}>
-              <ChannelIcon channel={chosen?.key} />
-              <span className="rv-opt__text">
-                <strong>{chosen?.label ?? "—"}</strong>
-              </span>
-              <Chip tint={channelReady ? "success" : "attention"}>{t(channelReady ? "rv.circ.chan.ready" : "rv.circ.chan.todo")}</Chip>
-            </div>
-            <a href="#canaux" className="link-btn">
-              {t("rv.circ.single.change")}
-            </a>
+            {channel ? <ChannelPicker channel={channel} onChanged={onChanged} /> : <span className="c-3 t-body-sm">{t("rv.err.unavailable")}</span>}
           </Block>
           <Arrow />
           <Block ent="prd" label={t("rv.circ.label.prd")}>
@@ -305,6 +363,7 @@ function SingleCircuit({ source, channel, readiness, onChanged }: { source: Sour
             <span className="c-2 t-body-sm">{t("rv.circ.prd.agent.help")}</span>
           </Block>
         </div>
+        {channelReady ? null : <ConnectionNeeded />}
         <p className="c-3 t-body-sm">{t("rv.circ.writeback")}</p>
       </Glass>
       <SingleSource key={source.version ?? "none"} source={source} onChanged={onChanged} />
@@ -466,7 +525,7 @@ export function CircuitsPage() {
               busy={form !== null}
             />
           ))}
-          {lanes.lanes.some((l) => l.source.source === "hubspot") ? <HubSpotAccessCard onChanged={() => void load()} /> : null}
+          {lanes.lanes.some((l) => l.source.source === "hubspot") ? <SourceConnectionNeeded provider="hubspot" /> : null}
         </>
       ) : source ? (
         <>
@@ -476,16 +535,6 @@ export function CircuitsPage() {
       ) : (
         <Note tone="danger">{t("rv.err.unavailable")}</Note>
       )}
-
-      <section id="canaux" className="rv-page" style={{ gap: 14 }} aria-labelledby="circ-channels">
-        <div className="rv-head__text">
-          <h3 className="rv-section-title" id="circ-channels">
-            {t("rv.circ.channels.title")}
-          </h3>
-          <p className="c-2">{t("rv.circ.channels.intro")}</p>
-        </div>
-        <ChannelsPage bare />
-      </section>
     </div>
   );
 }

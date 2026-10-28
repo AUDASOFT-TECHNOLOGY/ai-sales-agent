@@ -92,8 +92,7 @@ function freshExtras(): Extras {
         contact_prompt: "Pour continuer, partagez-nous votre numéro de téléphone.",
         contact_button: "Partager mon numéro",
         not_found_text: "Nous n'avons pas retrouvé votre dossier (exemple fictif).",
-        consent_field: "accepte_contact",
-        max_new_conversations_per_day: 20,
+        max_new_conversations_per_day: 5,
       },
     },
     access: { gmail: false, sheets: true, hubspot: true, whatsapp: true, telegram: "not_connected" },
@@ -815,6 +814,23 @@ on("PUT", "/followup-settings", (_m, b) => {
 
 // Channels and access
 on("GET", "/channel", () => ok(channelState()));
+// What the client said about the accounts it wants to connect; everything the demo offers is configured.
+const demoHints: Record<string, string | null> = { gmail: null, sheets: null, hubspot: null, telegram: null };
+const connectionsInfo = () => ({
+  hints: { ...demoHints },
+  selectable: { channels: { email: true, whatsapp: true, telegram: true }, sources: { google_sheets: true, hubspot: true } },
+});
+on("GET", "/connections", () => ok(connectionsInfo()));
+on("PUT", "/connections/hints/([^/]+)", (m, b) => {
+  const value = String((b as { value?: unknown } | null)?.value ?? "").trim();
+  if (!(id1(m) in demoHints) || value === "") return { status: 422, body: { detail: "invalid" } };
+  demoHints[id1(m)] = value;
+  return ok(connectionsInfo());
+});
+on("DELETE", "/connections/hints/([^/]+)", (m) => {
+  if (id1(m) in demoHints) demoHints[id1(m)] = null;
+  return ok(connectionsInfo());
+});
 on("PUT", "/channel", (_m, b) => saveChannel(b));
 on("POST", "/channel/email-activation", () => ok(channelState()));
 on("GET", "/channel/google", () => ok(gmailStatus()));
@@ -876,9 +892,6 @@ on("DELETE", "/channel/telegram/account", () => {
   extras.access.telegram = "not_connected";
   return ok({ disconnected: true, ended_at_telegram: false });
 });
-on("GET", "/channel/telegram/waiting", () =>
-  ok({ consent_field: "accepte_contact", waiting: 1, people: [{ prospect_id: "demo-p17", display_name: "Nour Chaabane", phone: null, reason: "needs_consent" }] }),
-);
 on("GET", "/channel/invitations", () => ok({ bot_username: "naga_formation_bot", bot_link: "#/connections/channels", waiting: 0, invitations: [] }));
 on("GET", "/channel/mailbox", () =>
   ok({

@@ -11,8 +11,9 @@ The menu follows the order an owner works in: prepare, then follow, then look af
 |---|---|---|---|
 | (top) | Home | `/home` | Agent state and its switch, what needs the owner, key figures, circuits, usage, connections, subscription |
 | (top, until done) | Get started | `/setup` | The 7-step guide: business, products, payments, prospects, channel, circuit, start. Each step opens the real screen |
+| Prepare | Connections | `/connections` | The only place a connection is made, one row each, one of four states (connected, to connect, Revansa is finishing, not available): Email (Gmail), WhatsApp, Telegram to write to prospects; HubSpot, Google Sheets to read them. A summary says "N of M ready" and the next step. Which channel a circuit uses is chosen on the circuit; the name, subject and Telegram limits are in Offers > Rules |
 | Prepare | Offers | `/offer/products[/new\|/:id]`, `/offer/payments`, `/offer/rules` | Catalogue (completeness per product), one page per product (photos, documents, testimonials, payment link, arguments), payment methods, business and rules (tone, schedule, follow-ups) |
-| Prepare | Circuits | `/circuits` | A circuit = source of prospects + channel + products. Channel and products are changed on the card; channels and accounts below |
+| Prepare | Circuits | `/circuits` | A circuit = source of prospects + channel + products. Channel and products are changed on the card; when its source or channel is not connected the circuit says "a configuration is needed" and links to Connections |
 | Follow | Conversations | `/conversations[/:id]`, `/prospects` | Every prospect (contacted or not), thread, prospect card, take-over; the same people as a table |
 | Follow | To review | `/review`, `/review/payments` | Messages to approve, payments to confirm, conversations a person must take over |
 | Follow | Results | `/results`, `/results/daily` | Figures by product, source, channel and period; the daily summary |
@@ -34,6 +35,32 @@ business with two circuits (a spreadsheet sent by WhatsApp, HubSpot leads waitin
 four products with photos, documents and testimonials, 22 prospects and 16 conversations. Nothing reaches
 the network; a reload restores the initial data.
 
+## Connections do not depend on the chosen channel
+
+Gmail, WhatsApp and the Telegram account can be connected whatever channel the account uses today (the
+Admin must have opened that channel to the client). The grant is kept; choosing the channel on the circuit
+then uses it (a Gmail already connected selects Gmail mode, a Telegram account already signed in selects
+the account mode). The mailbox Revansa provides excludes the client's Gmail: the Email row offers "Use my
+Gmail instead" first. A Google Sheets account can be authorised before any spreadsheet is chosen.
+
+## A connection has two sides, and the client's does not wait for Revansa's
+
+Each connection needs Revansa's side (the platform's Google, Meta, Telegram or HubSpot application, and the
+channel opened by the Admin) and the client's (the account it wants, then its permission on the provider's
+page). The Connections screen shows the client's side only: a connection is **Connected** (green) or
+**Disconnected** (red, "To reconnect" after a revocation). It never says "Revansa is finishing" or "not
+available".
+
+An address or a number alone connects nothing: the owner of the account must authorise on the provider's own
+page (Gmail, HubSpot, Google Drive), in Meta's window (WhatsApp) or with the code Telegram sends. So each row
+has one button with the service's mark: "Connect my Gmail", "Connect my HubSpot", "Connect my Google Drive",
+"Connect my WhatsApp Business", "Connect my Telegram", above which the client names the account (the Gmail,
+the Google account, the HubSpot email, the Telegram or WhatsApp number). What it types is kept first
+(`/client/v1/connections`, `sales_app/connection_hints.py`; the WhatsApp number is its profile). If the
+provider's page can open, the client goes there; if it cannot yet, the client is told its request is saved and
+that it will be asked to authorise, and nothing is lost. Only the circuits show the difference: a channel or a
+source that is not usable yet is greyed ("Coming soon"); the one in use is never greyed.
+
 ## Design rules
 
 - Nothing is invented: a figure that cannot be read is said so; "connected" is shown only after a real
@@ -53,7 +80,8 @@ the network; a reload restores the initial data.
 | Agent | `agent`, `agent/start`, `agent/pause`, `readiness` |
 | Offer | `settings` (GET/PUT, `commercial` = the Brain's document) |
 | Sources and circuits | `source` (GET/PUT), `source/test`, `lanes` (several-source accounts: one card per circuit) |
-| Channels | `channel` (GET/PUT), `channel/email-activation`, `channel/google/*`, `channel/invitations` |
+| Channels | `channel` (GET/PUT), `channel/email-activation`, `channel/google/*`, `channel/whatsapp/*`, `channel/telegram/account/*`, `channel/invitations` |
+| Source accounts | `sheets-access/*`, `hubspot-access/*` |
 | Prospects | `prospects`, `summary`, `conversations/{id}` |
 | Review | `approvals` (+ approve/reject), `payments`, `payments/{prospect}/confirm` |
 | Product documents | `products/{product}/resources` (list, `link`, `file`, `{id}/retry`, `{id}` DELETE, `{id}/download`) |

@@ -5,12 +5,14 @@ import { useI18n } from "../../i18n";
 import { FollowUpSettingsCard } from "../FollowUpSettingsCard";
 import { Card } from "../kit";
 import { BusinessPage } from "./BusinessPage";
+import { ChannelWordingCard } from "./ChannelWordingCard";
 
 export function RulesPage() {
   const { t } = useI18n();
   return (
     <div className="rv-page">
       <BusinessPage />
+      <ChannelWordingCard />
       <Card aria-label={t("followup.title")}>
         <div className="rv-card__head">
           <div>

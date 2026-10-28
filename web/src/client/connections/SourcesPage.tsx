@@ -9,7 +9,7 @@
  *  "Connected" is shown only after a real test succeeded; HubSpot access is the platform's job. */
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, FileSpreadsheet, Plus, RefreshCw, Users2 } from "lucide-react";
+import { FileSpreadsheet, Plus, RefreshCw, Users2 } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { Button } from "../../ui/Button";
 import { Chip } from "../../ui/Chip";
@@ -33,54 +33,12 @@ import {
 import { useClientAuth } from "../ClientAuthContext";
 import { Card, FailureNote, Loading, Note, failureOf, type Failure } from "../kit";
 import { slugify, uniqueSlug } from "../offer/productModel";
-import { HubSpotAccessCard } from "./HubSpotAccessCard";
-import { SheetsAccessCard } from "./SheetsAccessCard";
+import { SourceConnectionNeeded } from "./ConnectionNeeded";
+import { sourcePending, useSelectable } from "./useSelectable";
 import { SyncCard } from "./SyncCard";
 
 const SHEETS = "google_sheets";
 const HUBSPOT = "hubspot";
-
-function CopyButton({ text }: { text: string }) {
-  const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
-  return (
-    <Button
-      size="sm"
-      leading={<Copy size={14} aria-hidden />}
-      onClick={() => {
-        void navigator.clipboard?.writeText(text).then(() => setCopied(true));
-      }}
-    >
-      {copied ? t("rv.src.copied") : t("rv.src.copy")}
-    </Button>
-  );
-}
-
-function SheetsHelp({ shareWith, linkKey }: { shareWith: string | null; linkKey: string }) {
-  const { t } = useI18n();
-  // A deployment that still uses one service-account file keeps its sharing steps; every other
-  // client connects its own Google account.
-  if (!shareWith) return <SheetsAccessCard linkKey={linkKey} />;
-  return (
-    <ol className="stack" style={{ paddingInlineStart: 20, listStyle: "decimal" }}>
-      <li>{t("rv.src.sheets.step1")}</li>
-      <li>
-        {t("rv.src.sheets.step2")}
-        {shareWith ? (
-          <span className="row row--wrap" style={{ marginBlockStart: 6 }}>
-            <code className="t-mono" dir="ltr" data-testid="share-with">
-              {shareWith}
-            </code>
-            <CopyButton text={shareWith} />
-          </span>
-        ) : (
-          <span className="c-3"> {t("rv.src.sheets.noAddress")}</span>
-        )}
-      </li>
-      <li>{t("rv.src.sheets.step3")}</li>
-    </ol>
-  );
-}
 
 /** The connection test. One button, one result: the server makes a real, read-only call. */
 export function TestCard({ readiness, source, onDone, disabled }: { readiness: Readiness | null; source: SourceState | null; onDone: () => Promise<void>; disabled?: string }) {
@@ -145,6 +103,7 @@ export function SingleSource({ source, onChanged }: { source: SourceState; onCha
   const { t } = useI18n();
   const { logout } = useClientAuth();
   const [choice, setChoice] = useState(source.source);
+  const selectable = useSelectable();
   const [sheet, setSheet] = useState("");
   const [tab, setTab] = useState(source.google_sheets?.prospects_tab ?? "Prospects");
   const [busy, setBusy] = useState(false);
@@ -185,23 +144,27 @@ export function SingleSource({ source, onChanged }: { source: SourceState; onCha
         <h3>{t("rv.src.where")}</h3>
       </div>
       <div className="rv-grid-2" role="radiogroup" aria-label={t("rv.src.where")}>
-        {source.options.map((o) => (
-          <label key={o.key} className="rv-repeat" style={{ cursor: "pointer", borderColor: choice === o.key ? "var(--brand)" : undefined }}>
+        {source.options.map((o) => {
+          const pending = sourcePending(selectable, o.key, source.source);
+          return (
+          <label key={o.key} className="rv-repeat" data-pending={pending || undefined} style={{ cursor: pending ? "not-allowed" : "pointer", opacity: pending ? 0.55 : undefined, borderColor: choice === o.key ? "var(--brand)" : undefined }}>
             <span className="row">
-              <input type="radio" name="source" checked={choice === o.key} onChange={() => { setChoice(o.key); setDone(false); }} />
+              <input type="radio" name="source" checked={choice === o.key} disabled={pending} onChange={() => { setChoice(o.key); setDone(false); }} />
               <FileSpreadsheet size={18} aria-hidden />
               <strong>{o.label}</strong>
             </span>
+            {pending ? <span className="c-3 t-body-sm">{t("rv.circ.src.pending")}</span> : null}
             <span className="c-3 t-body-sm">{t(o.key === HUBSPOT ? "rv.src.hubspot.help" : o.key === SHEETS ? "rv.src.sheets.help" : "rv.src.other.help")}</span>
           </label>
-        ))}
+          );
+        })}
       </div>
 
       {option && !option.runnable ? <Note tone="warn">{t("rv.src.notRunnable", { name: option.label })}</Note> : null}
 
       {sheetsChosen ? (
         <>
-          <SheetsHelp shareWith={source.google_sheets?.share_with ?? null} linkKey={`${source.version}:${savedSheet}`} />
+          <SourceConnectionNeeded provider={SHEETS} shareWith={source.google_sheets?.share_with ?? null} />
           <TextInput
             label={t("rv.src.sheets.link")}
             helper={savedSheet ? t("rv.src.sheets.linkSaved") : t("rv.src.sheets.linkHelp")}
@@ -214,7 +177,7 @@ export function SingleSource({ source, onChanged }: { source: SourceState; onCha
           <TextInput label={t("rv.src.sheets.tab")} helper={t("rv.src.sheets.tabHelp")} value={tab} onChange={(e) => { setTab(e.target.value); setDone(false); }} maxLength={100} />
         </>
       ) : null}
-      {choice === HUBSPOT ? <HubSpotAccessCard onChanged={() => void onChanged()} /> : null}
+      {choice === HUBSPOT ? <SourceConnectionNeeded provider={HUBSPOT} /> : null}
 
       {failure ? <FailureNote failure={failure} /> : null}
       {done ? <Note tone="success">{t("rv.src.saved")}</Note> : null}
@@ -232,6 +195,7 @@ export function SingleSource({ source, onChanged }: { source: SourceState; onCha
 export function SourceForm({ state, lane, onClose, onSaved }: { state: LanesState; lane: Lane | null; onClose: () => void; onSaved: () => Promise<void> }) {
   const { t } = useI18n();
   const { logout } = useClientAuth();
+  const selectable = useSelectable();
   const [provider, setProvider] = useState(lane?.source.source ?? state.source_options[0]?.key ?? SHEETS);
   const [name, setName] = useState(lane ? lane.source.label : "");
   const [sheet, setSheet] = useState("");
@@ -292,11 +256,14 @@ export function SourceForm({ state, lane, onClose, onSaved }: { state: LanesStat
           <label className="rv-select-label">
             <span className="t-label c-2">{t("rv.src.kind")}</span>
             <select className="rv-select" value={provider} onChange={(e) => setProvider(e.target.value)}>
-              {state.source_options.map((o) => (
-                <option key={o.key} value={o.key}>
-                  {o.label}
-                </option>
-              ))}
+              {state.source_options.map((o) => {
+                const pending = sourcePending(selectable, o.key, null);
+                return (
+                  <option key={o.key} value={o.key} disabled={pending}>
+                    {pending ? `${o.label} — ${t("rv.circ.src.pending")}` : o.label}
+                  </option>
+                );
+              })}
             </select>
           </label>
           <TextInput label={t("rv.src.name")} helper={t("rv.src.nameHelp")} value={name} onChange={(e) => setName(e.target.value)} error={problem === "rv.src.err.name" ? t(problem) : undefined} maxLength={60} />
@@ -304,7 +271,7 @@ export function SourceForm({ state, lane, onClose, onSaved }: { state: LanesStat
       ) : null}
       {sheets ? (
         <>
-          <SheetsHelp shareWith={state.share_with} linkKey={String(state.version)} />
+          <SourceConnectionNeeded provider={SHEETS} shareWith={state.share_with} />
           <TextInput label={t("rv.src.sheets.link")} helper={lane ? t("rv.src.sheets.linkSaved") : t("rv.src.sheets.linkHelp")} value={sheet} onChange={(e) => setSheet(e.target.value)} error={problem === "rv.src.sheets.needLink" ? t(problem) : undefined} dir="ltr" inputMode="url" placeholder="https://docs.google.com/spreadsheets/d/…" />
           <TextInput label={t("rv.src.sheets.tab")} helper={t("rv.src.sheets.tabHelp")} value={tab} onChange={(e) => setTab(e.target.value)} maxLength={100} />
         </>
@@ -403,7 +370,7 @@ function MultiSource({ state, onChanged }: { state: LanesState; onChanged: () =>
         />
       ) : null}
       {syncing ? <SyncCard key={syncing.id} laneId={syncing.id} laneName={syncing.source.label} onClose={() => setSyncing(null)} onChanged={onChanged} /> : null}
-      {state.lanes.some((l) => l.source.source === HUBSPOT) ? <HubSpotAccessCard onChanged={() => void onChanged()} /> : null}
+      {state.lanes.some((l) => l.source.source === HUBSPOT) ? <SourceConnectionNeeded provider={HUBSPOT} /> : null}
       <Card flush aria-label={t("rv.src.yours")}>
         <ul className="rv-list">
           {state.lanes.map((lane) => {

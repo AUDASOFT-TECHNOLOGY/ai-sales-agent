@@ -73,7 +73,7 @@ export function buildSteps({ commercial, readiness, channel, source }: SetupInpu
     { id: "products", state: sellable.length > 0 ? "done" : "todo", required: true, to: "/offer/products", value: sellable.length },
     { id: "payments", state: methods > 0 ? "done" : "todo", required: false, to: "/offer/payments", value: methods },
     { id: "prospects", state: sourceOk ? "done" : sourceWaiting ? "waiting" : "todo", required: true, to: "/connections/sources" },
-    { id: "channel", state: channelOk ? "done" : channelWaiting ? "waiting" : "todo", required: true, to: "/connections/channels" },
+    { id: "channel", state: channelOk ? "done" : channelWaiting ? "waiting" : "todo", required: true, to: "/connections" },
   ];
 }
 

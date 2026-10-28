@@ -177,8 +177,7 @@ export interface TelegramSettings {
   contact_prompt: string;
   contact_button: string;
   not_found_text: string;
-  /** Account mode: the column of the client's prospects in which it writes "yes" for people who expect the contact. */
-  consent_field: string;
+  /** Account mode: at most this many new conversations a day (never more than 5). */
   max_new_conversations_per_day: number;
 }
 
@@ -206,7 +205,7 @@ export interface ChannelUpdate {
   channel: string;
   /** `use_gmail`: true to use the client's own Gmail, false to go back to a Revansa mailbox. */
   email?: { from_name?: string; subject?: string; use_gmail?: boolean };
-  telegram?: Partial<Record<"contact_prompt" | "contact_button" | "not_found_text" | "consent_field", string>> & {
+  telegram?: Partial<Record<"contact_prompt" | "contact_button" | "not_found_text", string>> & {
     /** true: write from the client's own Telegram account; false: back to the Revansa bot. */
     use_account?: boolean;
     max_new_conversations_per_day?: number;
@@ -321,17 +320,6 @@ export interface TelegramAccount {
   daily_limit: number | null;
 }
 
-export interface TelegramWaiting {
-  consent_field: string;
-  waiting: number;
-  people: Array<{
-    prospect_id: string;
-    display_name: string;
-    phone: string | null;
-    reason: "needs_consent" | "needs_phone" | "looking_up";
-  }>;
-}
-
 export function clientTelegramAccount(): Promise<TelegramAccount> {
   return request<TelegramAccount>("/channel/telegram/account");
 }
@@ -363,10 +351,6 @@ export function clientTelegramLoginCancel(): Promise<TelegramAccount> {
 
 export function clientTelegramDisconnect(): Promise<{ disconnected: boolean; ended_at_telegram: boolean }> {
   return request("/channel/telegram/account", { method: "DELETE" });
-}
-
-export function clientTelegramWaiting(): Promise<TelegramWaiting> {
-  return request<TelegramWaiting>("/channel/telegram/waiting");
 }
 
 /* ── Approvals (see src/sales_app/api/client_approvals.py) ──
@@ -1098,4 +1082,25 @@ export function clientPayments(): Promise<PaymentsState> {
 
 export function clientConfirmPayment(prospectId: string, body: PaymentConfirmBody): Promise<PaymentCase> {
   return request<PaymentCase>(`/payments/${encodeURIComponent(prospectId)}/confirm`, { method: "POST", body: JSON.stringify(body) });
+}
+
+/** What the client says about the accounts it wants to connect, before Revansa can connect them, and what
+ *  it can choose on a circuit today (see src/sales_app/api/client_connections.py). */
+export type HintKind = "gmail" | "sheets" | "hubspot" | "telegram";
+
+export interface ConnectionsInfo {
+  hints: Record<HintKind, string | null>;
+  selectable: { channels: Record<string, boolean>; sources: Record<string, boolean> };
+}
+
+export function clientConnections(): Promise<ConnectionsInfo> {
+  return request<ConnectionsInfo>("/connections");
+}
+
+export function clientSetHint(kind: HintKind, value: string): Promise<ConnectionsInfo> {
+  return request<ConnectionsInfo>(`/connections/hints/${kind}`, { method: "PUT", body: JSON.stringify({ value }) });
+}
+
+export function clientClearHint(kind: HintKind): Promise<ConnectionsInfo> {
+  return request<ConnectionsInfo>(`/connections/hints/${kind}`, { method: "DELETE" });
 }

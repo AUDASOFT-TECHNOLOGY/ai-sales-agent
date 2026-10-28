@@ -5,10 +5,10 @@
 import { Suspense, useEffect, useState } from "react";
 import { useOverview, OverviewProvider, guideSteps } from "../client/overview";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, House, LogOut, MessageSquare, Package, Receipt, Rocket, Route, UserRound } from "lucide-react";
+import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, House, LogOut, MessageSquare, Package, Plug, Receipt, Rocket, Route, UserRound } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
-import { googleReturnOf } from "../client/ClientGmailCard";
+import { googleReturnOf, hubspotReturnOf, sheetsReturnOf } from "../client/connections/returns";
 import { useClientAgentStatus } from "../client/useClientAgentStatus";
 import { useNotificationCount } from "../client/useNotificationCount";
 import { ClientNotificationsPanel } from "../client/notifications/ClientNotificationsPanel";
@@ -34,18 +34,18 @@ interface NavEntry {
  *  On a phone the first four entries stay in the tab bar and the rest sit under "More". */
 const HOME: NavEntry = { to: "/home", key: "rv.nav.home", icon: House };
 const SETUP: NavEntry = { to: "/setup", key: "rv.nav.setup", icon: Rocket };
-const PREPARE: NavEntry[] = [
-  { to: "/offer", key: "rv.nav.offer", icon: Package },
-  { to: "/circuits", key: "rv.nav.circuits", icon: Route },
-];
+const CONNECTIONS: NavEntry = { to: "/connections", key: "rv.nav.connections", icon: Plug };
+const OFFER: NavEntry = { to: "/offer", key: "rv.nav.offer", icon: Package };
+const CIRCUITS: NavEntry = { to: "/circuits", key: "rv.nav.circuits", icon: Route };
+const PREPARE: NavEntry[] = [CONNECTIONS, OFFER, CIRCUITS];
 const FOLLOW: NavEntry[] = [
   { to: "/conversations", key: "rv.nav.conversations", icon: MessageSquare, also: ["/prospects"] },
   { to: "/review", key: "rv.nav.review", icon: CheckSquare },
   { to: "/results", key: "rv.nav.results", icon: ChartNoAxesColumn, also: ["/reports", "/dashboard"] },
 ];
 const ACCOUNT: NavEntry[] = [{ to: "/account", key: "rv.nav.billing", icon: Receipt, also: ["/billing", "/profile"] }];
-const TABS = [HOME, FOLLOW[1]!, FOLLOW[0]!, PREPARE[0]!];
-const MORE = [PREPARE[1]!, FOLLOW[2]!, ...ACCOUNT];
+const TABS = [HOME, FOLLOW[1]!, FOLLOW[0]!, OFFER];
+const MORE = [CONNECTIONS, CIRCUITS, FOLLOW[2]!, ...ACCOUNT];
 
 function useActive(entry: NavEntry): boolean {
   const { pathname } = useLocation();
@@ -227,9 +227,11 @@ function Shell() {
   const navigate = useNavigate();
   const compact = useMedia("(max-width: 899px)");
 
-  // Google sends the browser back with `?google=...`: land on the channels, where the result is shown.
+  // Google and HubSpot send the browser back with `?google=...`, `?google_sheets=...` or `?hubspot=...`:
+  // land on the Connections, where the result is shown.
   useEffect(() => {
-    if (googleReturnOf(window.location.search)) navigate("/circuits", { replace: true });
+    const search = window.location.search;
+    if (googleReturnOf(search) || sheetsReturnOf(search) || hubspotReturnOf(search)) navigate("/connections", { replace: true });
   }, [navigate]);
 
   useEffect(() => {

@@ -30,6 +30,7 @@ import {
   adminEmailServiceStatus,
   adminGmailPlatformStatus,
   adminHubSpotPlatformStatus,
+  adminTelegramPlatformStatus,
   adminSetEmailForNewClients,
   adminTestEmailImap,
   adminTestEmailServers,
@@ -42,6 +43,7 @@ import {
   type GmailPlatformStatus,
   type HubSpotPlatformStatus,
   type OpenAIModel,
+  type TelegramPlatformStatus,
 } from "../api";
 
 interface FieldDef {
@@ -87,6 +89,11 @@ const HUBSPOT_FIELDS: FieldDef[] = [
   { key: "hubspot.oauth_state_key", label: "State signing key", help: "At least 16 random characters. Signs the return from HubSpot. Stored encrypted." },
 ];
 
+const TELEGRAM_FIELDS: FieldDef[] = [
+  { key: "telegram.api_id", label: "Telegram application id (api_id)", help: "From my.telegram.org > API development tools. Digits only.", placeholder: "1234567" },
+  { key: "telegram.api_hash", label: "Telegram application hash (api_hash)", help: "The 32-character hash of the same application. Stored encrypted. Never shown again once saved." },
+];
+
 const META_GLOBAL_FIELDS: FieldDef[] = [
   { key: "whatsapp.app_secret", label: "App Secret", help: "Revansa-wide. Signs the webhook calls Meta sends." },
   { key: "whatsapp.verify_token", label: "Verify Token", help: "Revansa-wide. The token you give Meta when registering the webhook." },
@@ -108,6 +115,7 @@ export function AdminSettingsPage() {
       </Glass>
       <OpenAISection canEdit={canEdit} />
       <MetaSection canEdit={canEdit} />
+      <TelegramSection canEdit={canEdit} />
       <EmailSection canEdit={canEdit} />
       <GmailSection canEdit={canEdit} />
       <HubSpotSection canEdit={canEdit} />
@@ -355,6 +363,49 @@ function MetaSection({ canEdit }: { canEdit: boolean }) {
       <p className="c-3 t-body-sm">
         A client&apos;s own Meta credentials are not entered here: the client connects its account with Meta&apos;s own
         window once the four values above are stored (see the WhatsApp section of its page for the rest).
+      </p>
+    </Glass>
+  );
+}
+
+// ---- Telegram (clients writing from their own account) -----------------------------------------
+
+function TelegramSection({ canEdit }: { canEdit: boolean }) {
+  const store = useGlobalCredentials();
+  const [status, setStatus] = useState<TelegramPlatformStatus | null>(null);
+  const credentialsSeen = store.credentials.map((c) => `${c.key}:${c.configured}`).join(",");
+  useEffect(() => {
+    adminTelegramPlatformStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  }, [credentialsSeen]);
+  return (
+    <Glass level={1} className="admin-settings__card" aria-labelledby="settings-telegram">
+      <div className="admin-settings__head">
+        <h2 className="t-h2" id="settings-telegram">
+          Telegram
+        </h2>
+        <span className="admin-settings__status">
+          <span className="c-3 t-body-sm">Configuration</span>
+          <Chip tint={status?.configured ? "success" : "neutral"}>
+            {status ? (status.configured ? "Configured, not verified by Telegram" : "Not configured") : "Unknown"}
+          </Chip>
+        </span>
+      </div>
+      <p className="c-2 t-body-sm">
+        The Telegram application that lets a client sign in with its own Telegram account. Register it once, with the platform
+        operator&apos;s account, at my.telegram.org. Stored is not verified: Telegram accepts it only once a client has signed in.
+      </p>
+      <CredentialGroup store={store} fields={TELEGRAM_FIELDS} canEdit={canEdit} />
+      {status && status.missing.length > 0 ? (
+        <p className="admin-alert admin-alert--info" role="status">
+          Still missing: {status.missing.join(", ")}.
+        </p>
+      ) : null}
+      <p className="c-3 t-body-sm">
+        A Telegram bot is different: its token (from BotFather) is specific to each client, so it is entered and connected on that
+        client&apos;s page, not here. Telegram delivers the bot&apos;s messages to the public base URL of the platform
+        (SALES_AGENT_PUBLIC_BASE_URL, https), which must be set.
       </p>
     </Glass>
   );

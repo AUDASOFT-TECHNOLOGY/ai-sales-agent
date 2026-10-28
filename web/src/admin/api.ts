@@ -484,6 +484,18 @@ export function adminHubSpotPlatformStatus(): Promise<HubSpotPlatformStatus> {
   return request<HubSpotPlatformStatus>("/settings/integrations/hubspot/status");
 }
 
+// The platform's Telegram application (my.telegram.org), which the clients sign in to their own account
+// with. Config-only: "configured" is not "verified" (Telegram accepts it only once a client has signed in).
+export interface TelegramPlatformStatus {
+  configured: boolean;
+  missing: string[];
+  note: string;
+}
+
+export function adminTelegramPlatformStatus(): Promise<TelegramPlatformStatus> {
+  return request<TelegramPlatformStatus>("/settings/integrations/telegram-account/status");
+}
+
 // A client's sources, from the Admin's side.
 export interface ClientSourceSettings {
   provider: string;

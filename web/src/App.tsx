@@ -23,6 +23,7 @@ import { ClientRoute } from "./client/ClientRoute";
 import { ClientTheme } from "./client/ClientTheme";
 import { AccountLayout } from "./client/account/AccountLayout";
 import { CircuitsPage } from "./client/circuits/CircuitsPage";
+import { ConnectionsPage } from "./client/connections/ConnectionsPage";
 import { ResultsLayout } from "./client/results/ResultsLayout";
 import { SetupPage } from "./client/setup/SetupPage";
 import { RulesPage } from "./client/offer/RulesPage";
@@ -104,6 +105,7 @@ export function App() {
                   <Route path="business" element={<Navigate to="/offer/rules" replace />} />
                 </Route>
 
+                <Route path="connections" element={<ConnectionsPage />} />
                 <Route path="circuits" element={<CircuitsPage />} />
 
                 <Route path="conversations" element={<Conversations />} />
@@ -127,8 +129,8 @@ export function App() {
                 <Route path="notifications" element={<ClientNotificationsPage />} />
 
                 {/* Addresses of the previous menus keep working. */}
-                <Route path="connections/*" element={<Navigate to="/circuits" replace />} />
-                <Route path="channel" element={<Navigate to="/circuits" replace />} />
+                <Route path="connections/*" element={<Navigate to="/connections" replace />} />
+                <Route path="channel" element={<Navigate to="/connections" replace />} />
                 <Route path="lanes" element={<Navigate to="/circuits" replace />} />
                 <Route path="reports" element={<Navigate to="/results/daily" replace />} />
                 <Route path="reporting" element={<Navigate to="/results/daily" replace />} />

@@ -1153,3 +1153,11 @@ main { outline: none; }
 .rv-bars li strong { grid-column: 2; grid-row: 1; }
 .rv-bars__track { grid-column: 1 / -1; }
 .rv-results .dv-grid-2 { align-items: start; }
+
+/* Connections: one row per connection, the same anatomy everywhere (icon, name, state, one action). */
+.rv-conn__body { display: grid; gap: 12px; padding: 0 24px 18px; padding-inline-start: 24px; }
+.rv-conn__summary { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rv-conn__group { margin-block: 0; }
+
+/* The mark of a service, on a white tile so it reads on any button or row. */
+.rv-brand { display: inline-grid; place-items: center; flex: none; border-radius: 8px; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.08); }
