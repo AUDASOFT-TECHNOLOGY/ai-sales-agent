@@ -5,16 +5,14 @@
  *
  *  The checklist on the side says what the agent already knows about this product and what is missing. */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Check, ExternalLink, Plus } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { Button } from "../../ui/Button";
-import { Chip } from "../../ui/Chip";
-import { Disclosure } from "../../ui/Disclosure";
 import { Glass } from "../../ui/Glass";
 import { TextInput, Textarea } from "../../ui/Controls";
-import { ALL_PRODUCTS, clientLanes, type LanesState, type ProductResource } from "../api";
+import type { ProductResource } from "../api";
 import { FailureNote, ListEditor, Note, PageHead, type Failure } from "../kit";
 import { defaultLanguage, type Doc } from "../settingsModel";
 import { checklistOf, scoreOf, type CheckKey } from "./completeness";
@@ -38,6 +36,26 @@ import {
   type ProductProblem,
 } from "./productModel";
 import { useOffer } from "./OfferLayout";
+import { useAddress } from "../prepare/links";
+import { useTerms } from "../prepare/terms";
+
+type SectionKey = "basics" | "price" | "media" | "pay" | "pitch" | "adv";
+const SECTIONS: SectionKey[] = ["basics", "price", "media", "pay", "pitch", "adv"];
+/** Which section each checklist line belongs to, and where each validation problem is shown. */
+const CHECK_SECTION: Record<CheckKey, SectionKey> = { basics: "basics", price: "price", media: "media", docs: "media", testi: "media", paylink: "pay", payoff: "pay", objections: "pitch" };
+const PROBLEM_SECTION: Record<ProductProblem, SectionKey> = {
+  name: "basics",
+  summary: "basics",
+  price: "price",
+  variantPrice: "adv",
+  variantCountries: "adv",
+  url: "pay",
+  onlineChoice: "pay",
+  onlineUrl: "pay",
+  ctaUrl: "adv",
+  comingSoonLink: "adv",
+  objection: "pitch",
+};
 
 const PRICED = ["fixed", "from", "range"];
 const HTTPS = /^https:\/\/[^\s/$.?#][^\s]*$/;
@@ -113,14 +131,17 @@ function Section({ title, intro, children, testId }: { title: string; intro?: st
   );
 }
 
-export function ProductEditor() {
+export function ProductEditor({ productId }: { productId?: string } = {}) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const params = useParams();
+  const address = useAddress();
+  const tt = useTerms();
+  const id = productId ?? params.id;
   const { commercial, save } = useOffer();
   const lang = defaultLanguage(commercial);
-  const isNew = params.id === undefined || params.id === "new";
-  const stored = isNew ? undefined : findProduct(commercial, params.id!);
+  const isNew = id === undefined || id === "new";
+  const stored = isNew ? undefined : findProduct(commercial, id!);
   const allMethods = methodsOf(commercial);
   const methods = allMethods.filter((m) => m.status !== "inactive");
   const takenIds = useMemo(() => productList(commercial).map((p) => String(p.id)), [commercial]);
@@ -128,40 +149,27 @@ export function ProductEditor() {
   const dedicated = dedicatedId ? allMethods.find((m) => String(m.id) === dedicatedId) : undefined;
   const storedLink = dedicated ? (formOfMethod(dedicated, lang).instructions.find((i) => i.url.trim() !== "")?.url ?? "") : "";
 
-  const initial = stored ? formOfProduct(stored, lang) : blankProduct("");
+  const fromStore = stored ? formOfProduct(stored, lang) : blankProduct("");
+  // A product already sold online with a payment link but no sheet address starts from that link.
+  const initial = fromStore.payOnline && fromStore.url.trim() === "" && storedLink !== "" ? { ...fromStore, url: storedLink } : fromStore;
   const [draft, setDraft] = useState<ProductForm>(initial);
   const [base, setBase] = useState(initial);
-  const [payLink, setPayLink] = useState(storedLink);
-  const [baseLink, setBaseLink] = useState(storedLink);
-  const [linkError, setLinkError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [problems, setProblems] = useState<ProductProblem[]>([]);
   const [done, setDone] = useState(false);
   const [resources, setResources] = useState<ProductResource[]>([]);
-  const [lanes, setLanes] = useState<LanesState | null>(null);
+  const [section, setSection] = useState<SectionKey>("basics");
 
-  useEffect(() => {
-    let cancelled = false;
-    clientLanes().then(
-      (v) => !cancelled && setLanes(v),
-      () => undefined,
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
   const onLoaded = useCallback((list: ProductResource[]) => setResources(list), []);
 
   if (stored && base !== initial && JSON.stringify(base) !== JSON.stringify(initial)) {
     setBase(initial);
     setDraft(initial);
   }
-  if (storedLink !== baseLink) {
-    setBaseLink(storedLink);
-    setPayLink(storedLink);
-  }
-  const dirty = JSON.stringify(draft) !== JSON.stringify(initial) || payLink.trim() !== storedLink.trim();
+  // The address of the product sheet is also the payment link: that is where the prospect pays online.
+  const link = draft.payMode === "custom" && draft.payOnline ? draft.url.trim() : "";
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
   const set = (patch: Partial<ProductForm>) => {
     setDone(false);
     setDraft({ ...draft, ...patch });
@@ -172,7 +180,7 @@ export function ProductEditor() {
     return (
       <div className="rv-page">
         <Note tone="warn" title={t("rv.prod.missing")}>
-          <Link to="/offer/products" className="link-btn">
+          <Link to={address({ to: "products" })} className="link-btn">
             {t("rv.prod.backToList")}
           </Link>
         </Note>
@@ -183,10 +191,10 @@ export function ProductEditor() {
   async function onSave() {
     const found = productProblems(draft);
     setProblems(found);
-    const link = payLink.trim();
-    if (link !== "" && !HTTPS.test(link)) setLinkError(true);
-    if (found.length > 0 || (link !== "" && !HTTPS.test(link))) return;
-    setLinkError(false);
+    if (found.length > 0) {
+      setSection(PROBLEM_SECTION[found[0]]);
+      return;
+    }
     const id = draft.id || uniqueSlug(slugify(draft.name), takenIds, "produit");
     let form: ProductForm = { ...draft, id };
     let next: Doc = commercial;
@@ -218,46 +226,11 @@ export function ProductEditor() {
       return;
     }
     setDone(true);
-    if (isNew) navigate(`/offer/products/${encodeURIComponent(id)}`, { replace: true });
+    if (isNew) navigate(address({ to: "product", id }), { replace: true });
   }
 
-  const labelOf = (m: Doc) => {
-    const id = String(m.id);
-    return typeof m.label === "string" ? m.label : (Object.values((m.label as Record<string, string>) ?? {})[0] ?? id);
-  };
-  const methodPicker = (kind: "online" | "offline") => {
-    const available = methods.filter((m) => (m.kind === "online") === (kind === "online") && String(m.id) !== dedicatedId);
-    const chosen = kind === "online" ? draft.payOnlineMethods.filter((x) => x !== dedicatedId) : draft.payOfflineMethods;
-    const noneMeansAll = kind === "online" ? payLink.trim() === "" : true;
-    const setChosen = (next: string[]) => set(kind === "online" ? { payOnlineMethods: next } : { payOfflineMethods: next });
-    if (available.length === 0) return null;
-    return (
-      <div className="stack" style={{ gap: 8 }}>
-        {kind === "offline" ? <span className="c-2 t-body-sm">{t("rv.pe.pay.offline.pick")}</span> : null}
-        {available.map((m) => {
-          const id = String(m.id);
-          const on = (noneMeansAll && chosen.length === 0) || chosen.includes(id);
-          return (
-            <label className="rv-checkbox" key={id}>
-              <input
-                type="checkbox"
-                checked={on}
-                onChange={(e) => {
-                  const current = noneMeansAll && chosen.length === 0 ? available.map((a) => String(a.id)) : chosen;
-                  const nextList = e.target.checked ? [...new Set([...current, id])] : current.filter((x) => x !== id);
-                  setChosen(noneMeansAll && nextList.length === available.length ? [] : nextList);
-                }}
-              />
-              <span dir="auto">{labelOf(m)}</span>
-            </label>
-          );
-        })}
-      </div>
-    );
-  };
-
   const counts = zoneCounts(resources);
-  const list = checklistOf({ form: draft, counts, methods, ownMethodId: dedicatedId || `pay-${draft.id}`, ownLink: payLink });
+  const list = checklistOf({ form: draft, counts, methods, ownMethodId: dedicatedId || `pay-${draft.id}`, ownLink: link });
   const labels: Record<CheckKey, string> = {
     basics: t("rv.pe.aside.basics"),
     price: t("rv.pe.aside.price"),
@@ -270,23 +243,23 @@ export function ProductEditor() {
   };
   const checks = list.map((c) => ({ key: c.key, ok: c.ok, label: labels[c.key] }));
   const score = scoreOf(list);
-  const soldIn = stored && lanes ? lanes.lanes.filter((l) => l.offers_all_products || l.products.includes(ALL_PRODUCTS) || l.products.includes(String(stored.id))) : [];
-  const shownLink = payLink.trim() !== "" && HTTPS.test(payLink.trim()) ? payLink.trim() : "";
+  const shownLink = link !== "" && HTTPS.test(link) ? link : "";
 
   return (
     <div className="rv-page">
       <div>
-        <Link to="/offer/products" className="link-btn">
+        <Link to={address({ to: "products" })} className="link-btn">
           <ArrowLeft size={14} className="mirror" aria-hidden /> {t("rv.prod.backToList")}
         </Link>
       </div>
-      <PageHead title={isNew ? t("rv.prod.new") : draft.name || draft.id} />
+      <PageHead title={isNew ? tt("rv.prod.new") : draft.name || draft.id} />
 
       {failure ? <FailureNote failure={failure} /> : null}
       {done ? <Note tone="success">{t("rv.common.saved")}</Note> : null}
 
       <div className="rv-split">
         <div className="rv-split__main">
+          {section === "basics" ? (
           <Section title={t("rv.pe.s.basics")}>
             <TextInput label={t("rv.prod.name")} value={draft.name} onChange={(e) => set({ name: e.target.value })} error={err("name")} maxLength={300} />
             <TextInput label={t("rv.prod.summary")} helper={t("rv.prod.summaryHelp")} value={draft.summary} onChange={(e) => set({ summary: e.target.value })} error={err("summary")} maxLength={300} />
@@ -299,10 +272,11 @@ export function ProductEditor() {
                 options={PRODUCT_STATUSES.map((s) => ({ value: s, label: t(`rv.prod.status.${s}` as MessageKey) }))}
                 helper={t(`rv.prod.statusHelp.${draft.status}` as MessageKey)}
               />
-              <TextInput label={t("rv.prod.url")} helper={t("rv.prod.urlHelp")} optional={t("rv.common.optional")} value={draft.url} onChange={(e) => set({ url: e.target.value })} error={err("url")} placeholder="https://" dir="ltr" inputMode="url" />
             </div>
           </Section>
+          ) : null}
 
+          {section === "price" ? (
           <Section title={t("rv.pe.s.price")} intro={t("rv.prod.price.help")}>
             <PriceFields
               model={draft.priceModel}
@@ -314,7 +288,9 @@ export function ProductEditor() {
             />
             <TextInput label={t("rv.prod.price.note")} optional={t("rv.common.optional")} value={draft.priceNote} onChange={(e) => set({ priceNote: e.target.value })} maxLength={300} />
           </Section>
+          ) : null}
 
+          {section === "media" ? (
           <Section title={t("rv.pe.s.media")} intro={t("rv.pe.media.intro")} testId="product-media">
             {stored ? (
               <ResourcesPanel productId={String(stored.id)} onLoaded={onLoaded} />
@@ -322,89 +298,52 @@ export function ProductEditor() {
               <Note tone="info">{t("rv.pe.saveFirst")}</Note>
             )}
           </Section>
+          ) : null}
 
+          {section === "pay" ? (
           <Section title={t("rv.pe.s.pay")} intro={t("rv.pe.pay.intro")} testId="product-payment">
-            <div className="rv-seg" role="group" aria-label={t("rv.pe.s.pay")} style={{ alignSelf: "flex-start" }}>
-              <button type="button" className="rv-seg__btn" aria-pressed={draft.payMode === "all"} onClick={() => set({ payMode: "all" })}>
-                {t("rv.pe.pay.all")}
-              </button>
-              <button type="button" className="rv-seg__btn" aria-pressed={draft.payMode === "custom"} onClick={() => set({ payMode: "custom" })}>
-                {t("rv.pe.pay.choose")}
-              </button>
+            <div className="stack">
+              <span className="t-label c-2" id="sold-online">
+                {t("rv.pe.sell.question")}
+              </span>
+              <div className="rv-seg" role="group" aria-labelledby="sold-online" style={{ alignSelf: "flex-start" }}>
+                <button type="button" className="rv-seg__btn" aria-pressed={draft.payMode === "custom" && draft.payOnline} onClick={() => set({ payMode: "custom", payOnline: true })}>
+                  {t("rv.pe.sell.yes")}
+                </button>
+                <button type="button" className="rv-seg__btn" aria-pressed={draft.payMode === "custom" && !draft.payOnline} onClick={() => set({ payMode: "custom", payOnline: false })}>
+                  {t("rv.pe.sell.no")}
+                </button>
+              </div>
+              {err("onlineChoice") ? <span className="c-danger t-body-sm">{err("onlineChoice")}</span> : null}
             </div>
 
-            {draft.payMode === "all" ? (
+            {draft.payMode === "custom" && draft.payOnline ? (
               <div className="stack">
-                <p className="c-2">{methods.length > 0 ? t("rv.pe.pay.all.help", { list: methods.map(labelOf).join(", ") }) : t("rv.pe.pay.all.none")}</p>
-                <div>
-                  <Button size="sm" leading={<Plus size={14} aria-hidden />} onClick={() => set({ payMode: "custom", payOnline: true })}>
-                    {t("rv.pe.pay.link")}
-                  </Button>
-                </div>
+                <TextInput label={t("rv.pe.sell.url")} helper={t("rv.pe.sell.urlHelp")} value={draft.url} onChange={(e) => set({ url: e.target.value })} error={err("onlineUrl") ?? err("url")} placeholder="https://" dir="ltr" inputMode="url" />
+                {shownLink ? (
+                  <div>
+                    <a className="btn" data-variant="secondary" data-size="sm" href={shownLink} target="_blank" rel="noreferrer noopener">
+                      <ExternalLink size={14} aria-hidden />
+                      <span className="btn__label">{t("rv.pe.pay.link.test")}</span>
+                    </a>
+                  </div>
+                ) : null}
               </div>
-            ) : (
-              <div className="rv-payzones">
-                <div className="rv-payzone rv-ent" data-ent="chn">
-                  <label className="rv-payzone__head">
-                    <input type="checkbox" checked={draft.payOnline} onChange={(e) => set({ payOnline: e.target.checked })} />
-                    <strong>{t("rv.pe.pay.online")}</strong>
-                  </label>
-                  {draft.payOnline ? (
-                    <>
-                      <TextInput
-                        label={t("rv.pe.pay.link")}
-                        helper={t("rv.pe.pay.link.help")}
-                        value={payLink}
-                        onChange={(e) => {
-                          setPayLink(e.target.value);
-                          setLinkError(false);
-                          setDone(false);
-                        }}
-                        error={linkError ? t("rv.pe.pay.link.err") : undefined}
-                        placeholder="https://"
-                        dir="ltr"
-                        inputMode="url"
-                      />
-                      {shownLink ? (
-                        <div>
-                          <a className="btn" data-variant="secondary" data-size="sm" href={shownLink} target="_blank" rel="noreferrer noopener">
-                            <ExternalLink size={14} aria-hidden />
-                            <span className="btn__label">{t("rv.pe.pay.link.test")}</span>
-                          </a>
-                        </div>
-                      ) : null}
-                      {methodPicker("online")}
-                    </>
-                  ) : null}
-                </div>
-                <div className="rv-payzone rv-ent" data-ent="chn">
-                  <label className="rv-payzone__head">
-                    <input type="checkbox" checked={draft.payOffline} onChange={(e) => set({ payOffline: e.target.checked })} />
-                    <strong>{t("rv.pe.pay.offline")}</strong>
-                  </label>
-                  {draft.payOffline ? (
-                    <>
-                      {methods.some((m) => m.kind === "offline") ? methodPicker("offline") : <p className="c-3 t-body-sm">{t("rv.pe.pay.offline.none")}</p>}
-                      <div>
-                        <Link to="/offer/rules" className="link-btn">
-                          {t("rv.pe.pay.offline.add")}
-                        </Link>
-                      </div>
-                      <label className="rv-checkbox">
-                        <input type="checkbox" checked={draft.receiptRequired} onChange={(e) => set({ receiptRequired: e.target.checked })} />
-                        <span className="rv-checkbox__text">
-                          <strong>{t("rv.prod.pay.receipt")}</strong>
-                          <span className="c-3 t-body-sm">{t("rv.prod.pay.receiptHelp")}</span>
-                        </span>
-                      </label>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            )}
-            <Note tone="info">{t("rv.pe.pay.declared")}</Note>
-          </Section>
+            ) : null}
 
+            {draft.payMode === "custom" ? (
+              <div className="rv-payzone rv-ent" data-ent="chn">
+                <label className="rv-payzone__head">
+                  <input type="checkbox" checked={draft.payOffline} onChange={(e) => set({ payOffline: e.target.checked, payOfflineMethods: [] })} />
+                  <strong>{t("rv.pe.pay.offline")}</strong>
+                </label>
+                {draft.payOffline ? <p className="c-3 t-body-sm">{t("rv.pe.pay.offline.global")}</p> : null}
+              </div>
+            ) : null}
+          </Section>
+          ) : null}
+
+          {section === "pitch" ? (
           <Section title={t("rv.pe.s.pitch")} intro={t("rv.prod.pitch.help")}>
             <ListEditor label={t("rv.prod.benefits")} helper={t("rv.prod.benefitsHelp")} values={draft.benefits} onChange={(benefits) => set({ benefits })} addLabel={t("rv.prod.benefits.add")} maxItems={10} />
             <div className="rv-grid-2">
@@ -435,8 +374,10 @@ export function ProductEditor() {
               ) : null}
             </fieldset>
           </Section>
+          ) : null}
 
-          <Disclosure title={t("rv.pe.s.adv")} hint={t("rv.pe.s.adv.hint")}>
+          {section === "adv" ? (
+          <Section title={t("rv.pe.s.adv")} intro={t("rv.pe.s.adv.hint")}>
             <div className="stack" style={{ gap: 20 }}>
               <Select
                 label={t("rv.prod.price.disclose")}
@@ -522,7 +463,8 @@ export function ProductEditor() {
               <TextInput label={t("rv.prod.cta.label")} optional={t("rv.common.optional")} helper={t("rv.prod.cta.labelHelp")} value={draft.ctaLabel} onChange={(e) => set({ ctaLabel: e.target.value })} maxLength={300} />
               <ListEditor label={t("rv.prod.doNotClaim")} helper={t("rv.prod.doNotClaimHelp")} values={draft.doNotClaim} onChange={(doNotClaim) => set({ doNotClaim })} addLabel={t("rv.prod.doNotClaim.add")} />
             </div>
-          </Disclosure>
+          </Section>
+          ) : null}
         </div>
 
         <aside className="rv-split__side" aria-label={t("rv.pe.aside.title")}>
@@ -535,52 +477,24 @@ export function ProductEditor() {
               <div className="rv-progress__fill" style={{ width: `${score}%` }} />
             </div>
             <ul className="rv-check">
-              {checks.map((c) => (
-                <li key={c.key} data-ok={c.ok || undefined}>
-                  <span className="rv-check__mark" aria-hidden>
-                    {c.ok ? <Check size={13} strokeWidth={3} /> : <Plus size={13} />}
-                  </span>
-                  <span>{c.label}</span>
-                </li>
-              ))}
-            </ul>
-          </Glass>
-          <Glass level={1} className="rv-card">
-            <div className="rv-card__head">
-              <h3>{t("rv.pe.aside.sold")}</h3>
-            </div>
-            {!stored ? null : soldIn.length === 0 ? (
-              <p className="c-3 t-body-sm">{t("rv.pe.aside.sold.none")}</p>
-            ) : (
-              <ul className="stack" style={{ gap: 8 }}>
-                {soldIn.map((l) => (
-                  <li key={l.id}>
-                    <span className="rv-tag rv-ent" data-ent="src" dir="auto">
-                      {l.source.label}
-                    </span>{" "}
-                    <span className="rv-tag rv-ent" data-ent="chn">
-                      {l.channel.label}
-                    </span>
-                    {l.offers_all_products || l.products.includes(ALL_PRODUCTS) ? <Chip>{t("rv.pe.aside.sold.all")}</Chip> : null}
+              {SECTIONS.map((key) => {
+                const own = checks.filter((c) => CHECK_SECTION[c.key] === key);
+                const ok = own.length > 0 && own.every((c) => c.ok);
+                return (
+                  <li key={key} data-ok={ok || undefined}>
+                    <button type="button" className="rv-check__nav" aria-current={section === key ? "true" : undefined} onClick={() => setSection(key)}>
+                      <span className="rv-check__mark" aria-hidden>
+                        {ok ? <Check size={13} strokeWidth={3} /> : <Plus size={13} />}
+                      </span>
+                      <span className="rv-check__text">
+                        <span className="rv-check__title">{t(`rv.pe.s.${key}` as MessageKey)}</span>
+                        {own.length > 0 ? <span className="c-3 t-body-sm">{own.map((c) => c.label).join(" · ")}</span> : null}
+                      </span>
+                    </button>
                   </li>
-                ))}
-              </ul>
-            )}
-            <Link to="/circuits" className="link-btn">
-              {t("rv.pe.aside.sold.link")}
-            </Link>
-          </Glass>
-          <Glass level={1} className="rv-card">
-            <div className="rv-card__head">
-              <h3>{t("rv.pe.preview.title")}</h3>
-            </div>
-            {shownLink ? (
-              <div className="rv-bubble" dir="auto">
-                {t("rv.pe.preview.text", { link: shownLink })}
-              </div>
-            ) : (
-              <p className="c-3 t-body-sm">{t("rv.pe.preview.none")}</p>
-            )}
+                );
+              })}
+            </ul>
           </Glass>
         </aside>
       </div>
@@ -594,7 +508,6 @@ export function ProductEditor() {
               variant="ghost"
               onClick={() => {
                 setDraft(initial);
-                setPayLink(storedLink);
               }}
               disabled={busy}
             >

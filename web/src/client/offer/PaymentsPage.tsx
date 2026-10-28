@@ -1,18 +1,21 @@
-/** Payment methods: how a buyer can pay, and what the agent tells them. Two kinds, both the
- *  client's own: an *online* method is a link to the client's payment or order page (the buyer pays
- *  there; Revansa is not a payment gateway), an *offline* one is a set of instructions (a bank
- *  transfer, cash, a deposit). Whichever the buyer picks, the agent gives the details exactly as
- *  written here, and a payment is "paid" only once the client has checked it by hand. */
+/** The offline payment methods, once for every product: one entry per country (name, description,
+ *  payment currency). An online payment is not set here: it is the link of the product's own page,
+ *  filled in on the product. The agent gives the details exactly as written here, and a payment is
+ *  "paid" only once the client has checked it by hand.
+ *
+ *  Each country entry is stored as an offline method of its own, scoped to that country, so the
+ *  Brain needs nothing new to offer the right one. The payment currency is kept in the method's
+ *  metadata: it is not a scope, because a Tunisian buyer pays in dinars a product priced in dollars. */
 
 import { useState } from "react";
-import { CreditCard, Landmark, Link2, Plus } from "lucide-react";
+import { CreditCard, Landmark, Plus } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { Button } from "../../ui/Button";
 import { Chip } from "../../ui/Chip";
 import { TextInput, Textarea } from "../../ui/Controls";
-import { Card, Empty, FailureNote, Note, type Failure } from "../kit";
-import { defaultLanguage, localizedText } from "../settingsModel";
-import { uniqueSlug, slugify } from "./productModel";
+import { Card, FailureNote, Note, type Failure } from "../kit";
+import { defaultLanguage, localizedText, type Doc } from "../settingsModel";
+import { slugify, uniqueSlug } from "./productModel";
 import {
   applyMethodForm,
   blankInstruction,
@@ -22,42 +25,78 @@ import {
   forgetMethod,
   formOfMethod,
   journeyOf,
-  methodProblems,
   methodsOf,
   putMethod,
   removeMethod,
-  type MethodForm,
-  type MethodKind,
-  type MethodProblem,
 } from "./paymentModel";
 import { useOffer } from "./OfferLayout";
 
-function MethodEditor({ initial, existing, onDone, onCancel }: { initial: MethodForm; existing: boolean; onDone: (startedJourney: boolean) => void; onCancel: () => void }) {
+/** A product's own payment link lives in a method named `pay-<product>`: not listed here. */
+const OWN = /^pay-/;
+const CURRENCY_KEY = "pay_currency";
+
+interface Entry {
+  id: string;
+  country: string;
+  name: string;
+  currency: string;
+  text: string;
+}
+type EntryProblem = "country" | "name" | "description" | "currency";
+
+function currencyOf(method: Doc): string {
+  const meta = method.metadata;
+  const value = meta && typeof meta === "object" ? (meta as Record<string, unknown>)[CURRENCY_KEY] : undefined;
+  return typeof value === "string" ? value : "";
+}
+
+function entryOf(method: Doc, lang: string): Entry {
+  const form = formOfMethod(method, lang);
+  const first = form.instructions[0] ?? blankInstruction("main");
+  return { id: form.id, country: first.countries, name: form.label, currency: currencyOf(method), text: first.text };
+}
+
+function entryProblems(e: Entry): EntryProblem[] {
+  const found: EntryProblem[] = [];
+  if (e.country.trim() === "") found.push("country");
+  if (e.name.trim() === "") found.push("name");
+  if (e.text.trim() === "") found.push("description");
+  if (e.currency.trim() !== "" && !/^[A-Za-z]{3}$/.test(e.currency.trim())) found.push("currency");
+  return found;
+}
+
+function EntryEditor({ initial, onDone, onCancel }: { initial: Entry; onDone: (startedJourney: boolean) => void; onCancel: () => void }) {
   const { t } = useI18n();
   const { commercial, save } = useOffer();
   const lang = defaultLanguage(commercial);
   const [draft, setDraft] = useState(initial);
-  const [problems, setProblems] = useState<MethodProblem[]>([]);
+  const [problems, setProblems] = useState<EntryProblem[]>([]);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
-  const online = draft.kind === "online";
-  const err = (p: MethodProblem) => (problems.includes(p) ? t(`rv.pay.err.${p}` as MessageKey) : undefined);
-  const patchInstruction = (i: number, patch: Partial<MethodForm["instructions"][number]>) =>
-    setDraft({ ...draft, instructions: draft.instructions.map((x, n) => (n === i ? { ...x, ...patch } : x)) });
+  const err = (p: EntryProblem) => (problems.includes(p) ? t(`rv.pay2.err.${p}` as MessageKey) : undefined);
 
   async function submit() {
-    const found = methodProblems(draft);
+    const found = entryProblems(draft);
     setProblems(found);
     if (found.length > 0) return;
-    const taken = methodsOf(commercial).map((m) => String(m.id));
-    const id = draft.id || uniqueSlug(slugify(draft.label), taken, online ? "paiement-en-ligne" : "paiement-hors-ligne");
-    const original = methodsOf(commercial).find((m) => m.id === id);
-    const method = applyMethodForm(original, { ...draft, id }, lang);
+    const all = methodsOf(commercial);
+    const id = draft.id || uniqueSlug(slugify(`${draft.name}-${draft.country}`), all.map((m) => String(m.id)), "paiement-hors-ligne");
+    const original = all.find((m) => m.id === id);
+    const form = original ? formOfMethod(original, lang) : blankMethod(id, "offline");
+    form.status = "active";
+    form.kind = "offline";
+    form.label = draft.name.trim();
+    const first = form.instructions[0] ?? blankInstruction("main");
+    form.instructions = [{ ...first, countries: draft.country.trim(), currencies: "", text: draft.text }, ...form.instructions.slice(1)];
+    const method = applyMethodForm(original, { ...form, id }, lang);
+    const metadata: Record<string, unknown> = { ...((method.metadata as Record<string, unknown> | undefined) ?? {}) };
+    if (draft.currency.trim() !== "") metadata[CURRENCY_KEY] = draft.currency.trim().toUpperCase();
+    else delete metadata[CURRENCY_KEY];
+    if (Object.keys(metadata).length > 0) method.metadata = metadata;
+    else delete method.metadata;
     setBusy(true);
     setFailure(null);
-    // The first payment method is useless unless the agent may hand it over: the purchase journey
-    // starts with it (unless Revansa set the client's own sales process), and the screen says so.
-    const firstOne = !existing && methodsOf(commercial).length === 0 && journeyOf(commercial) === "off";
+    const firstOne = all.length === 0 && journeyOf(commercial) === "off";
     const base = putMethod(commercial, method);
     const problem = await save({ commercial: firstOne ? enableJourney(base) : base });
     setBusy(false);
@@ -66,79 +105,14 @@ function MethodEditor({ initial, existing, onDone, onCancel }: { initial: Method
   }
 
   return (
-    <Card aria-label={t(existing ? "rv.pay.edit" : "rv.pay.new")}>
-      <div className="rv-card__head">
-        <h3>{t(existing ? "rv.pay.edit" : online ? "rv.pay.newOnline" : "rv.pay.newOffline")}</h3>
-      </div>
-      <p className="rv-card__sub">{t(online ? "rv.pay.onlineHelp" : "rv.pay.offlineHelp")}</p>
+    <div className="rv-repeat">
       {failure ? <FailureNote failure={failure} /> : null}
-      <TextInput label={t("rv.pay.label")} helper={t("rv.pay.labelHelp")} value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} error={err("label")} maxLength={300} />
-
-      {draft.instructions.map((ins, i) => (
-        <div className="rv-repeat" key={i}>
-          {online ? (
-            <TextInput label={t("rv.pay.url")} helper={t("rv.pay.urlHelp")} value={ins.url} onChange={(e) => patchInstruction(i, { url: e.target.value })} error={err("url") ?? err("onlineNeedsLink")} placeholder="https://" dir="ltr" inputMode="url" />
-          ) : null}
-          <Textarea
-            label={t(online ? "rv.pay.textOnline" : "rv.pay.text")}
-            helper={t(online ? "rv.pay.textOnlineHelp" : "rv.pay.textHelp")}
-            value={ins.text}
-            onChange={(e) => patchInstruction(i, { text: e.target.value })}
-            error={err("offlineNeedsDetails")}
-            rows={3}
-            maxLength={1500}
-          />
-          {!online ? (
-            <fieldset className="rv-fieldset">
-              <legend className="t-label c-2">{t("rv.pay.fields")}</legend>
-              <p className="c-3 t-body-sm">{t("rv.pay.fieldsHelp")}</p>
-              {ins.fields.map((f, n) => (
-                <div className="rv-grid-2" key={n}>
-                  <input className="input well" aria-label={t("rv.pay.fieldLabel")} placeholder={t("rv.pay.fieldLabel")} value={f.label} maxLength={200} dir="auto" onChange={(e) => patchInstruction(i, { fields: ins.fields.map((x, k) => (k === n ? { ...x, label: e.target.value } : x)) })} />
-                  <div className="row">
-                    <input className="input well" aria-label={t("rv.pay.fieldValue")} placeholder={t("rv.pay.fieldValue")} value={f.value} maxLength={200} dir="auto" spellCheck={false} onChange={(e) => patchInstruction(i, { fields: ins.fields.map((x, k) => (k === n ? { ...x, value: e.target.value } : x)) })} />
-                    <Button type="button" variant="ghost" size="sm" onClick={() => patchInstruction(i, { fields: ins.fields.filter((_, k) => k !== n) })}>
-                      {t("rv.common.remove")}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              {ins.fields.length < 20 ? (
-                <div>
-                  <Button type="button" size="sm" onClick={() => patchInstruction(i, { fields: [...ins.fields, { label: "", value: "" }] })}>
-                    {t("rv.pay.fieldAdd")}
-                  </Button>
-                </div>
-              ) : null}
-            </fieldset>
-          ) : null}
-          <div className="rv-grid-2">
-            <TextInput label={t("rv.pay.countries")} helper={t("rv.pay.countriesHelp")} optional={t("rv.common.optional")} value={ins.countries} onChange={(e) => patchInstruction(i, { countries: e.target.value })} />
-            <TextInput label={t("rv.pay.currencies")} helper={t("rv.pay.currenciesHelp")} optional={t("rv.common.optional")} value={ins.currencies} onChange={(e) => patchInstruction(i, { currencies: e.target.value })} error={err("currency")} dir="ltr" placeholder="TND, EUR" />
-          </div>
-          {draft.instructions.length > 1 ? (
-            <div>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setDraft({ ...draft, instructions: draft.instructions.filter((_, n) => n !== i) })}>
-                {t("rv.pay.removeVariant")}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ))}
-      {draft.instructions.length < 10 ? (
-        <div>
-          <Button type="button" size="sm" onClick={() => setDraft({ ...draft, instructions: [...draft.instructions, blankInstruction(`v${draft.instructions.length + 1}`)] })}>
-            {t("rv.pay.addVariant")}
-          </Button>
-          <p className="c-3 t-body-sm" style={{ marginBlockStart: 6 }}>
-            {t("rv.pay.variantHelp")}
-          </p>
-        </div>
-      ) : null}
-
-      <Textarea label={t("rv.pay.note")} helper={t("rv.pay.noteHelp")} value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} rows={2} maxLength={3000} />
-      <Note tone="info">{t("rv.pay.manualNote")}</Note>
-
+      <div className="rv-grid-2">
+        <TextInput label={t("rv.pay2.country")} helper={t("rv.pay2.countryHelp")} value={draft.country} onChange={(e) => setDraft({ ...draft, country: e.target.value })} error={err("country")} maxLength={100} />
+        <TextInput label={t("rv.pay2.currency")} helper={t("rv.pay2.currencyHelp")} value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase() })} error={err("currency")} maxLength={3} placeholder="TND" dir="ltr" />
+      </div>
+      <TextInput label={t("rv.pay2.name")} helper={t("rv.pay2.nameHelp")} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} error={err("name")} maxLength={300} />
+      <Textarea label={t("rv.pay2.description")} helper={t("rv.pay2.descriptionHelp")} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} error={err("description")} rows={4} maxLength={1500} />
       <div className="rv-actions">
         <Button variant="primary" onClick={() => void submit()} loading={busy}>
           {t("rv.common.save")}
@@ -147,7 +121,7 @@ function MethodEditor({ initial, existing, onDone, onCancel }: { initial: Method
           {t("rv.common.cancel")}
         </Button>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -155,44 +129,31 @@ export function PaymentsPage() {
   const { t } = useI18n();
   const { commercial, save } = useOffer();
   const lang = defaultLanguage(commercial);
-  const methods = methodsOf(commercial);
-  const [editing, setEditing] = useState<{ form: MethodForm; existing: boolean } | null>(null);
+  const all = methodsOf(commercial);
+  const offline = all.filter((m) => !OWN.test(String(m.id)) && m.kind !== "online");
+  const [editing, setEditing] = useState<Entry | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saved, setSaved] = useState<null | "plain" | "journey">(null);
   const journey = journeyOf(commercial);
-  const activeMethods = methods.filter((m) => m.status !== "inactive").length;
+  const activeMethods = all.filter((m) => m.status !== "inactive").length;
 
-  const start = (kind: MethodKind) => {
-    setSaved(null);
-    setEditing({ form: blankMethod("", kind), existing: false });
-  };
-
-  async function toggle(id: string, status: "active" | "inactive") {
-    setBusy(id);
+  async function commit(next: Doc, key: string) {
+    setBusy(key);
     setFailure(null);
-    const next = putMethod(commercial, { ...methods.find((m) => m.id === id)!, status });
+    setSaved(null);
     const problem = await save({ commercial: next });
-    setBusy(null);
-    if (problem) setFailure(problem);
-  }
-
-  async function switchJourney(turnOn: boolean) {
-    setBusy("journey");
-    setFailure(null);
-    setSaved(null);
-    const problem = await save({ commercial: turnOn ? enableJourney(commercial) : disableJourney(commercial) });
     setBusy(null);
     if (problem) setFailure(problem);
     else setSaved("plain");
   }
 
+  async function switchJourney(turnOn: boolean) {
+    await commit(turnOn ? enableJourney(commercial) : disableJourney(commercial), "journey");
+  }
+
   async function remove(id: string) {
-    setBusy(id);
-    setFailure(null);
-    const problem = await save({ commercial: forgetMethod(removeMethod(commercial, id), id) });
-    setBusy(null);
-    if (problem) setFailure(problem);
+    await commit(forgetMethod(removeMethod(commercial, id), id), id);
   }
 
   return (
@@ -202,26 +163,72 @@ export function PaymentsPage() {
           <h3 className="t-h2">{t("rv.pay.title")}</h3>
           <p>{t("rv.pay.intro")}</p>
         </div>
-        {/* With no method yet, the empty state below carries these two actions: not shown twice. */}
-        {methods.length > 0 ? (
-          <div className="rv-actions">
-            <Button leading={<Link2 size={16} aria-hidden />} onClick={() => start("online")} disabled={editing !== null}>
-              {t("rv.pay.addOnline")}
-            </Button>
-            <Button leading={<Landmark size={16} aria-hidden />} onClick={() => start("offline")} disabled={editing !== null}>
-              {t("rv.pay.addOffline")}
-            </Button>
-          </div>
-        ) : null}
       </div>
 
-      <Note tone="info" title={t("rv.pay.how.title")}>
-        {t("rv.pay.how.text")}
-      </Note>
       {failure ? <FailureNote failure={failure} /> : null}
       {saved ? <Note tone="success">{t(saved === "journey" ? "rv.pay.journey.started" : "rv.common.saved")}</Note> : null}
 
-      {methods.length > 0 ? (
+      <Card aria-label={t("rv.pay2.offline.title")} data-testid="pay-offline">
+        <div className="rv-card__head">
+          <h3>
+            <Landmark size={18} aria-hidden /> {t("rv.pay2.offline.title")}
+          </h3>
+          <Button leading={<Plus size={16} aria-hidden />} onClick={() => { setSaved(null); setEditing({ id: "", country: "", name: "", currency: "", text: "" }); }} disabled={editing !== null}>
+            {t("rv.pay2.offline.add")}
+          </Button>
+        </div>
+        <p className="rv-card__sub">{t("rv.pay2.offline.help")}</p>
+
+        {editing ? (
+          <EntryEditor
+            key={editing.id || "new"}
+            initial={editing}
+            onCancel={() => setEditing(null)}
+            onDone={(startedJourney) => {
+              setEditing(null);
+              setSaved(startedJourney ? "journey" : "plain");
+            }}
+          />
+        ) : null}
+
+        {offline.length === 0 && !editing ? (
+          <p className="c-3 t-body-sm">{t("rv.pay2.offline.empty")}</p>
+        ) : (
+          <ul className="rv-list">
+            {offline.map((m) => {
+              const id = String(m.id);
+              const e = entryOf(m, lang);
+              if (editing?.id === id) return null;
+              return (
+                <li key={id} className="rv-product" data-testid={`method-${id}`}>
+                  <span className="rv-channel__icon" aria-hidden>
+                    <CreditCard size={20} />
+                  </span>
+                  <div className="rv-row__main">
+                    <span className="rv-row__title" dir="auto">
+                      {e.country || "—"}
+                    </span>
+                    <span className="rv-row__sub" dir="auto">
+                      {localizedText(m.label, lang) || id}
+                      {e.currency ? ` · ${e.currency}` : ""}
+                    </span>
+                  </div>
+                  <div className="rv-actions">
+                    <Button size="sm" onClick={() => { setSaved(null); setEditing(e); }} disabled={editing !== null}>
+                      {t("rv.common.edit")}
+                    </Button>
+                    <Button size="sm" variant="danger" onClick={() => void remove(id)} loading={busy === id}>
+                      {t("rv.common.delete")}
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+
+      {all.length > 0 ? (
         <Card aria-label={t("rv.pay.journey.title")} data-testid="journey">
           <div className="rv-card__head">
             <h3>{t("rv.pay.journey.title")}</h3>
@@ -241,80 +248,6 @@ export function PaymentsPage() {
               </Button>
             </div>
           ) : null}
-        </Card>
-      ) : null}
-
-      {editing ? (
-        <MethodEditor
-          key={editing.form.id || "new"}
-          initial={editing.form}
-          existing={editing.existing}
-          onCancel={() => setEditing(null)}
-          onDone={(startedJourney) => {
-            setEditing(null);
-            setSaved(startedJourney ? "journey" : "plain");
-          }}
-        />
-      ) : null}
-
-      {methods.length === 0 && !editing ? (
-        <Card>
-          <Empty
-            icon={<CreditCard size={24} />}
-            title={t("rv.pay.empty.title")}
-            text={t("rv.pay.empty.text")}
-            action={
-              <div className="rv-actions">
-                <Button variant="primary" leading={<Plus size={16} aria-hidden />} onClick={() => start("online")}>
-                  {t("rv.pay.addOnline")}
-                </Button>
-                <Button leading={<Plus size={16} aria-hidden />} onClick={() => start("offline")}>
-                  {t("rv.pay.addOffline")}
-                </Button>
-              </div>
-            }
-          />
-        </Card>
-      ) : null}
-
-      {methods.length > 0 ? (
-        <Card flush aria-label={t("rv.pay.title")}>
-          <ul className="rv-list">
-            {methods.map((m) => {
-              const id = String(m.id);
-              const form = formOfMethod(m, lang);
-              const active = form.status === "active";
-              const scope = form.instructions.flatMap((i) => [i.countries, i.currencies]).filter((s) => s !== "");
-              return (
-                <li key={id} className="rv-product" data-testid={`method-${id}`}>
-                  <span className="rv-channel__icon" aria-hidden>
-                    {form.kind === "online" ? <Link2 size={20} /> : <Landmark size={20} />}
-                  </span>
-                  <div className="rv-row__main">
-                    <span className="rv-row__title" dir="auto">
-                      {localizedText(m.label, lang) || id}
-                    </span>
-                    <span className="rv-row__sub">
-                      {t(form.kind === "online" ? "rv.pay.kind.online" : "rv.pay.kind.offline")}
-                      {scope.length > 0 ? ` · ${scope.join(" · ")}` : ""}
-                    </span>
-                  </div>
-                  <Chip tint={active ? "success" : "neutral"}>{t(active ? "rv.pay.active" : "rv.pay.inactive")}</Chip>
-                  <div className="rv-actions">
-                    <Button size="sm" onClick={() => { setSaved(null); setEditing({ form, existing: true }); }} disabled={editing !== null}>
-                      {t("rv.common.edit")}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => void toggle(id, active ? "inactive" : "active")} loading={busy === id}>
-                      {t(active ? "rv.pay.disable" : "rv.pay.enable")}
-                    </Button>
-                    <Button size="sm" variant="danger" onClick={() => void remove(id)} loading={busy === id}>
-                      {t("rv.common.delete")}
-                    </Button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
         </Card>
       ) : null}
     </div>

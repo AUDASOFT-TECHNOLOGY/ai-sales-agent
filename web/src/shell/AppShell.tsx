@@ -5,7 +5,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useOverview, OverviewProvider, guideSteps } from "../client/overview";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, House, LogOut, MessageSquare, Package, Plug, Receipt, Rocket, Route, UserRound } from "lucide-react";
+import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, FlaskConical, House, LogOut, MessageSquare, Receipt, Rocket, UserRound, Waves } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { googleReturnOf, hubspotReturnOf, sheetsReturnOf } from "../client/connections/returns";
@@ -33,19 +33,19 @@ interface NavEntry {
 /** Four groups, in the order an owner works: set up, prepare, follow, look after the account.
  *  On a phone the first four entries stay in the tab bar and the rest sit under "More". */
 const HOME: NavEntry = { to: "/home", key: "rv.nav.home", icon: House };
-const SETUP: NavEntry = { to: "/setup", key: "rv.nav.setup", icon: Rocket };
-const CONNECTIONS: NavEntry = { to: "/connections", key: "rv.nav.connections", icon: Plug };
-const OFFER: NavEntry = { to: "/offer", key: "rv.nav.offer", icon: Package };
-const CIRCUITS: NavEntry = { to: "/circuits", key: "rv.nav.circuits", icon: Route };
-const PREPARE: NavEntry[] = [CONNECTIONS, OFFER, CIRCUITS];
+// The screens that used to have their own entry (setup guide, connections, offer, circuits) are reached from here.
+const PREPARE_HUB: NavEntry = { to: "/prepare", key: "rv.nav.prepare", icon: Rocket, also: ["/setup", "/connections", "/offer", "/circuits"] };
+const TEST: NavEntry = { to: "/simulation", key: "rv.nav.test", icon: FlaskConical };
+const PREPARE: NavEntry[] = [PREPARE_HUB, TEST];
 const FOLLOW: NavEntry[] = [
   { to: "/conversations", key: "rv.nav.conversations", icon: MessageSquare, also: ["/prospects"] },
+  { to: "/crm", key: "rv.nav.crm", icon: Waves },
   { to: "/review", key: "rv.nav.review", icon: CheckSquare },
   { to: "/results", key: "rv.nav.results", icon: ChartNoAxesColumn, also: ["/reports", "/dashboard"] },
 ];
 const ACCOUNT: NavEntry[] = [{ to: "/account", key: "rv.nav.billing", icon: Receipt, also: ["/billing", "/profile"] }];
-const TABS = [HOME, FOLLOW[1]!, FOLLOW[0]!, OFFER];
-const MORE = [CONNECTIONS, CIRCUITS, FOLLOW[2]!, ...ACCOUNT];
+const TABS = [HOME, FOLLOW[2]!, FOLLOW[0]!, PREPARE_HUB];
+const MORE = [TEST, FOLLOW[1]!, FOLLOW[3]!, ...ACCOUNT];
 
 function useActive(entry: NavEntry): boolean {
   const { pathname } = useLocation();
@@ -239,17 +239,14 @@ function Shell() {
   }, [pathname]);
 
   const badgeOf = (entry: NavEntry) => (entry.to === "/review" ? review : 0);
-  // The guide stays in the menu until every step is done, with how far the client got.
   const steps = data ? guideSteps(data) : [];
-  const doneSteps = steps.filter((s) => s.state === "done").length;
-  const guideOpen = data !== null && steps.length > 0 && doneSteps < steps.length;
   const groups: Array<{ label: MessageKey | null; entries: NavEntry[] }> = [
-    { label: null, entries: guideOpen ? [HOME, SETUP] : [HOME] },
+    { label: null, entries: [HOME] },
     { label: "rv.nav.group.prepare", entries: PREPARE },
     { label: "rv.nav.group.follow", entries: FOLLOW },
     { label: "rv.nav.group.account", entries: ACCOUNT },
   ];
-  const progressOf = (entry: NavEntry) => (entry.to === "/setup" ? `${doneSteps}/${steps.length}` : "");
+  const progressOf = (entry: NavEntry) => entry.to === "/prepare" && steps.length > 0 ? `${steps.filter((s) => s.id !== "start" && s.state === "done").length}/${steps.length - 1}` : "";
 
   return (
     <div className="rv-shell">

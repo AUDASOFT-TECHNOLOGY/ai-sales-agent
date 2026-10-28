@@ -93,7 +93,9 @@ export function guideSteps(o: Overview): GuideStep[] {
   const prospects = byId("prospects");
   const channel = byId("channel");
   const lanes = o.lanes?.lanes ?? [];
-  const circuitDone = lanes.length > 0 ? true : prospects.state === "done" && channel.state === "done";
+  // A circuit that already exists is not enough: it counts once what it links is done too, the
+  // products, the prospects and the channel.
+  const circuitDone = lanes.length > 0 && byId("products").state === "done" && prospects.state === "done" && channel.state === "done";
   const started = o.agent?.state === "running" || o.agent?.state === "paused";
   return [
     { ...byId("business"), to: "/offer/rules" },
