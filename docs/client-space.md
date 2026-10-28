@@ -5,19 +5,34 @@ not around the platform's internals. The words "lane", "token", "webhook" or "SM
 
 ## Menu and routes (`web/src/App.tsx`, `web/src/shell/AppShell.tsx`)
 
-| Menu | Routes | What it is for |
-|---|---|---|
-| Home | `/home` | Agent state, start/pause, readiness checklist (what the client fixes, what Revansa must activate), key numbers |
-| Prospects | `/prospects`, `/conversations/:id` | Prospect list and conversations (read-only, real data) |
-| To review | `/review`, `/review/payments` | Messages to approve; payments to check and confirm |
-| My offer | `/offer/products[/new\|/:id]`, `/offer/payments`, `/offer/business` | Catalogue, payment methods, business and messages |
-| Connections | `/connections/sources`, `/connections/channels` | Where prospects are, and Email/Telegram/WhatsApp |
-| Reports | `/reports` | Daily report settings and history |
+The menu follows the order an owner works in: prepare, then follow, then look after the account.
 
-Former addresses (`/agent`, `/lanes`, `/settings`, `/channel`, `/approvals`, ...) redirect.
-The light theme is scoped to the Client space (`ClientTheme` sets `data-app="client"`;
-`styles/client-theme.css`); the Admin console keeps its own look. Copy lives in `i18n/` (English is the
-reference; French is complete for the Client space; Arabic is partial and falls back to English).
+| Group | Menu | Routes | What it is for |
+|---|---|---|---|
+| (top) | Home | `/home` | Agent state and its switch, what needs the owner, key figures, circuits, usage, connections, subscription |
+| (top, until done) | Get started | `/setup` | The 7-step guide: business, products, payments, prospects, channel, circuit, start. Each step opens the real screen |
+| Prepare | Offers | `/offer/products[/new\|/:id]`, `/offer/payments`, `/offer/rules` | Catalogue (completeness per product), one page per product (photos, documents, testimonials, payment link, arguments), payment methods, business and rules (tone, schedule, follow-ups) |
+| Prepare | Circuits | `/circuits` | A circuit = source of prospects + channel + products. Channel and products are changed on the card; channels and accounts below |
+| Follow | Conversations | `/conversations[/:id]`, `/prospects` | Every prospect (contacted or not), thread, prospect card, take-over; the same people as a table |
+| Follow | To review | `/review`, `/review/payments` | Messages to approve, payments to confirm, conversations a person must take over |
+| Follow | Results | `/results`, `/results/daily` | Figures by product, source, channel and period; the daily summary |
+| Account | Subscription | `/account`, `/account/profile` | Plan, invoices, profile and password |
+| Account | Notifications | `/notifications` | What failed or needs an action |
+
+Former addresses (`/connections/*`, `/reports`, `/dashboard`, `/billing`, `/profile`, `/lanes`, `/channel`,
+`/approvals`, `/settings`...) redirect. `client/overview.tsx` reads the agent, readiness, settings, channel,
+source, circuits and figures once for the shell, the Home and the guide.
+The theme is scoped to the Client space (`ClientTheme` sets `data-app="client"`; `styles/client-theme.css`:
+dark glass over an aurora, one colour per kind of thing: source cyan, channel green, products violet); the
+Admin console keeps its own look. Copy lives in `i18n/` (English is the reference; French is complete for
+the Client space, `client.v2.*` holds the 2026 redesign; Arabic is partial and falls back to English).
+
+## Demo account
+
+Login `Demo` / `123456789` opens an in-memory demonstration (`web/src/demo`): a fictitious online-training
+business with two circuits (a spreadsheet sent by WhatsApp, HubSpot leads waiting for their e-mail box),
+four products with photos, documents and testimonials, 22 prospects and 16 conversations. Nothing reaches
+the network; a reload restores the initial data.
 
 ## Design rules
 
@@ -37,7 +52,7 @@ reference; French is complete for the Client space; Arabic is partial and falls 
 | Session/account | `auth/*`, `profile` |
 | Agent | `agent`, `agent/start`, `agent/pause`, `readiness` |
 | Offer | `settings` (GET/PUT, `commercial` = the Brain's document) |
-| Sources | `source` (GET/PUT), `source/test`, `lanes` (several-source accounts) |
+| Sources and circuits | `source` (GET/PUT), `source/test`, `lanes` (several-source accounts: one card per circuit) |
 | Channels | `channel` (GET/PUT), `channel/email-activation`, `channel/google/*`, `channel/invitations` |
 | Prospects | `prospects`, `summary`, `conversations/{id}` |
 | Review | `approvals` (+ approve/reject), `payments`, `payments/{prospect}/confirm` |
