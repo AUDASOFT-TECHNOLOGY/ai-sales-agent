@@ -83,7 +83,7 @@ function SheetsHelp({ shareWith, linkKey }: { shareWith: string | null; linkKey:
 }
 
 /** The connection test. One button, one result: the server makes a real, read-only call. */
-function TestCard({ readiness, source, onDone, disabled }: { readiness: Readiness | null; source: SourceState | null; onDone: () => Promise<void>; disabled?: string }) {
+export function TestCard({ readiness, source, onDone, disabled }: { readiness: Readiness | null; source: SourceState | null; onDone: () => Promise<void>; disabled?: string }) {
   const { t, d } = useI18n();
   const { logout } = useClientAuth();
   const [busy, setBusy] = useState(false);
@@ -141,7 +141,7 @@ function TestCard({ readiness, source, onDone, disabled }: { readiness: Readines
 
 /* ── One source ───────────────────────────────────────────────────────────────────────────── */
 
-function SingleSource({ source, onChanged }: { source: SourceState; onChanged: () => Promise<void> }) {
+export function SingleSource({ source, onChanged }: { source: SourceState; onChanged: () => Promise<void> }) {
   const { t } = useI18n();
   const { logout } = useClientAuth();
   const [choice, setChoice] = useState(source.source);
@@ -229,7 +229,7 @@ function SingleSource({ source, onChanged }: { source: SourceState; onChanged: (
 
 /* ── Several sources ──────────────────────────────────────────────────────────────────────── */
 
-function SourceForm({ state, lane, onClose, onSaved }: { state: LanesState; lane: Lane | null; onClose: () => void; onSaved: () => Promise<void> }) {
+export function SourceForm({ state, lane, onClose, onSaved }: { state: LanesState; lane: Lane | null; onClose: () => void; onSaved: () => Promise<void> }) {
   const { t } = useI18n();
   const { logout } = useClientAuth();
   const [provider, setProvider] = useState(lane?.source.source ?? state.source_options[0]?.key ?? SHEETS);

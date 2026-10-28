@@ -91,7 +91,7 @@ export function ClientInvoicesPage() {
 
   if (invoices === null || subscription === null) {
     return (
-      <div className="page page--focus">
+      <div className="rv-page">
         <div className="page-head">
           <h2 className="t-h1">{tx.title}</h2>
         </div>
@@ -117,7 +117,7 @@ export function ClientInvoicesPage() {
   const last = subscription.last_payment;
 
   return (
-    <div className="page page--focus">
+    <div className="rv-page">
       <div className="page-head">
         <h2 className="t-h1">{tx.title}</h2>
       </div>
@@ -127,52 +127,67 @@ export function ClientInvoicesPage() {
         </p>
       )}
 
-      <Glass level={2} as="section" aria-label={tx.plan}>
-        <h3 className="t-h2">{tx.plan}</h3>
+      <Glass level={2} tint="agent" as="section" className="rv-card rv-plancard" aria-label={tx.plan}>
         {plan === null ? (
-          <p className="c-3">{tx.noPlan}</p>
+          <>
+            <h3 className="t-h2">{tx.plan}</h3>
+            <p className="c-3">{tx.noPlan}</p>
+          </>
         ) : (
-          <dl className="kv">
-            <dt>{tx.plan}</dt>
-            <dd>{plan.name}</dd>
-            <dt>{tx.periodicity}</dt>
-            <dd>{plan.billing_period === "annual" ? tx.annual : tx.monthly}</dd>
-            <dt>{tx.price}</dt>
-            <dd>{money(plan.monthly_price, plan.currency)}</dd>
-            <dt>{tx.dailyQuota}</dt>
-            <dd>{fill(tx.actionsPerDay, { n: n(plan.daily_quota) })}</dd>
-            <dt>{tx.credits}</dt>
-            <dd>{n(plan.included_credits)}</dd>
-            <dt>{tx.since}</dt>
-            <dd>{d(plan.since, { dateStyle: "medium" })}</dd>
-            {subscription.next_billing_at && (
-              <>
-                <dt>{tx.nextBilling}</dt>
-                <dd>{d(subscription.next_billing_at, { dateStyle: "medium" })}</dd>
-              </>
-            )}
-          </dl>
+          <>
+            <div className="rv-card__head">
+              <div>
+                <span className="rv-section-title">{tx.plan}</span>
+                <h3 className="rv-plancard__name">{plan.name}</h3>
+              </div>
+              <div className="rv-actions">
+                <Chip tint="agent">{plan.billing_period === "annual" ? tx.annual : tx.monthly}</Chip>
+                {subscription.overdue_invoices > 0 ? <Chip tint="danger">{subscription.overdue_invoices} {tx.overdue}</Chip> : subscription.unpaid_invoices > 0 ? <Chip tint="attention">{tx.unpaid}: {subscription.unpaid_invoices}</Chip> : <Chip tint="success">{tx.unpaid}: {tx.none}</Chip>}
+              </div>
+            </div>
+            <dl className="rv-planstats">
+              <div>
+                <dt>{tx.price}</dt>
+                <dd>{money(plan.monthly_price, plan.currency)}</dd>
+              </div>
+              <div>
+                <dt>{tx.dailyQuota}</dt>
+                <dd>{fill(tx.actionsPerDay, { n: n(plan.daily_quota) })}</dd>
+              </div>
+              <div>
+                <dt>{tx.credits}</dt>
+                <dd>{n(plan.included_credits)}</dd>
+              </div>
+              <div>
+                <dt>{tx.since}</dt>
+                <dd>{d(plan.since, { dateStyle: "medium" })}</dd>
+              </div>
+              {subscription.next_billing_at && (
+                <div>
+                  <dt>{tx.nextBilling}</dt>
+                  <dd>{d(subscription.next_billing_at, { dateStyle: "medium" })}</dd>
+                </div>
+              )}
+            </dl>
+          </>
         )}
-        <p>
-          <strong>{tx.unpaid}:</strong>{" "}
-          {subscription.unpaid_invoices === 0
-            ? tx.none
-            : `${subscription.unpaid_invoices} (${subscription.overdue_invoices} ${tx.overdue})`}
-        </p>
         {last && (
-          <p>
+          <p className="c-2">
             <strong>{tx.lastPayment}:</strong> {last.invoice_number}{" "}
             <Chip tint={last.collected ? "success" : TINT[last.status]}>{tx[`s_${last.status}` as keyof typeof tx]}</Chip>
           </p>
         )}
       </Glass>
 
-      <section aria-label={tx.invoices}>
+      <Glass level={1} as="section" className="rv-card rv-card--flush" aria-label={tx.invoices}>
+        <div className="rv-card rv-card--bare">
         <h3 className="t-h2">{tx.invoices}</h3>
+        </div>
         {invoices.length === 0 ? (
-          <p className="c-3">{tx.noInvoices}</p>
+          <p className="c-3" style={{ padding: "0 24px 20px" }}>{tx.noInvoices}</p>
         ) : (
-          <table className="table">
+          <div className="ledger__scroll">
+          <table className="rv-table">
             <thead>
               <tr>
                 <th>{tx.number}</th>
@@ -204,14 +219,15 @@ export function ClientInvoicesPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
-        <p className="c-3">{tx.readOnly}</p>
-      </section>
+        <p className="c-3 t-body-sm" style={{ padding: "12px 24px 20px" }}>{tx.readOnly}</p>
+      </Glass>
 
       {selected && (
-        <Glass level={3} as="section" aria-label={fill(tx.detail, { number: selected.number })}>
+        <Glass level={3} as="section" className="rv-card" aria-label={fill(tx.detail, { number: selected.number })}>
           <h3 className="t-h2">{fill(tx.detail, { number: selected.number })}</h3>
-          <table className="table">
+          <table className="rv-table">
             <thead>
               <tr>
                 <th>{tx.plan_line}</th>

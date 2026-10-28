@@ -38,7 +38,7 @@ const CHIP = {
   todo: { tint: "attention", key: "rv.chan.s.todo" },
 } as const;
 
-export function ChannelsPage() {
+export function ChannelsPage({ bare }: { bare?: boolean } = {}) {
   const { t } = useI18n();
   const { profile } = useClientAuth();
   const [state, setState] = useState<ChannelState | null>(null);
@@ -60,12 +60,14 @@ export function ChannelsPage() {
 
   return (
     <div className="rv-page">
-      <div className="rv-head">
-        <div className="rv-head__text">
-          <h3 className="t-h2">{t("rv.chan.title")}</h3>
-          <p>{t("rv.chan.intro")}</p>
+      {bare ? null : (
+        <div className="rv-head">
+          <div className="rv-head__text">
+            <h3 className="t-h2">{t("rv.chan.title")}</h3>
+            <p>{t("rv.chan.intro")}</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {state ? (
         <Card flush aria-label={t("rv.chan.title")}>
@@ -91,7 +93,7 @@ export function ChannelsPage() {
                     {whatsappMissing ? (
                       <span className="rv-row__sub">
                         {t("rv.chan.d.whatsappNumber")}{" "}
-                        <Link to="/profile" className="link-btn">
+                        <Link to="/account/profile" className="link-btn">
                           {t("rv.chan.d.addNumber")}
                         </Link>
                       </span>

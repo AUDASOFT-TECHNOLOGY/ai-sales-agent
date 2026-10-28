@@ -1,11 +1,16 @@
 /** The client's own notifications (GET /client/v1/notifications). Self-contained: its texts live in
  *  this folder (not in the shared i18n files) and fall back to the server's sentence for a kind it
- *  does not know. The session decides whose notifications these are; nothing here names a client. */
+ *  does not know. The session decides whose notifications these are; nothing here names a client.
+ *
+ *  Shown twice: in full on `/notifications`, and in a short form (the latest few) in the bell menu. */
 
 import { appFetch } from "../../demo/transport";
 
 import { useCallback, useEffect, useState } from "react";
+import { AlertTriangle, BellOff, Check, Info, XCircle } from "lucide-react";
 import { useI18n } from "../../i18n";
+import { Button } from "../../ui/Button";
+import { Glass } from "../../ui/Glass";
 import { notificationText } from "./texts";
 
 interface ClientNotification {
@@ -31,8 +36,11 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function ClientNotificationsPanel() {
-  const { locale: lang } = useI18n();
+const ICON = { info: Info, warning: AlertTriangle, critical: XCircle } as const;
+const TINT = { info: "action", warning: "attention", critical: "danger" } as const;
+
+export function ClientNotificationsPanel({ compact, limit, onChanged }: { compact?: boolean; limit?: number; onChanged?: () => void }) {
+  const { locale: lang, d } = useI18n();
   const [page, setPage] = useState<Page | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -48,33 +56,62 @@ export function ClientNotificationsPanel() {
   useEffect(load, [load]);
 
   const t = (key: "title" | "empty" | "markAll" | "markRead" | "error") => notificationText(lang, key);
+  const act = (path: string) => void call(path, { method: "POST" }).then(() => {
+    load();
+    onChanged?.();
+  });
+  const items = page ? (limit ? page.items.slice(0, limit) : page.items) : [];
 
   return (
-    <section aria-label={t("title")}>
-      <h2 className="t-h2">
-        {t("title")}
-        {page && page.unread_count > 0 ? ` (${page.unread_count})` : ""}
-      </h2>
-      {failed && <p role="alert">{t("error")}</p>}
-      {page && page.items.length === 0 && <p className="c-3">{t("empty")}</p>}
+    <section aria-label={t("title")} className="rv-notes">
+      {compact ? null : (
+        <h2 className="sr-only">
+          {t("title")}
+          {page && page.unread_count > 0 ? ` (${page.unread_count})` : ""}
+        </h2>
+      )}
+      {failed && (
+        <p role="alert" className="admin-alert admin-alert--danger">
+          {t("error")}
+        </p>
+      )}
+      {page && page.items.length === 0 && (
+        <div className="rv-notes__empty">
+          <BellOff size={22} aria-hidden />
+          <p className="c-2">{t("empty")}</p>
+        </div>
+      )}
       {page && page.items.length > 0 && (
         <>
-          <button type="button" onClick={() => void call("/notifications/read-all", { method: "POST" }).then(load)}>
-            {t("markAll")}
-          </button>
-          <ul>
-            {page.items.map((n) => {
+          {page.unread_count > 0 ? (
+            <div className="rv-notes__bar">
+              <Button size="sm" variant="ghost" leading={<Check size={14} aria-hidden />} onClick={() => act("/notifications/read-all")}>
+                {t("markAll")}
+              </Button>
+            </div>
+          ) : null}
+          <ul className="rv-notes__list">
+            {items.map((n) => {
               const text = notificationText(lang, n.kind, n);
+              const Icon = ICON[n.severity] ?? Info;
               return (
-                <li key={n.id} data-severity={n.severity} className={n.read_at ? "is-read" : "is-unread"}>
-                  <strong>{text.title}</strong>
-                  <p>{text.message}</p>
-                  {text.action && <p className="c-3">{text.action}</p>}
-                  {!n.read_at && (
-                    <button type="button" onClick={() => void call(`/notifications/${n.id}/read`, { method: "POST" }).then(load)}>
-                      {t("markRead")}
-                    </button>
-                  )}
+                <li key={n.id}>
+                  <Glass level={compact ? 1 : 2} tint={TINT[n.severity] ?? "action"} className="rv-note-item" data-severity={n.severity} data-unread={n.read_at ? undefined : true}>
+                    <span className="rv-note-item__icon" aria-hidden>
+                      <Icon size={18} />
+                    </span>
+                    <div className="rv-note-item__body">
+                      <strong>{text.title}</strong>
+                      <p>{text.message}</p>
+                      {text.action && <p className="c-3">{text.action}</p>}
+                      <span className="c-3 t-body-sm">{d(n.created_at, { dateStyle: "medium", timeStyle: "short" })}</span>
+                    </div>
+                    {!n.read_at && (
+                      <Button size="sm" variant="ghost" onClick={() => act(`/notifications/${n.id}/read`)}>
+                        {t("markRead")}
+                      </Button>
+                    )}
+                  </Glass>
                 </li>
               );
             })}

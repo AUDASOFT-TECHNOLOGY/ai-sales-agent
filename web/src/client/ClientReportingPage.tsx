@@ -225,7 +225,7 @@ export function ClientReportingPage() {
 
   if (!state) {
     return (
-      <div className="page page--focus">
+      <div className="rv-page">
         <div className="page-head">
           <h2 className="t-h1">{t("reporting.title")}</h2>
         </div>
@@ -260,14 +260,14 @@ export function ClientReportingPage() {
   }
 
   return (
-    <div className="page page--focus">
+    <div className="rv-page">
       <div className="page-head">
         <h2 className="t-h1">{t("reporting.title")}</h2>
         <Button leading={<RefreshCw size={16} aria-hidden />} onClick={() => void refresh()} loading={busy === "load"} disabled={working && busy !== "load"}>
           {t("lanes.refresh")}
         </Button>
       </div>
-      <p className="c-2">{t("reporting.intro")}</p>
+      <p className="c-2" style={{ maxWidth: "75ch" }}>{t("reporting.intro")}</p>
 
       {failure ? (
         <p className="admin-alert admin-alert--danger" role="alert">
@@ -280,6 +280,7 @@ export function ClientReportingPage() {
         </p>
       ) : null}
 
+      <div className="rv-grid-2" style={{ alignItems: "start" }}>
       <Glass level={1} className="client-card" aria-label={t("reporting.settings")}>
         <h3 className="t-h2">{t("reporting.settings")}</h3>
         {!state.settings ? <p className="c-3" data-testid="reporting-unconfigured">{t("reporting.unconfigured")}</p> : null}
@@ -368,11 +369,12 @@ export function ClientReportingPage() {
             {t("reporting.empty")}
           </p>
         ) : (
-          <ul className="stack" data-testid="reporting-list">
+          <ul className="rv-reports" data-testid="reporting-list">
             {reports.map((r) => {
               const problem = problemText(r);
               return (
-                <li key={r.day} className="stack" data-testid={`report-${r.day}`}>
+                <li key={r.day} className="rv-report" data-testid={`report-${r.day}`}>
+                  <div className="rv-report__main">
                   <div className="row row--wrap">
                     <strong>{r.day}</strong>
                     <span data-testid={`report-status-${r.day}`}>
@@ -390,6 +392,7 @@ export function ClientReportingPage() {
                       {problem}
                     </p>
                   ) : null}
+                  </div>
                   <div className="row row--wrap">
                     <Button size="sm" onClick={() => void show(r.day)} loading={busy === `show:${r.day}`} disabled={working && busy !== `show:${r.day}`}>
                       {t("reporting.preview")}
@@ -406,11 +409,12 @@ export function ClientReportingPage() {
           </ul>
         )}
       </Glass>
+      </div>
 
       {preview ? (
         <Glass level={1} className="client-card" aria-label={t("reporting.preview")}>
           <h3 className="t-h2">{t("reporting.previewOf", { day: preview.day })}</h3>
-          <dl className="stack" data-testid="report-figures">
+          <dl className="rv-figures" data-testid="report-figures">
             <div>
               <dt className="t-label c-2">{t("reporting.fig.sent")}</dt>
               <dd>{preview.figures.activity.messages_sent}</dd>

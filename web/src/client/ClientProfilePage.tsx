@@ -100,12 +100,12 @@ export function ClientProfilePage() {
   }
 
   return (
-    <div className="page page--focus">
+    <div className="rv-page">
       <div className="page-head">
         <h2 className="t-h1">{t("profile.title")}</h2>
       </div>
 
-      <div className="stack stack--lg">
+      <div className="rv-grid-2" style={{ alignItems: "start" }}>
         <Glass level={1} as="form" className="client-card" onSubmit={onSave} aria-label={t("profile.account")}>
           <h3 className="t-h2">{t("profile.account")}</h3>
           <div className="grid-2">
