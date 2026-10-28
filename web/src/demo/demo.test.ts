@@ -46,33 +46,33 @@ describe("demo access", () => {
 });
 
 describe("demo data", () => {
-  it("is rich: 4 circuits, 6 products, 32 prospects over 3 channels, 30 conversations, 11 requests", async () => {
-    expect((await clientLanes()).lanes).toHaveLength(4);
+  it("tells one story: 2 circuits, 4 products, 22 prospects over 2 channels, 16 conversations, 7 requests", async () => {
+    expect((await clientLanes()).lanes).toHaveLength(2);
     const settings = await clientSettings();
     const products = (settings.settings.commercial as { catalog: { products: unknown[] } }).catalog.products;
-    expect(products.length).toBeGreaterThanOrEqual(5);
+    expect(products).toHaveLength(4);
     const prospects = await clientProspects(100, 0);
-    expect(prospects.total).toBe(32);
-    expect(new Set(prospects.prospects.map((p) => p.preferred_channel))).toEqual(new Set(["email", "telegram", "whatsapp"]));
-    expect((await clientConversations(100, 0)).total).toBe(30);
+    expect(prospects.total).toBe(22);
+    expect(new Set(prospects.prospects.map((p) => p.preferred_channel))).toEqual(new Set(["email", "whatsapp"]));
+    expect((await clientConversations(100, 0)).total).toBe(16);
     const requests = (await clientProposals()).proposals.length + (await clientPayments()).cases.length;
-    expect(requests).toBeGreaterThanOrEqual(8);
+    expect(requests).toBeGreaterThanOrEqual(7);
   });
 
   it("keeps the indicators consistent with the prospects", async () => {
     const summary = await clientSummary();
     const dashboard = await clientDashboard();
-    expect(summary.total_prospects).toBe(32);
-    expect(dashboard.activity.prospects_total.value).toBe(32);
+    expect(summary.total_prospects).toBe(22);
+    expect(dashboard.activity.prospects_total.value).toBe(22);
     expect(dashboard.activity.conversations.value).toBe((await clientConversations(100, 0)).total);
-    expect(Object.values(dashboard.activity.by_circuit).reduce((a, b) => a + b, 0)).toBe(32);
+    expect(Object.values(dashboard.activity.by_circuit).reduce((a, b) => a + b, 0)).toBe(22);
   });
 
   it("filters and searches prospects", async () => {
     expect((await clientProspects(100, 0, { q: "Dorra" })).total).toBe(1);
     const whatsapp = await clientProspects(100, 0, { channel: "whatsapp" });
     expect(whatsapp.prospects.every((p) => p.preferred_channel === "whatsapp")).toBe(true);
-    expect((await clientProspects(100, 0, { lane: "devis-negociation" })).total).toBe(7);
+    expect((await clientProspects(100, 0, { lane: "naga-tunisie" })).total).toBe(16);
   });
 });
 
@@ -94,11 +94,11 @@ describe("demo interactions", () => {
     resetDemo();
     expect((await clientAgent()).state).toBe("running");
     expect((await clientProposals()).proposals).toHaveLength(before.length);
-    expect(((await clientSettings()).settings.commercial as { business: { name: string } }).business.name).toBe("Demo Studio");
+    expect(((await clientSettings()).settings.commercial as { business: { name: string } }).business.name).toBe("Naga Formation");
   });
 
   it("needs the conversation to be taken over before a reply is sent, then appends it", async () => {
-    const id = "demo-p22";
+    const id = "demo-p03";
     await expect(clientSendMessage(id, "Bonjour", "key-0000001")).rejects.toMatchObject({ code: "not_in_human_mode" });
     await clientTakeOver(id);
     await clientSendMessage(id, "Réponse simulée", "key-0000002");

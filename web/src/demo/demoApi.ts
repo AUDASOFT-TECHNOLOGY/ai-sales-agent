@@ -52,7 +52,7 @@ let extras: Extras = freshExtras();
 
 function freshExtras(): Extras {
   const now = new Date().toISOString();
-  const res = (productId: string, id: string, title: string, category: ProductResource["category"], url: string): ProductResource => ({
+  const res = (productId: string, id: string, title: string, category: ProductResource["category"], url: string, status: ProductResource["status"] = "ready", detail: string | null = null): ProductResource => ({
     id,
     product_id: productId,
     kind: "link",
@@ -62,17 +62,32 @@ function freshExtras(): Extras {
     filename: null,
     mime_type: null,
     size_bytes: null,
-    status: "ready",
-    status_detail: null,
-    text_chars: 2400,
+    status,
+    status_detail: detail,
+    text_chars: status === "ready" ? 2400 : 0,
+    created_at: now,
+  });
+  const file = (productId: string, id: string, title: string, category: ProductResource["category"], filename: string, mime: string, bytes: number, status: ProductResource["status"], detail: string | null): ProductResource => ({
+    id,
+    product_id: productId,
+    kind: "file",
+    category,
+    title,
+    url: null,
+    filename,
+    mime_type: mime,
+    size_bytes: bytes,
+    status,
+    status_detail: detail,
+    text_chars: status === "ready" ? 3200 : 0,
     created_at: now,
   });
   return {
-    profile: { name: "Demo", login: "Demo", whatsapp_number: "+21600000000", status: "active", must_change_password: false, whatsapp_reconnect_required: false },
+    profile: { name: DEMO_BUSINESS, login: "Demo", whatsapp_number: "+21690123456", status: "active", must_change_password: false, whatsapp_reconnect_required: false },
     versions: { settings: 3, lanes: 2, channel: 2, source: 2, followUp: 1 },
     channel: {
-      channel: "email",
-      email: { from_name: DEMO_BUSINESS, subject: "Votre projet avec Demo Studio" },
+      channel: "whatsapp",
+      email: { from_name: DEMO_BUSINESS, subject: "Votre formation avec Naga Formation" },
       telegram: {
         contact_prompt: "Pour continuer, partagez-nous votre numéro de téléphone.",
         contact_button: "Partager mon numéro",
@@ -81,12 +96,26 @@ function freshExtras(): Extras {
         max_new_conversations_per_day: 20,
       },
     },
-    access: { gmail: true, sheets: true, hubspot: false, whatsapp: true, telegram: "connected" },
+    access: { gmail: false, sheets: true, hubspot: true, whatsapp: true, telegram: "not_connected" },
     source: { source: "google_sheets", spreadsheet: "tableur-demo-fictif", tab: "Prospects" },
     laneSync: {},
     resources: {
-      "site-vitrine": [res("site-vitrine", "r1", "Exemples de sites réalisés (fictif)", "web", "https://demo.example.test/portfolio")],
-      "boutique-pro": [res("boutique-pro", "r2", "Brochure Boutique Pro (fictive)", "pdf", "https://demo.example.test/brochure-boutique.pdf"), res("boutique-pro", "r3", "Témoignage client (fictif)", "testimonial", "https://demo.example.test/temoignage")],
+      "pack-vente-pro": [
+        file("pack-vente-pro", "r1", "Affiche du programme", "image", "affiche.jpg", "image/jpeg", 184_320, "stored_only", "image"),
+        file("pack-vente-pro", "r2", "Photo de la formation", "image", "formation.jpg", "image/jpeg", 242_000, "stored_only", "image"),
+        res("pack-vente-pro", "r3", "Vidéo de présentation", "video", "https://naga.example.test/presentation", "stored_only", "video"),
+        file("pack-vente-pro", "r4", "Programme détaillé", "pdf", "Programme-detaille.pdf", "application/pdf", 1_240_000, "ready", null),
+        file("pack-vente-pro", "r5", "Tarifs et dates", "spreadsheet", "Tarifs-et-dates.csv", "text/csv", 8_400, "ready", null),
+        res("pack-vente-pro", "r6", "Témoignage de Sami, gérant de boutique", "testimonial", "https://naga.example.test/temoignages/sami", "ready", null),
+        res("pack-vente-pro", "r7", "Témoignage d’Ines, freelance", "testimonial", "https://naga.example.test/temoignages/ines", "ready", null),
+        res("pack-vente-pro", "r8", "Retour d’expérience de Mehdi (vidéo)", "testimonial", "https://naga.example.test/temoignages/mehdi", "stored_only", "video"),
+        res("pack-vente-pro", "r9", "Avis de Hatem", "testimonial", "https://naga.example.test/temoignages/hatem", "ready", null),
+      ],
+      "coaching-individuel": [
+        file("coaching-individuel", "r10", "Présentation du coach", "image", "coach.jpg", "image/jpeg", 150_000, "stored_only", "image"),
+        file("coaching-individuel", "r11", "Déroulé du coaching", "pdf", "Deroule-coaching.pdf", "application/pdf", 640_000, "ready", null),
+      ],
+      "masterclass-ete": [file("masterclass-ete", "r12", "Visuel de la masterclass", "image", "masterclass.jpg", "image/jpeg", 120_000, "stored_only", "image")],
     },
     sentKeys: new Set(),
     extraReports: {},
@@ -174,7 +203,7 @@ function paged<T>(items: T[], q: Query): { total: number; limit: number; offset:
 }
 
 function listProspects(q: Query): Reply {
-  const rows = sorted(data.prospects.filter((p) => matches(p, q)), q, (p) => p.row.last_activity_at ?? p.row.next_action_due_at);
+  const rows = sorted(data.prospects.filter((p) => matches(p, q)), q, (p) => p.row.last_activity_at ?? null);
   const { total, limit, offset, slice } = paged(rows, q);
   return ok({ total, limit, offset, prospects: slice.map((p) => clone(p.row)) });
 }
@@ -310,15 +339,15 @@ function channelState(): ChannelState {
     channel: c.channel,
     authorized: true,
     options: CHANNEL_OPTIONS,
-    status: "ready",
-    status_message: null,
+    status: c.channel === "email" ? "waiting_platform" : c.channel === "telegram" ? "action_required" : "ready",
+    status_message: c.channel === "email" ? "Revansa prépare votre boîte d’envoi." : c.channel === "telegram" ? "Connectez votre compte Telegram." : null,
     email: {
       mode: extras.access.gmail && c.email.use_gmail ? "gmail" : "platform",
       from_name: c.email.from_name as string,
       sender_name_confirmed: true,
       subject: c.email.subject as string,
-      activation: { status: "active", requested_at: nowIso(), updated_at: nowIso(), reason: null },
-      sending: { state: "ok", message: null, daily_limit: 100, sent_today: 23 },
+      activation: { status: "in_progress", requested_at: nowIso(), updated_at: nowIso(), reason: null },
+      sending: { state: "not_set", message: "Votre boîte d’envoi n’est pas encore prête.", daily_limit: null, sent_today: null },
     },
     telegram: { mode: c.telegram.use_account ? "account" : "bot", ...(c.telegram as object) } as ChannelState["telegram"],
     sender_name_proposal: DEMO_BUSINESS,
@@ -342,7 +371,7 @@ function saveChannel(body: Doc): Reply {
 
 const gmailStatus = () => ({
   state: extras.access.gmail ? "connected" : "not_connected",
-  address: extras.access.gmail ? "demo.studio@example.test" : null,
+  address: extras.access.gmail ? "naga@example.test" : null,
   send_cap_configured: true,
   send_ready: extras.access.gmail,
   message: extras.access.gmail ? "Gmail est connecté (simulation de démonstration)." : "Gmail n'est pas connecté.",
@@ -351,7 +380,7 @@ const gmailStatus = () => ({
 });
 const sheetsAccess = () => ({
   state: extras.access.sheets ? "connected" : "not_connected",
-  address: extras.access.sheets ? "demo.studio@example.test" : null,
+  address: extras.access.sheets ? "naga@example.test" : null,
   spreadsheet_saved: true,
   message: extras.access.sheets ? "Le tableur est autorisé (simulation de démonstration)." : "Autorisez l'accès au tableur.",
 });
@@ -362,13 +391,13 @@ const hubspotAccess = () => ({
 });
 const whatsappStatus = () => ({
   state: extras.access.whatsapp ? "connected" : "not_connected",
-  number: extras.access.whatsapp ? "+21600000000" : null,
+  number: extras.access.whatsapp ? "+21690123456" : null,
   verified_name: extras.access.whatsapp ? DEMO_BUSINESS : null,
   status: extras.access.whatsapp ? "ready" : "action_required",
   message: extras.access.whatsapp ? null : "Connectez votre compte WhatsApp Business.",
   can_start_conversations: extras.access.whatsapp,
-  delivered_7d: 48,
-  failed_7d: 1,
+  delivered_7d: 212,
+  failed_7d: 3,
 });
 const telegramAccount = () => ({
   available: true,
@@ -398,7 +427,7 @@ function sourceState(): SourceState {
 
 function lanesState() {
   const list = obj(obj(data.settings.commercial).catalog).products;
-  const catalog = (Array.isArray(list) ? list.map(obj) : []).map((p) => ({ id: String(p.id), name: productName(String(p.id)) }));
+  const catalog = (Array.isArray(list) ? list.map(obj) : []).filter((p) => p.status !== "inactive").map((p) => ({ id: String(p.id), name: productName(String(p.id)) }));
   return {
     version: extras.versions.lanes,
     editable: true,
@@ -678,7 +707,7 @@ function dashboard(): ClientDashboard {
       by_circuit: count((p) => laneName(p.row.lane_id ?? "—")),
       by_product: count((p) => productName(p.product)),
       by_channel: count((p) => CHANNEL_LABEL[p.row.preferred_channel ?? ""] ?? "—"),
-      by_source: count((p) => `Tableur de démonstration – ${p.row.lane_id ?? "—"}`),
+      by_source: count((p) => laneName(p.row.lane_id ?? "—")),
       messages_by_channel: byChannel,
     },
     human_requests: ind(needsHuman + data.proposals.length),
@@ -690,10 +719,10 @@ function dashboard(): ClientDashboard {
       connection_problems: ind(0),
       items: [{ id: 1, created_at: nowIso(), kind: "delivery", severity: "warning", title: "Un message n'a pas pu être remis", message: "Mehdi Exemple n'a pas reçu la dernière relance (exemple fictif).", action: "Vérifiez le numéro du contact." }],
     },
-    usage: { availability: "measured", state: "ok", message: "Votre usage est normal.", action: "", plan_name: "Plan Démo", daily_limit: 100, daily_used: points[points.length - 1]!.f.sent, daily_percent: points[points.length - 1]!.f.sent, month_used: sent },
+    usage: { availability: "measured", state: "ok", message: "Votre usage est normal.", action: "", plan_name: "Plan Pro", daily_limit: 100, daily_used: points[points.length - 1]!.f.sent, daily_percent: points[points.length - 1]!.f.sent, month_used: sent },
     billing: {
       availability: "measured",
-      subscription: { status: "active", plan_name: "Plan Démo", monthly_price: "149.00", currency: "EUR", next_billing_at: new Date(Date.now() + 9 * 86_400_000).toISOString() },
+      subscription: { status: "active", plan_name: "Plan Pro", monthly_price: "149.00", currency: "EUR", next_billing_at: new Date(Date.now() + 9 * 86_400_000).toISOString() },
       invoices: {
         issued: ind(invoices.length),
         paid: ind(invoices.filter((i) => i.status === "PAID").length),
@@ -848,18 +877,18 @@ on("DELETE", "/channel/telegram/account", () => {
   return ok({ disconnected: true, ended_at_telegram: false });
 });
 on("GET", "/channel/telegram/waiting", () =>
-  ok({ consent_field: "accepte_contact", waiting: 1, people: [{ prospect_id: "demo-p21", display_name: "Anis Test", phone: null, reason: "needs_consent" }] }),
+  ok({ consent_field: "accepte_contact", waiting: 1, people: [{ prospect_id: "demo-p17", display_name: "Nour Chaabane", phone: null, reason: "needs_consent" }] }),
 );
-on("GET", "/channel/invitations", () => ok({ bot_username: "demo_studio_bot", bot_link: "#/connections/channels", waiting: 0, invitations: [] }));
+on("GET", "/channel/invitations", () => ok({ bot_username: "naga_formation_bot", bot_link: "#/connections/channels", waiting: 0, invitations: [] }));
 on("GET", "/channel/mailbox", () =>
   ok({
-    status: "active",
-    message: "Votre boîte e-mail est active (simulation de démonstration).",
+    status: "in_progress",
+    message: "Votre boîte e-mail est en cours de création par Revansa.",
     reason: null,
-    address: "demo.studio@example.test",
-    login: "demo.studio@example.test",
-    credentials_shared: true,
-    password_revealable: true,
+    address: null,
+    login: null,
+    credentials_shared: false,
+    password_revealable: false,
     updated_at: nowIso(),
   }),
 );
@@ -968,7 +997,7 @@ on("GET", "/subscription", () => {
   const paid = data.invoices.find((i) => i.status === "PAID");
   return ok({
     status: "active",
-    plan: { plan_id: "plan-demo", name: "Plan Démo", monthly_price: "149.00", currency: "EUR", billing_period: "monthly", included_credits: 5000, daily_quota: 100, since: data.invoices[data.invoices.length - 1]!.issued_on },
+    plan: { plan_id: "plan-pro", name: "Plan Pro", monthly_price: "149.00", currency: "EUR", billing_period: "monthly", included_credits: 5000, daily_quota: 100, since: data.invoices[data.invoices.length - 1]!.issued_on },
     next_billing_at: new Date(Date.now() + 9 * 86_400_000).toISOString(),
     unpaid_invoices: pending,
     overdue_invoices: 0,
