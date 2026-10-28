@@ -8,7 +8,7 @@ import { Conversations } from "./Conversations";
 const logout = vi.fn(async () => undefined);
 vi.mock("../client/ClientAuthContext", () => ({ useClientAuth: () => ({ logout }) }));
 
-const LIST = "GET /client/v1/conversations?limit=25&offset=0&sort=recent";
+const LIST = "GET /client/v1/prospects?limit=25&offset=0&sort=recent";
 const THREAD = "GET /client/v1/conversations/p1?limit=50&offset=0&order=desc";
 const TAKE = "POST /client/v1/conversations/p1/take-over";
 const RELEASE = "POST /client/v1/conversations/p1/release";
@@ -45,7 +45,7 @@ function list(needsHuman = false) {
     total: 1,
     limit: 25,
     offset: 0,
-    conversations: [{ prospect: prospect(needsHuman ? "paused" : "active"), message_count: 1, last_message_at: null, last_message_direction: "inbound" }],
+    prospects: [prospect(needsHuman ? "paused" : "active")],
   };
 }
 

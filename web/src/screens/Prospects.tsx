@@ -13,6 +13,8 @@ import { useFetched } from "../client/useFetched";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Glass } from "../ui/Glass";
+import { ProspectsHead } from "./ProspectsHead";
+import { laneOf, laneProducts, useCardContext } from "./ProspectFiche";
 import { ListFilters, filtersFromParams, isFiltered, paramsFromFilters, toApiFilters, type FilterState } from "./ListFilters";
 
 export const PAGE_SIZE = 25;
@@ -32,6 +34,7 @@ export function Prospects() {
   const requested = Number.parseInt(params.get("page") ?? "1", 10);
   const page = Number.isFinite(requested) && requested >= 1 ? requested : 1;
   const [attempt, setAttempt] = useState(0);
+  const { lanes } = useCardContext();
   const filterKey = params.toString().replace(/(^|&)page=\d+/, "");
   const filters = useMemo(() => filtersFromParams(params), [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const apiFilters = useMemo(() => toApiFilters(filters), [filters]);
@@ -53,15 +56,8 @@ export function Prospects() {
   const when = (iso: string | null) => (iso ? d(iso, { dateStyle: "medium", timeStyle: "short" }) : "—");
 
   return (
-    <div className="page page--focus prospects">
-      <div className="page-head">
-        <div>
-          <h2 className="t-h1">{t("prospects.title")}</h2>
-          {result ? (
-            <p className="c-2 tabular">{narrowed ? t("prospects.f.matching", { n: n(result.total) }) : t("prospects.live.count", { n: n(result.total) })}</p>
-          ) : null}
-        </div>
-      </div>
+    <div className="rv-page prospects">
+      <ProspectsHead view="list" total={result ? result.total : null} />
 
       <ListFilters value={filters} onChange={refilter} />
 
@@ -98,7 +94,9 @@ export function Prospects() {
                   <tr>
                     <th scope="col">{t("prospects.col.name")}</th>
                     <th scope="col">{t("prospects.col.status")}</th>
-                    <th scope="col">{t("prospects.col.stage")}</th>
+                    <th scope="col">{t("rv.conv.fiche.circuit")}</th>
+                    <th scope="col">{t("rv.conv.fiche.channel")}</th>
+                    <th scope="col">{t("rv.conv.fiche.products")}</th>
                     <th scope="col">{t("prospects.col.last")}</th>
                     <th scope="col">{t("prospects.col.next")}</th>
                   </tr>
@@ -121,8 +119,25 @@ export function Prospects() {
                       <td>
                         <Chip tint={STATUS_TINT[p.status] ?? "neutral"}>{t(`crm.status.${p.status}` as MessageKey)}</Chip>
                       </td>
-                      <td dir="auto">{p.stage ?? "—"}</td>
-                      <td>{when(p.last_contacted_at)}</td>
+                      <td dir="auto">{laneOf(lanes, p)?.source.label ?? "—"}</td>
+                      <td>{laneOf(lanes, p)?.channel.label ?? p.preferred_channel ?? "—"}</td>
+                      <td>
+                        {(() => {
+                          const lane = laneOf(lanes, p);
+                          return lane && lanes ? (
+                            <span className="rv-tags">
+                              {laneProducts(lanes, lane, t("rv.conv.fiche.agentAll")).map((x) => (
+                                <span key={x} className="rv-tag rv-ent" data-ent="prd" dir="auto">
+                                  {x}
+                                </span>
+                              ))}
+                            </span>
+                          ) : (
+                            "—"
+                          );
+                        })()}
+                      </td>
+                      <td>{p.last_contacted_at ? when(p.last_contacted_at) : t("rv.conv.notContacted")}</td>
                       <td>
                         {p.next_action_type ? (
                           <>

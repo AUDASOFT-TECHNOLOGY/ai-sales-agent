@@ -5,7 +5,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useI18n, type MessageKey } from "../i18n";
 import { clientLanes, type ProspectFilters, type ProspectRow } from "../client/api";
-import { Button } from "../ui/Button";
+import { Search } from "lucide-react";
 
 export const STATUSES: ProspectRow["status"][] = ["new", "active", "paused", "opted_out", "closed"];
 export const CHANNELS = ["whatsapp", "sms", "email", "telegram"];
@@ -77,13 +77,13 @@ export function toApiFilters(f: FilterState, sort?: ProspectFilters["sort"]): Pr
 }
 
 /** The client's circuits, for the filter. A failure only hides the circuit filter. */
-function useLanes(): { id: string }[] {
-  const [lanes, setLanes] = useState<{ id: string }[]>([]);
+function useLanes(): { id: string; label: string }[] {
+  const [lanes, setLanes] = useState<{ id: string; label: string }[]>([]);
   useEffect(() => {
     let cancelled = false;
     clientLanes().then(
       (state) => {
-        if (!cancelled) setLanes(state.lanes.map((l) => ({ id: l.id })));
+        if (!cancelled) setLanes(state.lanes.map((l) => ({ id: l.id, label: l.source.label })));
       },
       () => undefined,
     );
@@ -94,86 +94,96 @@ function useLanes(): { id: string }[] {
   return lanes;
 }
 
+/** One line of controls: a search box, three drop-downs, two switches and the dates behind "Dates".
+ *  Every control keeps a text label for assistive technology. */
 export function ListFilters({ value, onChange }: { value: FilterState; onChange: (next: FilterState) => void }) {
   const { t } = useI18n();
   const lanes = useLanes();
   const [text, setText] = useState(value.q);
-  useEffect(() => setText(value.q), [value.q]);
+  const [seen, setSeen] = useState(value.q);
+  if (seen !== value.q) {
+    // The address changed (reset, back button): the box follows it.
+    setSeen(value.q);
+    setText(value.q);
+  }
   const submit = (e: FormEvent) => {
     e.preventDefault();
     onChange({ ...value, q: text });
   };
   const set = (patch: Partial<FilterState>) => onChange({ ...value, ...patch });
+  const hasDates = value.since !== "" || value.until !== "";
 
   return (
-    <form className="stack" role="search" aria-label={t("prospects.f.label")} onSubmit={submit}>
-      <div className="row row--wrap">
-        <label className="rv-select-label">
-          <span className="t-label c-2">{t("prospects.f.search")}</span>
-          <input className="rv-select" type="search" value={text} placeholder={t("prospects.f.searchPh")} onChange={(e) => setText(e.target.value)} />
-        </label>
-        <Button type="submit">{t("prospects.f.searchGo")}</Button>
-      </div>
-      <div className="row row--wrap">
-        <label className="rv-select-label">
-          <span className="t-label c-2">{t("prospects.f.status")}</span>
-          <select className="rv-select" value={value.status} onChange={(e) => set({ status: e.target.value })}>
-            <option value="">{t("prospects.f.statusAll")}</option>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {t(`crm.status.${s}` as MessageKey)}
+    <form className="rv-filters" role="search" aria-label={t("prospects.f.label")} onSubmit={submit}>
+      <label className="rv-search">
+        <Search size={16} aria-hidden />
+        <span className="sr-only">{t("prospects.f.search")}</span>
+        <input type="search" value={text} placeholder={t("prospects.f.searchPh")} onChange={(e) => setText(e.target.value)} onBlur={() => text !== value.q && onChange({ ...value, q: text })} />
+      </label>
+      <button type="submit" className="sr-only">
+        {t("prospects.f.searchGo")}
+      </button>
+      <label className="rv-pillselect">
+        <span className="sr-only">{t("prospects.f.status")}</span>
+        <select value={value.status} onChange={(e) => set({ status: e.target.value })}>
+          <option value="">{t("prospects.f.statusAll")}</option>
+          {STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {t(`crm.status.${s}` as MessageKey)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="rv-pillselect">
+        <span className="sr-only">{t("prospects.f.channel")}</span>
+        <select value={value.channel} onChange={(e) => set({ channel: e.target.value })}>
+          <option value="">{t("prospects.f.channelAll")}</option>
+          {CHANNELS.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </label>
+      {lanes.length > 1 ? (
+        <label className="rv-pillselect">
+          <span className="sr-only">{t("prospects.f.lane")}</span>
+          <select value={value.lane} onChange={(e) => set({ lane: e.target.value })}>
+            <option value="">{t("prospects.f.laneAll")}</option>
+            {lanes.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.label}
               </option>
             ))}
           </select>
         </label>
-        <label className="rv-select-label">
-          <span className="t-label c-2">{t("prospects.f.channel")}</span>
-          <select className="rv-select" value={value.channel} onChange={(e) => set({ channel: e.target.value })}>
-            <option value="">{t("prospects.f.channelAll")}</option>
-            {CHANNELS.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </label>
-        {lanes.length > 1 ? (
+      ) : null}
+      <label className="rv-switchchip" data-on={value.human || undefined}>
+        <input type="checkbox" checked={value.human} onChange={(e) => set({ human: e.target.checked })} />
+        <span>{t("prospects.f.human")}</span>
+      </label>
+      <label className="rv-switchchip" data-on={value.errors || undefined}>
+        <input type="checkbox" checked={value.errors} onChange={(e) => set({ errors: e.target.checked })} />
+        <span>{t("prospects.f.errors")}</span>
+      </label>
+      <details className="rv-dates" open={hasDates || undefined}>
+        <summary>{t("rv.conv.dates")}</summary>
+        <div className="rv-dates__body">
           <label className="rv-select-label">
-            <span className="t-label c-2">{t("prospects.f.lane")}</span>
-            <select className="rv-select" value={value.lane} onChange={(e) => set({ lane: e.target.value })}>
-              <option value="">{t("prospects.f.laneAll")}</option>
-              {lanes.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.id}
-                </option>
-              ))}
-            </select>
+            <span className="t-label c-2">{t("prospects.f.since")}</span>
+            <input className="rv-select" type="date" value={value.since} onChange={(e) => set({ since: e.target.value })} />
           </label>
-        ) : null}
-        <label className="rv-select-label">
-          <span className="t-label c-2">{t("prospects.f.since")}</span>
-          <input className="rv-select" type="date" value={value.since} onChange={(e) => set({ since: e.target.value })} />
-        </label>
-        <label className="rv-select-label">
-          <span className="t-label c-2">{t("prospects.f.until")}</span>
-          <input className="rv-select" type="date" value={value.until} onChange={(e) => set({ until: e.target.value })} />
-        </label>
-      </div>
-      <div className="row row--wrap">
-        <label className="row">
-          <input type="checkbox" checked={value.human} onChange={(e) => set({ human: e.target.checked })} />
-          <span>{t("prospects.f.human")}</span>
-        </label>
-        <label className="row">
-          <input type="checkbox" checked={value.errors} onChange={(e) => set({ errors: e.target.checked })} />
-          <span>{t("prospects.f.errors")}</span>
-        </label>
-        {isFiltered(value) ? (
-          <button type="button" className="link-btn" onClick={() => onChange(NO_FILTERS)}>
-            {t("prospects.f.reset")}
-          </button>
-        ) : null}
-      </div>
+          <label className="rv-select-label">
+            <span className="t-label c-2">{t("prospects.f.until")}</span>
+            <input className="rv-select" type="date" value={value.until} onChange={(e) => set({ until: e.target.value })} />
+          </label>
+        </div>
+      </details>
+      {isFiltered(value) ? (
+        <button type="button" className="link-btn" onClick={() => onChange(NO_FILTERS)}>
+          {t("prospects.f.reset")}
+        </button>
+      ) : null}
     </form>
   );
 }

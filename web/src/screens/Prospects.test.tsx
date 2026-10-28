@@ -79,7 +79,7 @@ describe("Prospects (live)", () => {
     const line = await screen.findByTestId("prospect-p1");
     expect(within(line).getByText("Amel Ben Salah")).toBeInTheDocument();
     expect(within(line).getByText("Opted out")).toBeInTheDocument();
-    expect(screen.getByText(/1 prospects in total/)).toBeInTheDocument();
+    expect(screen.getByText("1 prospects")).toBeInTheDocument();
     expect(within(line).getByRole("link")).toHaveAttribute("href", "/conversations/p1");
     expect(calls.filter((c) => c.includes("/prospects"))).toEqual(["GET /client/v1/prospects?limit=25&offset=0"]);
   });
@@ -156,7 +156,7 @@ describe("Prospects (live)", () => {
     await user.click(screen.getByRole("button", { name: "Search" }));
     await waitFor(() => expect(screen.queryByTestId("prospect-p1")).not.toBeInTheDocument());
     expect(screen.getByTestId("prospect-p2")).toBeInTheDocument();
-    expect(screen.getByText(/1 matching/)).toBeInTheDocument();
+    expect(screen.getByText("1 prospects")).toBeInTheDocument();
     expect(calls).toContain("GET /client/v1/prospects?limit=25&offset=0&q=zied");
   });
 

@@ -12,14 +12,15 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
-import { clientConversation, clientConversations, type ConversationHistory, type ConversationMessage } from "../client/api";
-import { FollowUpSettingsCard } from "../client/FollowUpSettingsCard";
+import { clientConversation, clientProspects, type ConversationHistory, type ConversationMessage, type LanesState, type PaymentCase } from "../client/api";
 import { Composer, ControlBar } from "./ConversationControl";
 import { whatsappText, type WhatsAppKey } from "../whatsapp/copy";
 import { crmFailureOf, type CrmFailure } from "../client/crmFailure";
 import { useFetched } from "../client/useFetched";
 import { Button } from "../ui/Button";
-import { Disclosure } from "../ui/Disclosure";
+import { Chip } from "../ui/Chip";
+import { ProspectsHead } from "./ProspectsHead";
+import { ProspectFiche, laneOf, laneProducts, useCardContext } from "./ProspectFiche";
 import { Glass } from "../ui/Glass";
 import { useMedia } from "../ui/useMedia";
 import { cx } from "../ui/cx";
@@ -36,7 +37,7 @@ function useSignOutOn(failure: CrmFailure | null) {
   }, [signedOut, logout]);
 }
 
-function Thread({ id, name }: { id: string; name: string | null }) {
+function Thread({ id, name, lanes, payments }: { id: string; name: string | null; lanes: LanesState | null; payments: PaymentCase[] | null }) {
   const { t, d, n, locale } = useI18n();
   const navigate = useNavigate();
   const wide = useMedia("(min-width: 1024px)");
@@ -83,8 +84,11 @@ function Thread({ id, name }: { id: string; name: string | null }) {
   const prospect = history?.prospect ?? null;
   const control = history?.control ?? null;
   const when = (iso: string) => d(iso, { dateStyle: "medium", timeStyle: "short" });
+  const lane = laneOf(lanes, prospect);
+  const fiche = <ProspectFiche history={history} lanes={lanes} payments={payments} />;
 
   return (
+    <>
     <Glass level={1} className="thread-view" aria-label={name ?? id}>
       <header className="thread-view__head">
         {!wide ? (
@@ -97,12 +101,31 @@ function Thread({ id, name }: { id: string; name: string | null }) {
             {name ?? prospect?.display_name ?? id}
           </h2>
           {prospect ? (
-            <p className="c-3 t-body-sm" data-testid="thread-status">
-              {t(`crm.status.${prospect.status}` as MessageKey)}
-              {prospect.preferred_channel ? ` · ${prospect.preferred_channel}` : ""}
-              {prospect.lane_id ? ` · ${prospect.lane_id}` : ""}
-              {prospect.needs_human ? ` · ${t("convo.f.needsPerson")}` : ""}
-            </p>
+            <div className="rv-tags" data-testid="thread-status">
+              <Chip tint={prospect.status === "active" ? "success" : prospect.status === "paused" ? "attention" : prospect.status === "opted_out" ? "danger" : "neutral"}>{t(`crm.status.${prospect.status}` as MessageKey)}</Chip>
+              {lane ? (
+                <span className="rv-tag rv-ent" data-ent="src" dir="auto">
+                  {lane.source.label}
+                </span>
+              ) : null}
+              {lane && lanes
+                ? laneProducts(lanes, lane, t("rv.conv.fiche.agentAll")).map((p) => (
+                    <span key={p} className="rv-tag rv-ent" data-ent="prd" dir="auto">
+                      {p}
+                    </span>
+                  ))
+                : null}
+              {lane ? (
+                <span className="rv-tag rv-ent" data-ent="chn">
+                  {lane.channel.label}
+                </span>
+              ) : prospect.preferred_channel ? (
+                <span className="rv-tag rv-ent" data-ent="chn">
+                  {prospect.preferred_channel}
+                </span>
+              ) : null}
+              {prospect.needs_human ? <Chip tint="attention">{t("convo.f.needsPerson")}</Chip> : null}
+            </div>
           ) : null}
           {history?.next_follow_up ? (
             <p className="c-3 t-body-sm" data-testid="thread-follow-up">
@@ -199,6 +222,8 @@ function Thread({ id, name }: { id: string; name: string | null }) {
         <Composer id={id} name={name ?? prospect?.display_name ?? id} optedOut={prospect?.status === "opted_out"} onSent={() => refresh(true)} />
       ) : null}
     </Glass>
+    {wide ? fiche : null}
+    </>
   );
 }
 
@@ -213,80 +238,102 @@ export function Conversations() {
   const key = params.toString();
   const filters = useMemo(() => filtersFromParams(params), [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const apiFilters = useMemo(() => toApiFilters(filters, "recent"), [filters]);
+  const { lanes, payments } = useCardContext();
+  // Every prospect is listed, contacted or not: a list that is empty while prospects exist would hide them.
   const load = useCallback(
-    () => clientConversations(LIST_SIZE, (page - 1) * LIST_SIZE, apiFilters).then((p) => ({ p, attempt })),
+    () => clientProspects(LIST_SIZE, (page - 1) * LIST_SIZE, apiFilters).then((p) => ({ p, attempt })),
     [page, apiFilters, attempt],
   );
   const { loading, value, error, failed } = useFetched(load);
   const failure = useMemo(() => (failed ? crmFailureOf(error) : null), [failed, error]);
   useSignOutOn(failure);
   const result = value?.p;
-  const rows = result?.conversations ?? [];
+  const rows = result?.prospects ?? [];
   const lastPage = result ? Math.max(1, Math.ceil(result.total / LIST_SIZE)) : page;
   const narrowed = isFiltered(filters);
   const go = (next: number) => setParams(paramsFromFilters(filters, next), { replace: true });
   const refilter = (next: FilterState) => setParams(paramsFromFilters(next), { replace: true });
+  const initials = (name: string) =>
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]!.toUpperCase())
+      .join("");
 
   const list = (
     <Glass className="convo-list" aria-label={t("convo.title")}>
-      <div className="convo-list__head">
-        <h2 className="t-h2">{t("convo.title")}</h2>
-        {result ? <p className="c-3 t-body-sm tabular">{narrowed ? t("prospects.f.matching", { n: n(result.total) }) : t("prospects.live.count", { n: n(result.total) })}</p> : null}
-      </div>
-      <ListFilters value={filters} onChange={refilter} />
-      <Disclosure title={t("followup.title")} hint={t("followup.hint")}>
-        <FollowUpSettingsCard />
-      </Disclosure>
       {failure ? (
-        <div className="stack">
+        <div className="stack" style={{ padding: 14 }}>
           <p className="admin-alert admin-alert--danger" role="alert">
             {t(failure.key)}
           </p>
           <Button onClick={() => setAttempt((a) => a + 1)}>{t("lanes.retry")}</Button>
         </div>
       ) : loading ? (
-        <p className="c-3" role="status">
+        <p className="c-3" role="status" style={{ padding: 14 }}>
           {t("prospects.live.loading")}
         </p>
       ) : rows.length === 0 ? (
-        <p className="c-3" data-testid="convo-list-empty">
-          {narrowed ? t("convo.f.noMatch") : t("prospects.live.empty")}
+        <p className="c-3" data-testid="convo-list-empty" style={{ padding: 14 }}>
+          {narrowed ? t("rv.conv.noMatch") : t("rv.conv.empty")}
         </p>
       ) : (
         <>
           <ul>
-            {rows.map(({ prospect: p, message_count, last_message_at }) => (
-              <li key={p.id}>
-                <Link to={`/conversations/${encodeURIComponent(p.id)}${key ? `?${key}` : ""}`} className={cx("convo-item", p.id === id && "is-active")} aria-current={p.id === id ? "page" : undefined}>
-                  <span className="convo-item__text">
-                    <span className="t-body-sm ledger__strong" dir="auto">
-                      {p.display_name}
+            {rows.map((p) => {
+              const lane = laneOf(lanes, p);
+              const first = p.last_contacted_at ?? p.last_inbound_at;
+              const last = p.last_inbound_at ?? p.last_contacted_at;
+              return (
+                <li key={p.id}>
+                  <Link to={`/conversations/${encodeURIComponent(p.id)}${key ? `?${key}` : ""}`} className={cx("convo-item", p.id === id && "is-active")} aria-current={p.id === id ? "page" : undefined}>
+                    <span className="rv-avatar rv-avatar--sm" aria-hidden>
+                      {initials(p.display_name)}
                     </span>
-                    <span className="c-3 t-body-sm convo-item__preview">
-                      {t(`crm.status.${p.status}` as MessageKey)}
-                      {p.preferred_channel ? ` · ${p.preferred_channel}` : ""}
-                      {last_message_at ?? p.last_activity_at ? ` · ${d((last_message_at ?? p.last_activity_at)!, { dateStyle: "medium" })}` : ""}
-                      {message_count !== null ? ` · ${t("convo.f.count", { n: n(message_count) })}` : ""}
-                    </span>
-                    {p.needs_human ? (
-                      <span className="t-body-sm convo-item__flag" data-testid={`needs-person-${p.id}`}>
-                        {t("convo.ctl.needsPerson")}
+                    <span className="convo-item__text">
+                      <span className="convo-item__name">
+                        <span className="t-body-sm ledger__strong" dir="auto">
+                          {p.display_name}
+                        </span>
+                        {last ? <span className="c-3 t-body-sm">{d(last, { dateStyle: "short" })}</span> : null}
                       </span>
-                    ) : null}
-                  </span>
-                </Link>
-              </li>
-            ))}
+                      <span className="c-3 t-body-sm convo-item__preview" dir="auto">
+                        {first ? t("rv.conv.lastContact", { date: d(first, { dateStyle: "medium" }) }) : t("rv.conv.notContacted")}
+                      </span>
+                      <span className="rv-tags">
+                        <Chip tint={p.status === "active" ? "success" : p.status === "paused" ? "attention" : p.status === "opted_out" ? "danger" : "neutral"}>{t(`crm.status.${p.status}` as MessageKey)}</Chip>
+                        {lane ? (
+                          <span className="rv-tag rv-ent" data-ent="chn">
+                            {lane.channel.label}
+                          </span>
+                        ) : p.preferred_channel ? (
+                          <span className="rv-tag rv-ent" data-ent="chn">
+                            {p.preferred_channel}
+                          </span>
+                        ) : null}
+                        {p.needs_human ? (
+                          <Chip tint="attention">
+                            <span data-testid={`needs-person-${p.id}`}>{t("convo.ctl.needsPerson")}</span>
+                          </Chip>
+                        ) : null}
+                        {p.has_error ? <Chip tint="danger">{t("rv.conv.error")}</Chip> : null}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
           {lastPage > 1 ? (
-            <nav className="row row--wrap" aria-label={t("prospects.live.pages")}>
-              <Button leading={<ChevronLeft size={16} aria-hidden className="mirror" />} onClick={() => go(page - 1)} disabled={page <= 1}>
+            <nav className="row row--wrap convo-list__pages" aria-label={t("prospects.live.pages")}>
+              <Button size="sm" leading={<ChevronLeft size={16} aria-hidden className="mirror" />} onClick={() => go(page - 1)} disabled={page <= 1}>
                 {t("prospects.live.previous")}
               </Button>
               <span className="c-2 tabular" data-testid="convo-list-page">
                 {t("convo.f.pageOf", { page: n(page), pages: n(lastPage) })}
               </span>
-              <Button trailing={<ChevronRight size={16} aria-hidden className="mirror" />} onClick={() => go(page + 1)} disabled={page >= lastPage}>
+              <Button size="sm" trailing={<ChevronRight size={16} aria-hidden className="mirror" />} onClick={() => go(page + 1)} disabled={page >= lastPage}>
                 {t("prospects.live.next")}
               </Button>
             </nav>
@@ -296,18 +343,35 @@ export function Conversations() {
     </Glass>
   );
 
-  if (!wide && !id) return <div className="page page--narrow">{list}</div>;
-  const name = rows.find((c) => c.prospect.id === id)?.prospect.display_name ?? null;
+  const head = (
+    <>
+      <ProspectsHead view="chat" total={result ? result.total : null} />
+      <ListFilters value={filters} onChange={refilter} />
+    </>
+  );
+
+  if (!wide && !id) {
+    return (
+      <div className="rv-page">
+        {head}
+        {list}
+      </div>
+    );
+  }
+  const name = rows.find((c) => c.id === id)?.display_name ?? null;
   return (
-    <div className="page convo" data-wide={wide || undefined}>
-      {wide ? list : null}
-      {id ? (
-        <Thread key={id} id={id} name={name} />
-      ) : (
-        <Glass level={1} className="thread-view">
-          <p className="c-3">{t("convo.live.pick")}</p>
-        </Glass>
-      )}
+    <div className="rv-page">
+      {wide || !id ? head : null}
+      <div className="convo" data-wide={wide || undefined} data-empty={!id || undefined}>
+        {wide ? list : null}
+        {id ? (
+          <Thread key={id} id={id} name={name} lanes={lanes} payments={payments} />
+        ) : (
+          <Glass level={1} className="thread-view thread-view--empty">
+            <p className="c-3">{t("rv.conv.pick")}</p>
+          </Glass>
+        )}
+      </div>
     </div>
   );
 }
