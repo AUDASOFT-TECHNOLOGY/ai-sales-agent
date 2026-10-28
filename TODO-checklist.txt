@@ -1,0 +1,967 @@
+Revansa doit être un SaaS multi-clients, capable d'accueillir des entreprises de secteurs, de pays et de tailles différents. Chaque client doit disposer de ses propres données, produits, consignes commerciales, ressources et paramètres.
+Roadmap Revansa
+
+1. Registre LLM + tests ciblés
+2. Tarifs fournisseurs et calcul des coûts
+3. Gestion des plans et attribution aux clients
+4. Facturation mensuelle : PAID / FOR FREE
+5. Dashboard Admin : revenus, coûts, ROI
+6. Espace Client : données réelles, historique, notifications et factures
+7. Gestion multi-fournisseurs et multi-modèles
+8. Test réel de Naga de bout en bout
+9. Validation du déploiement en production
+
+
+-----
+Architecture cible de Revansa
+
+1. Admin Revansa — configuration centralisée
+
+Gestion des LLM (GPT Lune, GPT Sol, Muse Spark…), des canaux, des comptes techniques, des capacités et des règles d'attribution.
+
+2. Plateforme Revansa — attribution automatique
+
+À chaque création de client, manuelle ou via le landing page, Revansa attribue les ressources nécessaires, applique les paramètres par défaut et vérifie que la configuration est opérationnelle.
+
+3. Espace Client — uniquement des actions compréhensibles
+
+Profil et logo, catalogue, autorisation Google Sheets/HubSpot par clic, nom d'expéditeur, quota, horaires de reporting et consignes commerciales.
+
+4. AI Sales Agent — parcours commercial complet
+
+Lire les prospects, préparer et envoyer les messages, traiter les réponses, programmer les relances et écrire les résultats dans le CRM, avec facturation de l'utilisation.
+
+Les règles que nous allons imposer
+
+Zéro configuration technique côté client : aucune clé, aucun token, aucun SMTP/IMAP, aucun webhook et aucune création manuelle de bot.
+
+Des autorisations simples par clic pour connecter les données du client, avec des explications claires sur les accès demandés.
+
+Des ressources gérées par Revansa : les adresses email et les bots sont provisionnés par la plateforme. L'envoi sous le domaine propre du client nécessitera toutefois une vérification appropriée.
+
+Respect des règles réelles des canaux : notamment, un bot Telegram ne peut pas démarrer librement une conversation privée avec un prospect qui ne l'a jamais activé. Revansa doit prévoir un parcours d'invitation simple et conforme.
+
+Une priorité absolue : faire fonctionner le parcours commercial de Naga de bout en bout, sans multiplier les audits ni ajouter des tâches inutiles
+
+1. Comment identifier les e-mails envoyés ?
+
+Je recommande cette architecture pour Revansa :
+
+Configuration Admin — une seule fois
+
+L’administrateur configure le serveur SMTP d’OVH, son compte technique et ses identifiants. Ces paramètres sont communs à la plateforme.
+
+Configuration de chaque client
+
+Revansa attribue une adresse e-mail autorisée au client et utilise automatiquement son nom commercial comme nom d’expéditeur.
+
+E-mail reçu par le prospect
+
+Exemple pour le client Naga
+
+De : Naga
+
+Adresse : naga@domaine-revansa.com
+
+Objet : Découvrez notre offre…
+
+Exemple illustratif : l’adresse devra exister et être autorisée par le fournisseur SMTP.
+
+----------------
+Le parcours Revansa à implémenter
+
+1. Administration globale
+
+L’Admin configure les fournisseurs et modèles LLM, les paramètres globaux Email, Telegram et WhatsApp, ainsi que les services disponibles pour les clients.
+
+2. Le client choisit son mode Email
+
+Deux possibilités exclusives :
+
+Gmail personnel/professionnel : bouton « Connecter Revansa avec mon Gmail », autorisation OAuth Google, puis connexion de lecture et d’envoi.
+
+Boîte dédiée Revansa : le client confirme le Sender Name proposé par défaut à partir du nom de son entreprise et soumet sa demande d’activation.
+
+3. L’Admin traite la demande de boîte dédiée
+
+L’Admin voit la demande, crée la boîte chez le fournisseur, utilise le Sender Name choisi par le client, configure les identifiants et active le canal après vérification.
+
+4. Le client voit l’état réel du canal
+
+Le client voit si Email est en attente, en cours ou prêt. Pour une boîte dédiée, il peut consulter son adresse et les informations de connexion utiles, sans jamais voir son mot de passe en clair après enregistrement.
+
+5. L’AI Sales Agent travaille
+
+Il peut envoyer les messages de prospection, lire les réponses, gérer les suivis et respecter les quotas et autorisations du client, uniquement lorsque le canal est réellement opérationnel.
+---------------------
+
+Le parcours attendu est le suivant :
+
+L’Admin affecte à Naga un modèle IA actif.
+
+Naga renseigne ses produits, ses paramètres commerciaux, sa source de prospects (Google Sheets au départ et hubSpot plus tard) et son canal de conversation (Telegram ou Email en priorité, WhatsApp plus tard).
+
+Naga teste la connexion et démarre son agent.
+
+Revansa récupère les prospects, prépare les messages, les envoie via le canal choisi, traite les réponses et organise les relances et met à jour le CRM (Google Sheet, hubspot et le CRM interne du Revansa)
+
+
+Admin configure le modèle IA.
+
+Naga configure ses produits, ses paramètres commerciaux, sa source et son canal.
+
+L’agent récupère les prospects, prépare et envoie les messages, traite les réponses et planifie les relances.
+
+Les données et les statuts sont synchronisés avec Google Sheets, HubSpot et le CRM interne selon la source utilisée.
+
+Telegram et Email sont prioritaires ; WhatsApp viendra ensuite.
+
+Telegram ne contacte jamais un prospect qui n’a pas démarré la conversation.
+--------
+
+Nouvelle règle métier
+
+Chaque client pourra configurer plusieurs sources, et définir pour chacune :
+
+Source
+
+	
+
+Canal de conversation
+
+	
+
+Produits à vendre
+
+
+
+
+Google Sheets A
+
+	
+
+WhatsApp
+
+	
+
+Produit A, Produit B
+
+
+
+
+HubSpot
+
+	
+
+Email
+
+	
+
+Produit C
+
+
+
+
+Google Sheets B
+
+	
+
+Telegram
+
+	
+
+Produit A
+
+
+-----------
+## 10 ☐ Finaliser l’intégration OpenAI et le catalogue des modèles ==> Done
+
+* Catalogue des modèles IA et sélection du fournisseur.
+* Affectation d’un modèle actif à chaque client depuis l’Admin.
+* Vérification de la configuration, des secrets, de la disponibilité du modèle et de la gestion des erreurs.
+* Architecture extensible pour ajouter d’autres fournisseurs sans modifier le Core.
+* Vérifier que le modèle affecté est effectivement utilisé par l’agent du client, et non uniquement affiché dans l’interface.
+
+## 11 ☐ Finaliser le Multi-Source ==> In Progress
+
+Objectif : permettre à Naga de choisir sa source de prospects, de tester la connexion et d’exploiter réellement les données.
+
+**Lots A à D — Done**
+
+* Configuration client persistante et état de l’agent.
+* Configuration des sources et tests de connexion.
+* Store opérationnel SQL et isolation des clients.
+* Connecteur HubSpot en lecture seule et intégration au runtime.
+* Isolation des erreurs de consentement au démarrage.
+* Lot D : audit du store et du ledger, sans correction nécessaire.
+
+**Lot E — In Progress : intégration opérationnelle et write-back**
+
+* Vérifier le parcours complet entre source, store, consentement, runtime et synchronisation.
+* Rendre une première source réellement inscriptible, en privilégiant Google Sheets si elle permet le parcours prévu.
+* Intégrer la policy de write-back, désactivée par défaut.
+* Câbler le syncer au runtime et au scheduler, par client.
+* Garantir l’idempotence, l’isolation, la gestion des conflits, les reprises après erreur et les relances de synchronisation.
+* Ajouter la persistance du ledger si elle est nécessaire à la fiabilité du mécanisme.
+* Tester les modifications réellement propagées vers la source.
+* **Ne valider le lot qu’après vérification de l’intégration réelle et de ses tests.**
+
+**Lot F — To Do : configuration Client**
+
+* Permettre à Naga de choisir Google Sheets ou HubSpot depuis son espace Client.
+* Configurer et sécuriser les informations de connexion.
+* Tester réellement la connexion et afficher un résultat fiable.
+* Vérifier la disponibilité et la qualité des données nécessaires à l’agent.
+* Préparer une configuration extensible aux sources suivantes.
+
+**Lot G — To Do : tests E2E Multi-Source**
+
+* Tester le parcours de configuration, connexion, lecture, traitement et mise à jour.
+* Vérifier les erreurs, les redémarrages et l’isolation entre clients.
+
+**Lot H — To Do : configuration Naga et acceptation**
+
+* Configurer Naga avec sa source réelle.
+* Vérifier que le runtime utilise la bonne source et le bon compte.
+* Valider les scénarios opérationnels avant de passer à la suite.
+
+**Avant PROD**
+
+* Vérifier les migrations `0003` et `0004` sur une base PostgreSQL de test sûre.
+* Vérifier les migrations, contraintes et données préexistantes avant application en production.
+
+Sources prévues à terme : Google Sheets, HubSpot, Salesforce, Airtable, Excel/OneDrive et API CRM générique. Google Sheets d’abord, puis HubSpot ; les autres sources restent des objectifs à implémenter et tester.
+
+## 12 ☐ Finaliser le Multi-Channel ==> To Do
+
+* Définir un contrat commun pour les canaux et leur configuration par client.
+* Implémenter et intégrer Telegram et Email en priorité.
+* Prévoir WhatsApp dans l’architecture, puis l’intégrer dans une étape ultérieure.
+* Gérer l’envoi réel, les erreurs, les accusés de réception disponibles et les limites des fournisseurs.
+* Recevoir et traiter les messages entrants par webhooks ou mécanisme adapté.
+* Associer chaque message au bon client, prospect et canal.
+* Gérer les identités d’expéditeur, les secrets et les tests de connexion.
+* Éviter les doublons d’envoi et gérer les reprises après erreur.
+* Vérifier qu’un canal non configuré ou indisponible empêche le démarrage opérationnel du client concerné, sans bloquer les autres clients.
+* Tester les parcours entrants et sortants de bout en bout.
+
+## 13 ☐ Finaliser le cycle commercial complet et le Planner quotidien ==> To Do
+
+* Récupérer les prospects depuis la source configurée.
+* Appliquer les règles de qualification, de priorité et d’éligibilité.
+* Construire le planning quotidien, avec quota d’actions et gestion des actions échues.
+* Éviter les doublons et respecter les limites quotidiennes du client.
+* Préparer les nouvelles prises de contact et les suivis planifiés.
+* Déclencher les actions via le canal réellement configuré.
+* Gérer les horaires, les erreurs, les tentatives et les reprises.
+* Permettre de suspendre, reprendre et arrêter proprement l’agent.
+* Garantir qu’un agent arrêté ou en erreur n’envoie pas de nouveaux messages.
+* Vérifier que les actions planifiées persistent et restent cohérentes après redémarrage.
+
+## 14 ☐ Finaliser le Naga Brain et valider les scénarios commerciaux réels ==> To Do
+
+* Configurer les produits, offres, tarifs, conditions et paramètres commerciaux de Naga.
+* Vérifier que le Brain utilise uniquement les informations commerciales autorisées et à jour.
+* Adapter la langue, le registre et le ton au pays et au profil du prospect.
+* Préparer les messages, répondre aux objections et guider vers l’inscription ou le paiement.
+* Utiliser le modèle IA réellement affecté au client.
+* Prévoir les cas où les informations manquent, où la demande est ambiguë ou où une intervention humaine est nécessaire.
+* Tester les scénarios commerciaux représentatifs de Naga, avec résultats attendus.
+* Vérifier qu’aucune information commerciale inventée n’est présentée comme un fait.
+
+## 15 ☐ Finaliser le suivi des conversations, statuts, relances et rendez-vous ==> To Do
+
+* Conserver l’historique des messages et les rattacher au bon prospect.
+* Traiter les réponses entrantes et mettre à jour le statut commercial.
+* Déterminer la prochaine action : réponse, relance, rappel, rendez-vous, arrêt ou intervention humaine.
+* Planifier et exécuter les relances sans doublons.
+* Respecter les refus, opt-out, règles de consentement et demandes de ne plus être contacté.
+* Enregistrer les rendez-vous et leurs informations utiles.
+* Synchroniser les modifications autorisées vers la source CRM via le write-back.
+* Gérer les conflits avec les modifications effectuées manuellement dans le CRM.
+* Vérifier la cohérence entre le store Revansa et la source après chaque synchronisation.
+* Assurer la traçabilité des décisions, erreurs et tentatives de synchronisation.
+
+## 16 ☐ Finaliser les quotas, crédits, consommation des tokens et limites par client ==> To Do
+
+* Définir les plans, crédits, quotas journaliers et limites par client.
+* Mesurer la consommation réelle des tokens par modèle et par requête.
+* Associer chaque consommation au bon client et à son modèle.
+* Appliquer les limites avant les actions coûteuses ou les envois.
+* Gérer les dépassements, l’épuisement des crédits et les erreurs de facturation.
+* Éviter la double comptabilisation lors des reprises.
+* Afficher l’utilisation et les limites dans l’Admin.
+* Tester l’isolation de la consommation et les limites entre clients.
+* Vérifier les coûts réels lors du pilote Naga.
+
+## 17 ☐ Finaliser les KPI, rapports quotidiens et logs d’erreurs ==> To Do
+
+* Suivre les prospects récupérés, contactés, en cours et convertis lorsque l’information est disponible.
+* Mesurer les messages envoyés, les réponses, les relances, les rendez-vous et les erreurs.
+* Produire le rapport quotidien prévu pour Naga et l’Admin.
+* Distinguer les erreurs du modèle, de la source, du canal, du scheduler et du write-back.
+* Assurer des logs structurés, exploitables et sans secrets ni données sensibles inutiles.
+* Mettre en place des indicateurs de santé et des alertes utiles.
+* Vérifier la cohérence des KPI avec les données réelles.
+* Tester les rapports après redémarrage et sur plusieurs clients.
+
+## 18 ☐ Finaliser les tests E2E, l’isolation des clients et la sécurité ==> To Do
+
+**Parcours fonctionnel complet**
+
+* Tester le parcours : affectation du modèle, configuration Naga, test des connexions, démarrage, récupération des prospects, préparation et envoi, réponse entrante, relance et mise à jour du CRM.
+* Tester le parcours prioritaire Google Sheets + Telegram ou Email.
+* Tester ensuite Google Sheets + HubSpot selon les capacités réellement disponibles.
+* Tester les erreurs de connexion, les refus, les doublons, les conflits, les arrêts et les redémarrages.
+* Vérifier que chaque étape est réellement câblée dans l’application.
+
+**Authentification et permissions**
+
+* Vérifier l’authentification Admin et supprimer la dépendance aux identifiants locaux de développement (`admin / admin-dev-password`).
+* Vérifier la création et la persistance du compte Admin Revansa dans PostgreSQL.
+* Vérifier la création des comptes clients (Naga, etc.), le stockage sécurisé des mots de passe (hash) et leur authentification.
+* Vérifier les rôles et permissions, le changement de mot de passe et l’isolation des données entre clients.
+* Vérifier qu’aucun compte ou mot de passe de développement ne permet d’accéder à la PROD.
+
+**Données, secrets et résilience**
+
+* Vérifier l’isolation des sources, conversations, prospects, messages, crédits, logs et configurations entre clients.
+* Vérifier le stockage et la rotation des secrets et l’absence de fuite dans les réponses API et les logs.
+* Tester les webhooks, la validation des requêtes, les doublons et les tentatives malveillantes.
+* Vérifier les sauvegardes, la restauration et la reprise après panne.
+* Exécuter les tests unitaires, d’intégration, d’architecture, de sécurité et E2E pertinents.
+* Obtenir un rapport de tests complet et reproductible avant validation finale.
+
+## 19 ☐ Déployer sur OVH et valider la configuration PROD ==> To Do
+
+* Préparer les environnements et la procédure de déploiement.
+* Configurer et vérifier les identifiants de connexion PostgreSQL dans les secrets de l’environnement PROD.
+* Vérifier la séparation entre les identifiants PostgreSQL, les comptes utilisateurs Revansa et les identifiants API des fournisseurs.
+* Configurer les clés API OpenAI, Meta et WhatsApp, ainsi que les autres secrets nécessaires, sans les exposer dans le code ou les journaux.
+* Configurer les accès Google Sheets, HubSpot et les fournisseurs de canaux effectivement activés.
+* Vérifier HTTPS, certificats, DNS, webhooks, permissions, monitoring, sauvegardes et restauration.
+* Vérifier que l’application utilise effectivement la base de données et les secrets de PROD, et non les configurations locales.
+* Appliquer les migrations uniquement après validation sur une base PostgreSQL de test sûre et selon la procédure de déploiement.
+* Vérifier les contrôles de santé, les logs, les alertes et la reprise après redémarrage.
+* Valider le déploiement sans activer l’agent commercial Naga avant le pilote contrôlé.
+
+## 20 ☐ Réaliser le pilote réel Naga et corriger les problèmes avant commercialisation ==> To Do
+
+* Créer et valider le compte client Naga en environnement PROD.
+* Vérifier la connexion Admin et Naga avec leurs propres identifiants.
+* Affecter à Naga un modèle IA actif et vérifier son utilisation réelle.
+* Configurer les produits et paramètres commerciaux.
+* Configurer une source de prospects réelle et un canal prioritaire.
+* Tester chaque connexion, puis démarrer l’agent de manière contrôlée.
+* Vérifier la récupération des prospects, la préparation et l’envoi des messages.
+* Vérifier le traitement des réponses, la planification des relances et les rendez-vous.
+* Vérifier la mise à jour effective du CRM et le respect des refus de contact.
+* Contrôler les KPI, logs, erreurs, quotas et coûts réels.
+* Tester l’arrêt, la reprise et le comportement après incident.
+* Corriger les problèmes bloquants et rejouer les scénarios concernés.
+* Confirmer qu’aucun identifiant de développement n’est utilisé en production.
+
+**Critère final d’acceptation :** le parcours Naga est démontré en conditions réelles, de la configuration Admin et Client jusqu’à la mise à jour du CRM. Les résultats sont vérifiables, les erreurs sont maîtrisées et l’isolation des clients est confirmée. La roadmap ne peut pas être déclarée terminée sur la seule base de tests unitaires ou d’intégration entre composants.
+---------------
+REVANSA
+Cahier des charges fonctionnel et technique
+Version 1.1 — Document de référence à valider
+1. Présentation et vision du produit
+1.1. Objectif
+Revansa est une plateforme SaaS permettant aux entreprises de configurer et d'exploiter des agents commerciaux autonomes basés sur l'intelligence artificielle.
+Ces agents doivent pouvoir rechercher des prospects, comprendre leurs besoins, présenter les produits ou services pertinents, mener des conversations commerciales, assurer des relances et suivre les résultats jusqu'à la conversion.
+Revansa ne doit pas être conçu comme un simple chatbot, mais comme une plateforme de gestion de processus commerciaux automatisés.
+1.2. Clients cibles
+Revansa doit pouvoir servir des entreprises B2B et B2C de tous secteurs, proposant des produits ou des services.
+Naga et TounesImmo constituent des cas d'utilisation pilotes, mais l'architecture ne doit pas être limitée à ces deux entreprises.
+1.3. Vision à long terme
+Revansa doit évoluer vers un SaaS international permettant aux entreprises de s'inscrire, de souscrire à un abonnement et de configurer leurs propres agents sans intervention technique systématique de l'équipe Revansa.
+L'architecture doit anticiper cette évolution, même si certaines fonctionnalités de libre-service sont développées ultérieurement.
+
+2. Principes fondamentaux
+Les principes suivants s'appliquent à l'ensemble du produit.
+Automatisation réelle : les fonctionnalités annoncées doivent être opérationnelles, et pas simplement simulées dans l'interface.
+Simplicité : le Client ne doit pas être obligé de comprendre des paramètres techniques pour utiliser Revansa.
+Configuration centralisée : l'Admin gère les paramètres globaux et les configurations externes qui nécessitent son intervention.
+Autonomie du Client : le Client configure les éléments métier qui relèvent de son activité.
+Isolation des données : chaque Client dispose de données et de conversations isolées.
+Traçabilité : les actions importantes, les erreurs, les synchronisations et les changements de statut doivent être suivis.
+Fiabilité : les échecs de connexion ou de synchronisation doivent être visibles et récupérables.
+Évolutivité : les fonctionnalités doivent être conçues pour plusieurs Clients, plusieurs secteurs, plusieurs canaux et plusieurs fournisseurs.
+Non-régression : les fonctionnalités déjà validées ne doivent pas être supprimées ou modifiées sans accord du Product Owner.
+
+3. Utilisateurs, rôles et permissions
+3.1. Admin Revansa
+L'Admin gère la plateforme dans son ensemble.
+Ses responsabilités comprennent :
+Création, modification, activation et désactivation des comptes Clients.
+Gestion des informations administratives des Clients.
+Affectation des modèles d'intelligence artificielle.
+Gestion des quotas et des limites d'utilisation.
+Configuration des fournisseurs et intégrations globales.
+Gestion des paramètres techniques globaux des services Email.
+Traitement des demandes de création de boîtes Email.
+Gestion des abonnements, factures, paiements hors ligne, gratuités et remises.
+Supervision des agents, conversations, erreurs, coûts et consommations.
+Consultation des indicateurs et rapports de la plateforme.
+Gestion des incidents et des connexions externes nécessitant une intervention administrative.
+L'interface Admin doit rester simple et ne présenter que les paramètres nécessaires à ces responsabilités.
+Les fonctionnalités internes obligatoires de Revansa ne doivent pas devenir des options administratives inutiles.
+3.2. Client Revansa
+Le Client gère son activité commerciale dans Revansa.
+Il peut notamment :
+Consulter et modifier les informations autorisées de son profil.
+Changer son mot de passe.
+Configurer son catalogue de produits ou services.
+Définir ses règles commerciales.
+Connecter ses sources de prospects.
+Créer et gérer ses circuits commerciaux.
+Connecter ses canaux de communication.
+Configurer et démarrer ses agents.
+Consulter les conversations et intervenir si nécessaire.
+Consulter les prospects, résultats, erreurs et statistiques.
+Gérer les paramètres métier accessibles dans son rôle.
+Consulter ses factures et le statut de son abonnement.
+Soumettre une demande de création d'une boîte Email indépendante.
+Le Client ne doit pas avoir à gérer directement les clés API, les secrets OAuth, les paramètres SMTP/IMAP ou les autres identifiants techniques des fournisseurs.
+3.3. Profil Client et droits de modification
+Le Client peut modifier :
+Son nom de profil.
+Son login.
+Son numéro WhatsApp.
+Son mot de passe, via le mécanisme sécurisé prévu.
+Le statut de son compte reste administré exclusivement par l'Admin.
+Les paramètres techniques et secrets des fournisseurs ne doivent pas être exposés dans le profil Client.
+Lorsqu'un numéro WhatsApp est modifié, Revansa doit déclencher le parcours de mise à jour de l'intégration nécessaire. Le nouveau numéro ne doit pas être considéré comme opérationnel avant la validation requise.
+3.4. Évolution des rôles
+L'architecture doit pouvoir prendre en charge ultérieurement plusieurs utilisateurs au sein d'une même entreprise, avec des rôles et permissions distincts.
+Cette évolution ne doit pas compromettre l'isolation des données.
+
+4. Catalogue de produits et règles commerciales
+4.1. Gestion du catalogue
+Chaque Client peut gérer les produits et services qu'il souhaite commercialiser.
+Pour chaque élément, Revansa doit pouvoir exploiter les informations disponibles, notamment :
+Nom et description.
+Prix et conditions commerciales.
+Liens utiles.
+Documents PDF.
+Documents bureautiques et feuilles de calcul.
+Images et vidéos.
+Témoignages et autres contenus commerciaux.
+Informations complémentaires utiles à la qualification et à la vente.
+Les informations doivent être organisées de façon à pouvoir être utilisées par l'agent commercial.
+L'agent ne doit pas inventer de prix, de caractéristiques, de disponibilité ou de promesses commerciales absentes des informations validées.
+4.2. Choix du produit à proposer
+Un circuit commercial peut être associé à un ou plusieurs produits.
+Si un produit est associé au circuit, l'agent commence normalement par celui-ci.
+Cependant, si la conversation révèle que ce produit ne correspond pas au besoin du prospect et qu'un autre produit du catalogue est plus adapté, l'agent peut proposer cette meilleure alternative.
+Si aucun produit n'est imposé au circuit, l'agent doit qualifier le besoin et sélectionner les produits pertinents du catalogue.
+Le choix final doit toujours respecter les règles commerciales du Client.
+4.3. Règles commerciales configurables
+Le Client doit pouvoir définir les règles métier utiles à son activité, notamment :
+Objectifs de qualification.
+Informations à recueillir.
+Critères d'intérêt commercial.
+Conditions de présentation des produits.
+Règles de prix et de négociation autorisées.
+Liens de paiement.
+Instructions de paiement hors ligne.
+Conditions de transfert vers un interlocuteur humain.
+Règles de suivi et de relance.
+Situations dans lesquelles l'agent doit s'abstenir de répondre ou demander une intervention humaine.
+4.4. Paiements des prospects
+Lorsque le Client propose un paiement en ligne, l'agent peut transmettre le lien de paiement configuré.
+Pour un paiement hors ligne, il peut communiquer les instructions fournies par le Client.
+Il faut impérativement distinguer :
+PAID — déclaré par le prospect : le prospect affirme avoir payé.
+PAID — confirmé : le paiement a été vérifié et confirmé par le Client ou par un mécanisme autorisé et fiable.
+L'agent ne doit jamais transformer automatiquement une simple déclaration du prospect en paiement confirmé.
+4.5. Relances commerciales
+Par défaut, Revansa autorise au maximum trois relances espacées de deux jours.
+Le Client doit pouvoir adapter ces règles à son activité.
+Les relances doivent respecter les horaires, les limites d'utilisation, les demandes d'arrêt et les règles de consentement applicables.
+Après une demande claire d'arrêt ou de désinscription, les relances commerciales concernées doivent être interrompues.
+
+5. Sources de prospects et circuits commerciaux
+5.1. Sources initiales
+Les premières sources prévues sont :
+Google Sheets.
+HubSpot.
+L'architecture doit permettre l'ajout ultérieur d'autres sources.
+5.2. Définition d'un circuit
+Un circuit commercial regroupe les éléments nécessaires à un processus de prospection :
+Une source de prospects.
+Un ou plusieurs canaux de communication.
+Un ou plusieurs produits ou services.
+Des règles de qualification et de vente.
+Des règles de relance.
+Les paramètres nécessaires au suivi des résultats.
+Un Client peut créer plusieurs circuits indépendants.
+Chaque circuit doit pouvoir être configuré, testé, activé, suspendu et supervisé séparément.
+5.3. Isolation des circuits
+Les prospects, produits, règles, conversations et résultats d'un circuit ne doivent pas être mélangés avec ceux d'un autre circuit.
+Un prospect ne doit pas être traité plusieurs fois par erreur à la suite d'une relance technique, d'un redémarrage ou d'une synchronisation répétée.
+Les règles de déduplication et de rattachement doivent être définies dans le modèle de données et appliquées côté serveur.
+
+6. Intégration Google Sheets
+6.1. Connexion
+Le Client connecte son compte Google via un parcours OAuth.
+Revansa demande uniquement les permissions nécessaires à son fonctionnement.
+Après connexion, Revansa doit pouvoir accéder aux feuilles autorisées et lire les informations nécessaires au traitement des prospects.
+6.2. Lecture et traitement
+Revansa doit :
+Lire les lignes pertinentes.
+Identifier les prospects.
+Extraire les informations utiles à la prospection.
+Associer chaque prospect au circuit correspondant.
+Enregistrer les données dans son CRM interne.
+Éviter les doublons et les traitements répétés.
+Suivre les erreurs de lecture et les problèmes d'autorisation.
+6.3. Write-back obligatoire
+Le write-back Google Sheets est une fonctionnalité permanente de Revansa.
+Il doit toujours être activé et ne doit jamais être présenté comme une option activable ou désactivable dans l'interface Admin ou Client.
+Revansa doit automatiquement créer et mettre à jour un onglet de suivi selon son propre modèle de données.
+Cet onglet permet notamment de retrouver les informations de suivi commercial et les statuts des prospects.
+Le modèle de suivi doit être cohérent et stable. Le Client ne doit pas avoir à construire manuellement une structure complexe de colonnes ou à configurer des mappings techniques pour que le write-back fonctionne.
+Les erreurs de synchronisation doivent être enregistrées, visibles pour les rôles autorisés et récupérables.
+Le système doit éviter la création répétée d'onglets ou de lignes en cas de redémarrage ou de nouvelle tentative.
+6.4. Configuration Admin
+L'interface Admin doit contenir uniquement les paramètres externes réellement nécessaires à la connexion et au fonctionnement du service Google.
+Le write-back est une règle interne obligatoire, et non un paramètre de configuration.
+
+7. Intégration HubSpot
+7.1. Connexion
+Le Client connecte HubSpot via un parcours OAuth simple.
+Il ne doit pas être obligé de saisir manuellement des clés techniques lorsque le parcours OAuth permet d'obtenir les autorisations nécessaires.
+7.2. Lecture des données
+Revansa doit pouvoir accéder aux contacts et propriétés autorisés nécessaires à la prospection.
+Les prospects pertinents sont associés aux circuits, canaux et produits appropriés.
+Les données utiles sont ensuite enregistrées dans le CRM interne de Revansa.
+7.3. Synchronisation des résultats
+Revansa doit synchroniser vers HubSpot les informations commerciales autorisées, notamment :
+Statuts des prospects.
+Résumés commerciaux utiles.
+Résultats de qualification.
+Résultats de conversion lorsque disponibles.
+Le mapping des statuts HubSpot doit être configurable depuis une interface Admin adaptée.
+Les erreurs de synchronisation, expirations de tokens et autorisations manquantes doivent être détectées et signalées.
+Le système doit permettre la reconnexion et la reprise des synchronisations échouées sans dupliquer les traitements.
+7.4. Périmètre des données
+Revansa conserve l'historique détaillé des conversations dans son propre système.
+HubSpot reçoit les données commerciales et statuts prévus pour la synchronisation. La synchronisation ne doit pas transférer inutilement l'intégralité des conversations si cela n'est pas nécessaire au fonctionnement convenu.
+
+8. Canaux de communication
+8.1. Principes communs
+Les canaux initiaux comprennent Email et Telegram. WhatsApp Business est également prévu dans le périmètre produit, avec une intégration nécessitant le choix et la configuration du partenaire.
+Pour tous les canaux, Revansa doit assurer, selon les capacités du fournisseur :
+Envoi des messages.
+Réception des réponses pertinentes.
+Association des messages aux bons prospects, circuits et conversations.
+Historique des échanges.
+Gestion des relances.
+Gestion des demandes d'arrêt.
+Suivi des statuts de livraison.
+Gestion des erreurs et des limites.
+Traçabilité des actions.
+8.2. Email — Deux modes d'utilisation
+Le Client choisit entre deux modes : utiliser son compte Gmail ou demander une boîte Email indépendante fournie par Revansa.
+Le Client ne doit jamais être obligé de configurer lui-même des paramètres techniques.
+Mode A — Utiliser son compte Gmail
+Le Client clique sur un bouton de connexion à Gmail et autorise Revansa via OAuth.
+Revansa demande les permissions nécessaires à la lecture des emails pertinents et à l'envoi des messages.
+Le système doit ensuite permettre :
+L'envoi des messages commerciaux.
+La réception des réponses pertinentes.
+Le rattachement des réponses aux bons prospects et conversations.
+La gestion des relances et demandes d'arrêt.
+La conservation de l'historique dans Revansa.
+L'affichage de l'état de connexion et des erreurs d'autorisation.
+Le Client n'a pas à saisir de paramètres SMTP, IMAP ou de mot de passe Gmail.
+La connexion doit utiliser les autorisations officiellement disponibles. Les limites et restrictions éventuelles du fournisseur doivent être traitées proprement.
+Mode B — Demander une boîte Email indépendante
+Le Client peut demander la création d'une boîte Email indépendante hébergée chez OVH et gérée dans le cadre du service Revansa.
+Le parcours est le suivant :
+Le Client soumet une demande depuis son espace.
+Il confirme le Sender Name, c'est-à-dire le nom affiché comme expéditeur.
+La demande apparaît dans une interface Admin dédiée.
+L'Admin examine la demande et crée manuellement la boîte chez OVH.
+L'Admin renseigne le login et le mot de passe attribués, puis valide la demande.
+Le Client reçoit une notification et voit le statut actualisé.
+Le Client peut consulter les informations de connexion qui lui sont destinées, selon les règles de sécurité définies.
+Le Client ne doit pas renseigner de serveur SMTP, de serveur IMAP, de port, de protocole ou d'autres paramètres techniques.
+L'interface doit prévoir des statuts adaptés, au minimum : demande en attente, en cours de traitement, active et en erreur.
+Les identifiants doivent être transmis et affichés de manière sécurisée. Ils ne doivent pas apparaître dans les journaux techniques ni être accessibles à d'autres Clients.
+Configuration globale Email de l'Admin
+L'Admin dispose d'une interface de configuration globale pour les paramètres techniques nécessaires au service Email, notamment SMTP et les paramètres d'hébergement OVH utiles au fonctionnement du service.
+L'Admin doit pouvoir consulter et traiter les demandes de création de boîtes Email indépendantes.
+Ces paramètres sont gérés par Revansa et ne sont pas exposés comme des champs techniques dans l'espace Client.
+Fonctionnalités communes aux deux modes
+Quel que soit le mode sélectionné, Revansa doit gérer les messages envoyés et reçus, les réponses pertinentes, les relances, les demandes d'arrêt, l'historique et les erreurs.
+Les réponses doivent être rattachées au bon prospect et au bon circuit.
+Le système ne doit pas traiter indistinctement tous les emails d'une boîte comme des réponses commerciales.
+8.3. Telegram
+Le besoin métier porte sur l'utilisation du compte Telegram du Client, et non sur la substitution automatique par un bot générique.
+L'architecture doit prévoir une méthode conforme aux conditions et mécanismes officiellement autorisés par Telegram pour satisfaire ce besoin.
+La solution technique doit permettre, dans les limites de la méthode retenue :
+La connexion et la validation du compte.
+L'envoi et la réception des messages.
+Le rattachement des échanges aux prospects et circuits.
+L'historique des conversations.
+La gestion des relances et des demandes d'arrêt.
+La révocation de l'accès et le traitement des erreurs.
+L'API Bot de Telegram ne doit pas être présentée comme équivalente à l'utilisation du compte personnel du Client.
+La méthode finale doit être validée avant de déclarer cette intégration opérationnelle.
+8.4. WhatsApp Business
+Propriété et modèle économique
+Chaque Client reste propriétaire de son propre compte WhatsApp Business (WABA) et de son numéro.
+Revansa prévoit de s'appuyer sur Twilio ou Bird comme partenaire d'intégration, afin de satisfaire le besoin métier de connexion, de gestion des messages et d'exploitation des agents.
+Tous les Clients, et pas uniquement les Clients pilotes, paient leur abonnement Revansa.
+Revansa supporte les coûts techniques liés à OpenAI, Meta/WhatsApp, Google, aux fournisseurs d'intégration et à l'infrastructure, selon son modèle économique.
+Les Clients ne gèrent pas directement la facturation Meta/WhatsApp liée au service Revansa.
+Le modèle économique interne doit permettre à Revansa de suivre ces coûts et de les intégrer dans ses calculs de rentabilité.
+Fonctionnalités nécessaires
+L'architecture doit prévoir :
+L'association du WABA et du numéro du Client.
+Le parcours de connexion et de configuration adapté au partenaire retenu.
+L'envoi et la réception des messages.
+La gestion des modèles de messages requis par WhatsApp.
+Les webhooks et statuts de livraison.
+Le suivi des consentements et demandes d'arrêt.
+La gestion des erreurs, limites et incidents.
+La traçabilité des messages et événements.
+Le suivi des coûts techniques.
+La possibilité de gérer plusieurs numéros lorsque nécessaire.
+La gestion des autorisations, révocations et reconnexions.
+Le besoin de visibilité des messages dans l'application WhatsApp du téléphone doit être pris en compte. Sa faisabilité doit être confirmée selon le fournisseur et le mode de connexion retenus, notamment si un mode de coexistence est nécessaire.
+Configuration et onboarding
+L'interface Admin doit permettre de terminer les configurations externes nécessaires : fournisseur, paramètres de connexion, webhooks et autres éléments techniques relevant de Revansa.
+Le parcours d'onboarding du Client doit prendre en compte les autorisations, la propriété de son compte et de son numéro ainsi que les vérifications Meta nécessaires.
+Le choix définitif entre Twilio et Bird reste à arrêter. Il doit être fondé sur les besoins fonctionnels, la compatibilité des comptes, les possibilités de coexistence avec l'application mobile, la gestion de plusieurs numéros, les coûts et les conditions du partenariat.
+Aucune intégration ne doit être déclarée opérationnelle avant la réussite d'un test de bout en bout réel.
+
+9. CRM interne, conversations et suivi commercial
+9.1. CRM interne
+Revansa doit disposer de son propre modèle de données pour gérer notamment :
+Comptes Clients.
+Sources et circuits.
+Prospects.
+Statuts commerciaux.
+Produits associés.
+Conversations et messages.
+Événements et actions.
+Relances planifiées.
+Résultats et conversions.
+Erreurs.
+États de synchronisation.
+Informations nécessaires au suivi des coûts et quotas.
+Toutes les données doivent être isolées par Client et protégées par les permissions appropriées.
+9.2. Source de vérité
+Revansa conserve l'historique détaillé des conversations, des messages, des actions et des résultats de l'agent.
+Les sources externes servent à fournir les prospects et à recevoir les informations commerciales prévues pour la synchronisation.
+Les données de suivi doivent être cohérentes entre Revansa et les outils externes, sans faire dépendre l'existence de l'historique détaillé de la disponibilité d'une feuille Google Sheets ou de HubSpot.
+9.3. Menu Conversations
+Le menu Conversations doit être réellement fonctionnel et permettre au Client de consulter les échanges commerciaux.
+Pour chaque conversation, l'interface doit présenter les informations pertinentes disponibles, notamment :
+Prospect concerné.
+Source et circuit.
+Produit ou service concerné.
+Messages envoyés et reçus avec leurs dates.
+Contexte de la conversation.
+Statut commercial.
+Prochaine action ou relance planifiée.
+Erreurs ou interventions nécessaires.
+Possibilité de demander une intervention humaine ou de reprendre le contrôle lorsque cette fonctionnalité est prévue.
+L'interface doit permettre de retrouver les conversations et de consulter leur historique, sans limitation arbitraire non documentée qui empêcherait le suivi normal de l'activité.
+Les mécanismes de pagination et de recherche doivent être conçus pour les volumes de données attendus.
+9.4. Intervention humaine
+Lorsqu'une conversation nécessite une intervention humaine, Revansa doit rendre cette situation visible au Client.
+Les règles de transfert, de suspension de l'agent et de reprise du contrôle doivent éviter que l'agent continue à envoyer des messages incompatibles avec l'intervention humaine en cours.
+9.5. Synchronisation et reprise
+Les erreurs de synchronisation doivent être enregistrées et visibles.
+Le système doit permettre les nouvelles tentatives nécessaires, sans créer de doublons ou répéter des actions commerciales déjà exécutées.
+L'historique interne ne doit pas être perdu en cas d'indisponibilité temporaire d'un fournisseur externe.
+
+10. Dashboards et rapports
+10.1. Dashboard Admin
+Le Dashboard Admin doit conserver les indicateurs existants qui ont déjà été validés. Les nouveaux indicateurs et graphiques viennent les compléter, sans supprimer les éléments existants sans validation du Product Owner.
+Il doit présenter, selon les données réellement disponibles :
+Nombre total de Clients.
+Clients actifs et inactifs.
+Modèles IA configurés.
+Agents actifs.
+Prospects traités.
+Conversations.
+Réponses reçues.
+Conversions.
+Factures émises.
+Factures réglées.
+Factures gratuites et remisées.
+Montants facturés.
+Montants encaissés.
+Coûts techniques de Revansa.
+Consommation et quotas.
+Erreurs et incidents.
+État des intégrations.
+Graphiques significatifs
+Le Dashboard doit intégrer des graphiques utiles à la décision :
+Activité commerciale : évolution des prospects, conversations et conversions par jour ou par mois.
+Performance des agents : taux de réponse et taux de conversion, avec une période et un périmètre clairement définis.
+Évolution financière : montants facturés et montants encaissés au fil du temps.
+Évolution des abonnements : nombre de Clients actifs et inactifs.
+Coûts techniques : consommation et coûts par fournisseur, modèle IA ou intégration, selon les données disponibles.
+Fiabilité opérationnelle : évolution des erreurs, échecs de synchronisation et incidents d'intégration.
+Les graphiques doivent s'appuyer sur des données réelles. Les filtres de période et de Client doivent être disponibles lorsque cela est pertinent.
+Les indicateurs doivent distinguer le chiffre d'affaires facturé, les montants encaissés, les montants gratuits ou remisés et les coûts techniques.
+Aucune donnée simulée ne doit être présentée comme un résultat réel.
+10.2. Dashboard Client
+Le Client doit disposer d'une vue opérationnelle lui permettant de suivre :
+État de ses agents.
+Activité commerciale.
+Prospects traités.
+Conversations et réponses.
+Conversions.
+Résultats par produit, source, canal et période.
+Paiements déclarés et paiements confirmés, selon les informations disponibles.
+Demandes d'intervention humaine.
+Erreurs et problèmes de connexion.
+Consommation et quotas.
+État de ses intégrations.
+Factures et statut de son abonnement.
+L'interface doit rester compréhensible pour un utilisateur non technique.
+Les données affichées doivent correspondre aux données réelles du Client connecté.
+10.3. Rapports et résumés périodiques
+Revansa doit prévoir la génération de résumés d'activité, notamment quotidiens, avec une configuration de l'horaire, du fuseau horaire et du canal de réception.
+Les canaux disponibles dépendent des intégrations réellement opérationnelles : Email, Telegram ou WhatsApp, lorsque ce dernier est configuré.
+Le fuseau horaire doit être configurable ; le fuseau Africa/Tunis peut servir de valeur par défaut pour les comptes configurés en Tunisie.
+
+11. Intelligence artificielle, autonomie et garde-fous
+11.1. Affectation du modèle
+L'Admin attribue un modèle d'intelligence artificielle à chaque Client selon la configuration et le plan applicables.
+Le Client ne doit pas être obligé de configurer directement les clés API des fournisseurs.
+L'architecture doit permettre de faire évoluer les modèles utilisés sans reconstruire l'ensemble du produit.
+11.2. Comportement commercial
+L'agent doit :
+Comprendre le contexte et les besoins du prospect.
+Poser des questions de qualification pertinentes.
+Utiliser les informations commerciales validées.
+Proposer les produits appropriés.
+Adapter son discours au canal.
+Gérer les objections dans les limites des règles configurées.
+Transmettre les informations utiles au CRM.
+Appliquer les règles de relance.
+Reconnaître les situations nécessitant une intervention humaine.
+L'agent ne doit pas prétendre être humain ni tromper volontairement le prospect sur son identité. S'il est directement interrogé sur son caractère artificiel, il doit répondre honnêtement.
+11.3. Quotas et limites
+Les limites d'utilisation doivent être définies par Client selon son plan ou sa configuration administrative.
+Revansa doit suivre la consommation réelle, appliquer les quotas côté serveur et signaler les seuils atteints.
+Les erreurs de quota ou de fournisseur doivent être visibles et ne doivent pas provoquer des traitements répétés incontrôlés.
+11.4. Consentement et sécurité commerciale
+Revansa doit respecter les règles de consentement applicables, les demandes d'arrêt, les limites de fréquence et les restrictions des fournisseurs.
+Les agents ne doivent pas continuer des relances commerciales après une demande d'arrêt pertinente.
+
+12. Administration technique, sécurité et architecture
+12.1. Architecture générale
+L'architecture doit séparer clairement les responsabilités :
+Interface Admin.
+Interface Client.
+API et logique métier.
+Orchestration des agents IA.
+Intégrations externes.
+CRM et conversations internes.
+Stockage des données.
+Gestion sécurisée des secrets.
+Abonnements et facturation.
+Quotas, rapports et supervision.
+Les règles métier et de sécurité doivent être appliquées côté serveur, et pas uniquement dans l'interface.
+12.2. Persistance et isolation
+Les données opérationnelles doivent être stockées dans une base de données adaptée, notamment PostgreSQL selon l'architecture validée du projet.
+Les données doivent être isolées par Client, et les requêtes doivent vérifier les autorisations.
+Un Client ne doit jamais pouvoir consulter ou modifier les données d'un autre Client en manipulant directement une requête ou un identifiant.
+12.3. Secrets et autorisations
+Les clés API, tokens OAuth, mots de passe et autres secrets doivent être stockés et transmis de manière sécurisée.
+Les permissions OAuth doivent être limitées aux besoins réels des intégrations.
+Les secrets ne doivent pas apparaître dans les logs, les messages d'erreur accessibles aux Clients ou les réponses API.
+La révocation d'une autorisation externe doit être prise en compte dans l'état de l'intégration.
+12.4. Traçabilité
+Les actions sensibles doivent être traçables, notamment :
+Changements de permissions.
+Modifications de quotas.
+Affectations de modèles.
+Actions sur les factures.
+Changements d'état des intégrations.
+Actions administratives.
+Erreurs et reprises de synchronisation.
+12.5. Fiabilité
+Les traitements doivent être conçus pour résister aux redémarrages et aux erreurs temporaires.
+Revansa doit prévenir les doublons, rendre les échecs visibles et permettre la reprise des traitements lorsque cela est possible.
+
+13. Abonnements, facturation et modèle économique
+13.1. Modèle commercial
+Revansa est un SaaS facturant un abonnement à ses Clients.
+Les abonnements peuvent prévoir des périodicités mensuelles ou annuelles, selon les plans disponibles.
+L'architecture doit permettre de gérer les plans, tarifs, quotas, modèles IA et limites associés.
+Les Clients paient leur abonnement Revansa. Ils ne gèrent pas directement la facturation Meta/WhatsApp des intégrations utilisées par Revansa.
+Revansa supporte les coûts techniques liés aux fournisseurs et à l'infrastructure selon son modèle économique.
+13.2. Génération automatique des factures
+Les factures d'abonnement doivent être générées automatiquement à partir de la date d'inscription du Client, selon la périodicité et les règles d'abonnement applicables.
+Le système doit respecter le calendrier de facturation défini pour chaque abonnement et empêcher les doublons.
+Les factures doivent être accessibles dans l'interface Admin et dans l'espace du Client concerné.
+Le Client peut consulter ses factures et leur statut. Seul l'Admin peut effectuer les modifications administratives de statut prévues.
+13.3. Actions de l'Admin
+L'Admin doit pouvoir gérer le statut des factures, notamment :
+Paid : confirmer un paiement reçu et vérifié, y compris un paiement hors ligne.
+For Free : accorder la gratuité totale de la facture.
+Remise de 100 % : appliquer une remise totale.
+Ces actions doivent être enregistrées dans un historique d'audit.
+La gratuité et la remise totale doivent être clairement distinguées du paiement effectivement encaissé.
+13.4. Indicateurs financiers
+Toute création de facture ou modification de son statut doit actualiser les indicateurs financiers concernés.
+Revansa doit distinguer :
+Montant facturé : montant de l'abonnement avant remise.
+Montant après remise : montant restant à payer.
+Montant encaissé : paiement réellement reçu et confirmé.
+Montant gratuit : montant couvert par une décision de gratuité.
+Montant remisé : montant couvert par une remise.
+Coûts techniques : dépenses supportées par Revansa auprès des fournisseurs.
+Rentabilité : indicateurs calculés à partir des revenus et coûts selon les règles financières retenues.
+Une facture marquée Paid après vérification doit contribuer aux montants encaissés.
+Une facture For Free ou remisée à 100 % ne doit pas être comptabilisée comme un encaissement réel.
+Les tableaux de bord doivent afficher séparément ces indicateurs pour éviter toute confusion sur le chiffre d'affaires facturé et les recettes réellement perçues.
+13.5. Pilotes et évolution vers le libre-service
+Les comptes pilotes peuvent être provisionnés manuellement par l'Admin, avec attribution du modèle et des quotas.
+À terme, Revansa doit pouvoir proposer une landing page, une inscription autonome, la sélection d'un plan, la souscription et la configuration guidée.
+Les règles d'abonnement, de facturation, de modèles et de quotas doivent donc être conçues pour permettre cette évolution.
+
+14. Notifications, erreurs et supervision
+Revansa doit rendre visibles les problèmes nécessitant une action, notamment :
+Connexion externe expirée.
+Autorisation révoquée.
+Échec d'envoi ou de réception.
+Échec de synchronisation.
+Quota atteint.
+Problème de configuration.
+Demande de création de boîte Email en attente.
+Erreur de facturation ou de traitement.
+Conversation nécessitant une intervention humaine.
+Les notifications doivent être adressées au rôle approprié.
+Les messages d'erreur doivent être compréhensibles et proposer une action lorsque cela est possible, sans révéler de secrets techniques.
+Les échecs récupérables doivent pouvoir être traités sans perdre l'historique ni dupliquer les actions déjà réalisées.
+
+15. Parcours d'acceptation et critères de validation
+15.1. Parcours Admin
+Le parcours Admin doit permettre de :
+Créer ou gérer un Client.
+Configurer son abonnement et ses quotas.
+Affecter un modèle IA.
+Configurer les fournisseurs externes requis.
+Gérer les demandes de création de boîtes Email.
+Consulter les agents, conversations, erreurs et indicateurs.
+Générer et gérer les factures.
+Confirmer un paiement hors ligne ou appliquer une gratuité/remise.
+Vérifier la mise à jour des indicateurs financiers.
+15.2. Parcours Client
+Le parcours Client doit permettre de :
+Se connecter et gérer son profil.
+Configurer son catalogue.
+Définir ses règles commerciales.
+Connecter Google Sheets et vérifier la lecture ainsi que le write-back automatique.
+Connecter HubSpot et vérifier la lecture ainsi que la synchronisation des statuts.
+Choisir Gmail ou demander une boîte Email indépendante.
+Connecter un canal de communication disponible.
+Créer et démarrer un circuit.
+Vérifier le traitement d'un prospect réel.
+Consulter les messages dans Conversations.
+Vérifier les relances, statuts et résultats.
+Vérifier la prise en compte des demandes d'arrêt.
+Consulter les factures et les indicateurs autorisés.
+15.3. Tests réels des intégrations
+Les intégrations ne doivent pas être déclarées opérationnelles sur la seule base d'une interface fonctionnelle ou de tests simulés.
+Les tests doivent vérifier, selon le périmètre de chaque intégration :
+Authentification et autorisations.
+Lecture des données.
+Envoi et réception réels.
+Synchronisation des statuts.
+Gestion des erreurs.
+Reconnexion.
+Absence de doublons.
+Reprise après échec.
+Respect des permissions et de l'isolation des Clients.
+Pour WhatsApp, le parcours réel doit être testé avec le partenaire et un compte correctement configuré.
+Pour Telegram, la méthode d'accès au compte doit être validée avant de déclarer l'intégration opérationnelle.
+15.4. Définition de terminé
+Une fonctionnalité est considérée comme terminée lorsque :
+Son comportement correspond au cahier des charges.
+Son interface fonctionne pour le rôle autorisé.
+Les règles métier et de sécurité sont appliquées côté serveur.
+Les erreurs pertinentes sont visibles et gérées.
+Les tests ciblés indispensables réussissent.
+Les intégrations réelles ont été testées, ou leurs dépendances non résolues sont explicitement identifiées.
+La documentation reflète le comportement réel.
+Aucun parcours existant validé n'a été régressé.
+
+16. Roadmap et priorités de réalisation
+Le cahier des charges constitue la référence fonctionnelle. Il ne remplace pas silencieusement la roadmap précédemment validée.
+Les développements doivent suivre la roadmap approuvée, étape par étape. Toute modification de l'ordre, du périmètre ou des critères d'acceptation nécessite une validation explicite.
+Les priorités fonctionnelles à préserver sont notamment :
+Priorité 1 — Fondations et parcours commerciaux
+Administration et authentification.
+Profil Client.
+Catalogue et règles commerciales.
+Affectation des modèles IA.
+Google Sheets avec lecture et write-back permanent.
+HubSpot avec OAuth, lecture et synchronisation.
+Email avec les deux modes prévus.
+CRM interne et menu Conversations.
+Quotas, sécurité, relances et gestion des demandes d'arrêt.
+Priorité 2 — Telegram
+Valider et implémenter la méthode permettant de satisfaire le besoin d'utilisation du compte Telegram du Client, puis effectuer des tests réels.
+Priorité 3 — WhatsApp Business
+Retenir Twilio ou Bird selon les exigences métier, intégrer le parcours de connexion et les fonctionnalités nécessaires, puis effectuer un test complet de bout en bout.
+Priorité 4 — Industrialisation SaaS
+Landing page.
+Inscription autonome.
+Plans et abonnements.
+Facturation industrialisée.
+Configuration guidée.
+Supervision et gestion des coûts à l'échelle.
+Extension des intégrations et des fonctionnalités.
+Ce découpage de priorités ne doit pas supprimer ni remplacer les phases de la roadmap précédemment validée.
+
+17. Décisions validées et points restant à arbitrer
+17.1. Décisions validées
+Les règles suivantes sont considérées comme validées dans ce cahier des charges :
+Google Sheets write-back toujours activé, sans option Admin ou Client.
+Client non responsable des configurations techniques des intégrations.
+Email proposé en deux modes : Gmail via OAuth ou boîte indépendante fournie par Revansa.
+Configuration SMTP globale gérée par l'Admin.
+Demandes de création de boîtes indépendantes traitées manuellement par l'Admin chez OVH.
+Client autorisé à modifier son nom de profil, son login, son numéro WhatsApp et son mot de passe.
+Statut du compte réservé à l'Admin.
+Non-régression obligatoire des fonctionnalités Client déjà validées.
+Conservation des indicateurs Admin existants et ajout de graphiques significatifs.
+Génération automatique des factures à partir de la date d'inscription et selon la périodicité applicable.
+Possibilité pour l'Admin de marquer une facture Paid, For Free ou d'appliquer une remise de 100 %.
+Mise à jour des indicateurs financiers selon les statuts et montants réels.
+Clients propriétaires de leur WABA et de leur numéro WhatsApp.
+Clients payant leur abonnement Revansa uniquement ; coûts techniques pris en charge par Revansa selon son modèle économique.
+Utilisation de Twilio ou Bird comme partenaire WhatsApp, avec choix final à arrêter.
+Conversations détaillées conservées dans Revansa.
+Évolution prévue vers un SaaS international en libre-service.
+17.2. Points techniques restant à décider ou confirmer
+Les décisions suivantes nécessitent encore une validation technique ou métier, sans remettre en cause les exigences déjà approuvées :
+Choix définitif entre Twilio et Bird.
+Faisabilité précise de la coexistence WhatsApp avec l'application mobile pour le mode retenu.
+Méthode autorisée pour satisfaire le besoin d'utilisation du compte Telegram du Client.
+Mapping final des champs et statuts des sources externes.
+Règles précises de calcul des abonnements, périodicités et prorata, si applicables.
+Politique de conservation, exportation et suppression des données.
+Gestion future des utilisateurs multiples par Client.
+Exigences de conformité et de consentement selon les marchés ciblés.
+Ces points doivent être traités explicitement au moment approprié. Ils ne doivent pas être utilisés pour réduire ou supprimer les fonctionnalités déjà validées.
+
+Conclusion
+Revansa doit fournir une plateforme commerciale réellement opérationnelle, sécurisée et évolutive, avec des parcours simples pour les Clients et une administration maîtrisée pour l'équipe Revansa.
+Les fonctionnalités obligatoires doivent être intégrées au produit sans créer de paramètres inutiles. Les Clients configurent leur activité commerciale ; Revansa et son Admin prennent en charge les opérations techniques qui leur incombent.
+Le présent cahier des charges sert de référence pour les développements, les tests d'acceptation et la validation des évolutions. Toute modification substantielle d'une décision validée doit être soumise au Product Owner avant sa mise en œuvre.
+
+
