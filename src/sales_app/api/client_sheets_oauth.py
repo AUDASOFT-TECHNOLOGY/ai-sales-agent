@@ -120,8 +120,6 @@ def create_client_sheets_oauth_router(
         # No request body is read: the link was saved with the source; there is nothing to type.
         if not access.configured():
             raise HTTPException(503, "Google Sheets is not available yet")
-        if not saved_link(client.client_id):
-            raise HTTPException(409, "save the link of your Google Sheet first")
         return StartResponse(authorize_url=connection.start(client.client_id))
 
     @router.get("/callback")

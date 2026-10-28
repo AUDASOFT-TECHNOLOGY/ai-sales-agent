@@ -31,16 +31,14 @@ from sales_core.approval import ApprovalMode
 from sales_core.contracts import ActionStatus, Channel, ContactInfo, Direction, ProspectStatus
 from sales_integrations.telegram import TelegramAccountChannel, TelegramAccountInbox
 
-COLUMN = "telegram_consent"
 ACCOUNT_ID = "900001"
 LINA, OMAR, STRANGER = "5001", "5002", "6666"
 
 
-def person(pid, phone, *, consent="yes", account=None):
+def person(pid, phone, *, account=None):
     return prospect(
         pid,
         contact=ContactInfo(phone=phone, telegram_chat_id=account),
-        attributes={COLUMN: consent} if consent else {},
         display_name=pid.title(),
     )
 
@@ -57,7 +55,7 @@ class Room:
             prospects=list(prospects),
             mode=ApprovalMode.AUTONOMOUS,
             brain=brain or ScriptedBrain(),
-            telegram_consent_attribute=COLUMN,
+            telegram_first_contact=True,
         )
         limits = SendLimits(InMemorySendCapStore(), InMemorySendCounter(), self.h.clock)
         guard = limits.fixed_guard("client-a", "telegram_new", daily)
@@ -122,8 +120,8 @@ class TestWritingFirst:
         assert len(room.sent_to(LINA)) == 1
         assert room.h.prospect("lina").status is ProspectStatus.ACTIVE
 
-    def test_an_unmarked_prospect_is_never_looked_up_nor_written_to(self, room_of):
-        room = room_of(person("omar", "+21620000002", consent=None))
+    def test_a_prospect_without_a_number_is_never_looked_up_nor_written_to(self, room_of):
+        room = room_of(person("omar", None))
         start(room)
         room.poll()
         room.cycle()
@@ -171,7 +169,7 @@ class TestReading:
     def test_a_prospect_who_wrote_first_is_linked_stored_and_answered_without_any_mark(
         self, room_of
     ):
-        room = room_of(person("omar", "+21620000002", consent=None))
+        room = room_of(person("omar", "+21620000002"))
         start(room)
         room.account.receive(OMAR, "Hello, I saw your offer", message_id=10, phone="+21620000002")
         report = room.poll()
@@ -183,7 +181,7 @@ class TestReading:
         assert len(room.sent_to(OMAR)) == 1  # the answer; it took no place in the daily maximum
 
     def test_an_answer_does_not_use_the_new_conversation_maximum(self, room_of):
-        room = room_of(person("omar", "+21620000002", consent=None), daily=1)
+        room = room_of(person("omar", "+21620000002"), daily=1)
         start(room)
         room.account.receive(OMAR, "Hi", message_id=11, phone="+21620000002")
         room.poll()

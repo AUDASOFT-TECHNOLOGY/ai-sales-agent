@@ -16,9 +16,8 @@ verified by Telegram and neither needing the client to type anything by hand:
 
 **The client's own account** (`mode: account`, `sales_app.telegram_account`) is the other way, and the
 only one that can open a conversation: the client signs in with Telegram and Revansa writes from that
-account, never to someone the client did not mark as expecting it (`consent_field`), never more than
-`max_new_conversations_per_day` new conversations a day, and never again once Telegram limits the
-account. Replies are read by polling the account (no webhook), for the client's prospects only.
+account, to the prospects that have a phone number, never more than `max_new_conversations_per_day`
+(5 at most) new conversations a day, and never again once Telegram limits the account. Replies are read by polling the account (no webhook), for the client's prospects only.
 
 Which clients may use the channel at all is the Admin's decision (`sales_app.config.channel_access`).
 """

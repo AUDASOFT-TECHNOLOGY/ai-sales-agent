@@ -15,7 +15,7 @@ Errors carry no address and no text: only fixed sentences and the error's type.
 **A mailbox that is not Revansa's alone.** A poller that reads someone's own mailbox says so
 (`filters_by_sender`) and is given the Engine's answer to "is this sender a prospect?" (`fetch(...,
 accept=)`), so that the rest of the mailbox is never handed over, nor stored, nor written to the
-audit trail. A poller that must also find its people before writing to them (`link_consented`:
+audit trail. A poller that must also find its people before writing to them (`link_by_phone`:
 Telegram from the client's own account) is asked to, once per poll, before it reads. A poller that
 needs a place to keep its position says so too (`needs_cursor`) and is given one before it reads
 (`use_cursor`, by the scheduler). A poller that says none of this is read exactly as it always was.
@@ -81,7 +81,7 @@ def poll_inbox(engine: Engine, poller: InboxPoller, *, limit: int = DEFAULT_BATC
     others go on."""
     errors: list[str] = []
     received = 0
-    link = getattr(poller, "link_consented", None)
+    link = getattr(poller, "link_by_phone", None)
     if link is not None:  # a channel that must find its people before writing first (Telegram)
         try:
             link(engine)

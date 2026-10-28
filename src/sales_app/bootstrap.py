@@ -35,6 +35,7 @@ from sales_app.daily_report import DailyReportService
 from sales_app.email_activation import EmailActivationService
 from sales_app.email_platform import AuthLedger
 from sales_app.errors import ConfigurationError
+from sales_app.connection_hints import ConnectionHints
 from sales_app.gmail_wiring import GmailMailService
 from sales_app.hubspot_wiring import HubSpotAccessService
 from sales_app.hubspot_wiring import install as install_hubspot_access
@@ -169,6 +170,9 @@ class Application:
     # Telegram from a client's own account: the platform's Telegram application, the clients'
     # sessions in the secret store, and the channel/inbox of a client in `account` mode.
     telegram_accounts: TelegramAccountService | None = None
+    # What a client says about the accounts it wants to connect, before Revansa can connect them. See
+    # `sales_app.connection_hints`.
+    connection_hints: ConnectionHints | None = None
     # Google Sheets by the client's own Google authorisation (OAuth), same platform application as
     # Gmail, grants in the client's scope of the secret store. See `sales_app.sheets_wiring`.
     sheets_access: SheetsAccessService | None = None
@@ -451,6 +455,7 @@ def _assemble(
         whatsapp=whatsapp,
         telegram=telegram_accounts,
     )
+    connection_hints = ConnectionHints(secrets)
     product_resources, knowledge = _resources(account_stores, clock)
     builders = builders or default_builders(
         settings,
@@ -574,6 +579,7 @@ def _assemble(
         clock=clock,
         credentials=credentials,
         runtime_manager=manager,
+        connection_hints=connection_hints,
         llm_providers=tuple(sorted(builders.llms)),
         provider_registry=default_registry(),
         account_stores=account_stores,

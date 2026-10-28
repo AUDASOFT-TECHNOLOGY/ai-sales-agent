@@ -170,8 +170,8 @@ class TelegramAccountChannel:
     """Implements `sales_core.ports.MessagingChannel` through the client's own Telegram account.
 
     The recipient is the person's account id, which the Engine holds as `telegram_chat_id`: the
-    account is linked to a prospect only when the person wrote first or the client recorded that
-    they expect the contact (`sales_core.safety.has_stated_consent`). Failures follow the other
+    account is linked to a prospect when the person wrote first or, from the phone number the client
+    holds for them, when Telegram says who holds it (`Engine.link_telegram_by_phone`). Failures follow the other
     channels: certainly not sent (transient), refused for this person (permanent), or unknown (an
     exception: the Engine leaves the action in `SENDING` for a human).
 
@@ -338,13 +338,13 @@ class TelegramAccountInbox:
     def use_cursor(self, store: PositionStore | None) -> None:
         self._cursors = store
 
-    def link_consented(self, engine) -> int:
-        """Ask Telegram for the account of each prospect the client says expects the contact, so a
-        first message can be sent to them. A few per poll (see `Engine.link_consented_telegram`)."""
+    def link_by_phone(self, engine) -> int:
+        """Ask Telegram for the account of each prospect that has a phone number, so a first message can
+        be sent to them. A few per poll (see `Engine.link_telegram_by_phone`)."""
         if self.link_limit < 1:
             return 0
         try:
-            return engine.link_consented_telegram(
+            return engine.link_telegram_by_phone(
                 lambda phone, name: self.client.resolve_phone(phone, name), limit=self.link_limit
             )
         except AccountFailure as failure:

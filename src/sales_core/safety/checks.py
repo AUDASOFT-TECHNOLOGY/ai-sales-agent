@@ -73,19 +73,6 @@ def awaits_opt_in(prospect: Prospect, channel: Channel) -> bool:
     return channel in OPT_IN_CHANNELS and recipient_for(prospect, channel) is None
 
 
-# What a client writes in its consent column to say "this person expects to hear from us here".
-# Anything else (empty, "no", a date, a question mark) is not consent: any doubt blocks.
-_CONSENT_WORDS = frozenset({"yes", "y", "true", "1", "ok", "oui", "o", "نعم", "x", "✓"})
-
-
-def has_stated_consent(prospect: Prospect, attribute: str | None) -> bool:
-    """True if the client recorded, in the source column `attribute`, that this person expects to be
-    contacted. It is the client's own statement, not something Revansa can verify."""
-    if not attribute:
-        return False
-    return (prospect.attributes.get(attribute) or "").strip().casefold() in _CONSENT_WORDS
-
-
 def has_initiated(messages: Iterable[Message], channel: Channel, address: str) -> bool:
     """True if this person wrote to us first, from `address`, on `channel`.
 

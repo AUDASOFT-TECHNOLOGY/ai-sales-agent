@@ -34,7 +34,6 @@ from sales_app.bootstrap import Application
 from sales_app.channel_status import (
     WHATSAPP,
     allowed_channels,
-    channel_provider_of,
     channel_status,
 )
 from sales_app.client_profiles import ClientProfile
@@ -128,8 +127,6 @@ def create_client_whatsapp_router(application: Application) -> APIRouter | None:
         found = client_wiring_and_document(application, client.client_id)
         if found is None:
             return 404, "no such client"
-        if channel_provider_of(found[0], found[1]) != WHATSAPP:
-            return 409, "your channel is not WhatsApp"
         if not client.whatsapp_number:
             return 409, "enter your WhatsApp number first"
         return None

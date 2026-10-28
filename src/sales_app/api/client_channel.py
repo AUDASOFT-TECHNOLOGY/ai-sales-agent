@@ -40,7 +40,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from sales_app.api.admin_clients import client_wiring_and_document, publish_client_settings
 from sales_app.api.client import make_current_client_dependency
@@ -71,7 +71,6 @@ from sales_app.config.telegram_settings import (
     ACCOUNT_MODE,
     BOT_MODE,
     TelegramChannelSettings,
-    account_mode_of,
 )
 from sales_app.config_store import ConfigStoreError
 from sales_app.connection_tests import BotProbeFailure
@@ -86,7 +85,6 @@ from sales_app.telegram_account import AccountLoginError
 from sales_app.telegram_connection import BotProbeFactory
 from sales_app.wiring.providers import ProviderKind
 from sales_app.wiring.providers import telegram as telegram_provider
-from sales_core.safety import has_stated_consent
 from sales_integrations.telegram import invitation_link, make_invitation
 
 # What this route may change in a stored settings document: the channel and its business wording.
@@ -126,11 +124,10 @@ class TelegramSettingsChanges(BaseModel):
     contact_button: str | None = None
     not_found_text: str | None = None
     # Which Telegram: true, the client's own account (it signs in with Telegram); false, back to the
-    # bot the platform sets up. The column that marks who expects the contact, and the most new
-    # conversations a day, are the client's own business choices.
+    # bot the platform sets up. The most new conversations a day is the client's own choice, up to the
+    # maximum Telegram tolerates (5).
     use_account: bool | None = None
-    consent_field: str | None = None
-    max_new_conversations_per_day: int | None = None
+    max_new_conversations_per_day: Annotated[int, Field(ge=1, le=5)] | None = None
 
 
 class UpdateChannelRequest(BaseModel):
@@ -205,7 +202,6 @@ class TelegramSettingsResponse(BaseModel):
     contact_prompt: str
     contact_button: str
     not_found_text: str
-    consent_field: str
     max_new_conversations_per_day: int
 
 
@@ -244,21 +240,6 @@ class TelegramDisconnectResponse(BaseModel):
     ended_at_telegram: (
         bool  # False: Telegram could not be told; end it from Telegram's Devices list
     )
-
-
-class WaitingResponse(BaseModel):
-    prospect_id: str
-    display_name: str
-    phone: str | None = None
-    # `needs_consent`: the client has not marked this person as expecting the contact; `needs_phone`:
-    # marked, but there is no number to find them by; `looking_up`: marked, being found on Telegram.
-    reason: Literal["needs_consent", "needs_phone", "looking_up"]
-
-
-class WaitingListResponse(BaseModel):
-    consent_field: str
-    waiting: int
-    people: list[WaitingResponse]
 
 
 class ChannelResponse(BaseModel):
@@ -615,16 +596,9 @@ def create_client_channel_router(
         return service
 
     def account_ready(client_id: str):
-        """The account service, for a client whose channel is Telegram on its own account and may
-        be. Said as plainly for each way it is not."""
-        try:
-            raw, document, _ = current_state(client_id)
-        except ConfigStoreError:
-            raise HTTPException(503, "settings are temporarily unavailable") from None
-        if channel_provider_of(raw, document) != TELEGRAM or not account_mode_of(
-            channel_settings_of(document)
-        ):
-            raise HTTPException(409, "your channel is not Telegram on your own account")
+        """The account service, for a client the Admin allows Telegram to."""
+        # Signing in does not depend on today's channel: the session is kept, and choosing Telegram
+        # on its own account later uses it.
         if TELEGRAM not in allowed_channels(application, client_id):
             raise HTTPException(403, "this channel is not available for your account")
         return account_service()
@@ -736,49 +710,6 @@ def create_client_channel_router(
             raise _login_http_error(error) from None
         refresh(client.client_id)
         return TelegramDisconnectResponse(ended_at_telegram=ended)
-
-    @router.get("/channel/telegram/waiting", response_model=WaitingListResponse)
-    def get_telegram_waiting(
-        limit: int = Query(200, ge=1, le=1000),
-        client: ClientProfile = Depends(get_current_client),
-    ) -> WaitingListResponse:
-        """The prospects Revansa does not write to yet because the client has not said they expect
-        the contact (or it has no number to find them by). They wait: none is lost or paused."""
-        client_id = client.client_id
-        account_ready(client_id)
-        runtime = application.registry.get(client_id)
-        if runtime is None:
-            raise HTTPException(409, "your agent is not ready yet")
-        try:
-            _, document, _ = current_state(client_id)
-            settings = TelegramChannelSettings.model_validate(channel_settings_of(document))
-            with runtime.lease() as engine:
-                waiting = engine.prospects_awaiting_opt_in()
-        except ClientNotReadyError:
-            raise HTTPException(409, "your agent is not ready yet") from None
-        except ConfigStoreError:
-            raise HTTPException(503, "settings are temporarily unavailable") from None
-        except Exception:  # noqa: BLE001 - the source answers or it does not; never its words
-            raise HTTPException(502, "your prospects could not be read just now") from None
-        people = []
-        for prospect in waiting[:limit]:
-            if not has_stated_consent(prospect, settings.consent_field):
-                reason = "needs_consent"
-            elif not (prospect.contact.phone or "").strip():
-                reason = "needs_phone"
-            else:
-                reason = "looking_up"
-            people.append(
-                WaitingResponse(
-                    prospect_id=prospect.prospect_id,
-                    display_name=prospect.display_name,
-                    phone=prospect.contact.phone,
-                    reason=reason,  # type: ignore[arg-type]
-                )
-            )
-        return WaitingListResponse(
-            consent_field=settings.consent_field, waiting=len(waiting), people=people
-        )
 
     # ---- Telegram invitations -------------------------------------------------------------
 

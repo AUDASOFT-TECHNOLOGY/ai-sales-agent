@@ -272,16 +272,16 @@ class TestReading:
         with pytest.raises(InboxNotReadyError):
             reader.fetch(10, accept)
 
-    def test_consent_lookups_are_made_through_the_account(self):
+    def test_phone_lookups_are_made_through_the_account(self):
         class Engine:
-            def link_consented_telegram(self, resolve, *, limit):
+            def link_telegram_by_phone(self, resolve, *, limit):
                 self.answer, self.limit = resolve("+15550000001", "Lina"), limit
                 return 1
 
         account = FakeAccountClient(people={"+15550000001": "333"})
         reader, _ = inbox(account, MemoryPositions(), link_limit=3)
         engine = Engine()
-        assert reader.link_consented(engine) == 1
+        assert reader.link_by_phone(engine) == 1
         assert engine.answer == "333" and engine.limit == 3 and account.lookups == ["+15550000001"]
         idle, _ = inbox(account, MemoryPositions())  # no lookups configured
-        assert idle.link_consented(engine) == 0
+        assert idle.link_by_phone(engine) == 0

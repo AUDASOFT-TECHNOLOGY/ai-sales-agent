@@ -101,17 +101,19 @@ class TestChoosingTheAccount:
     ):
         body = on_account.get(CHANNEL).json()
         assert body["telegram"]["mode"] == "account"
-        assert body["telegram"]["consent_field"] == "telegram_consent"
-        assert body["telegram"]["max_new_conversations_per_day"] == 10
-
-    def test_the_client_can_state_which_column_marks_who_expects_the_contact(self, on_account):
-        body = choose(
-            on_account, telegram={"consent_field": "opt in", "max_new_conversations_per_day": 5}
-        ).json()
-        assert body["telegram"]["consent_field"] == "opt in"
+        assert "consent_field" not in body["telegram"]  # nobody has to be marked any more
         assert body["telegram"]["max_new_conversations_per_day"] == 5
 
-    def test_more_new_conversations_than_telegram_tolerates_is_refused(self, on_account):
+    def test_the_client_can_lower_the_new_conversations_a_day(self, on_account):
+        body = choose(on_account, telegram={"max_new_conversations_per_day": 3}).json()
+        assert body["telegram"]["max_new_conversations_per_day"] == 3
+
+    def test_the_consent_column_no_longer_exists(self, on_account):
+        assert choose(on_account, telegram={"consent_field": "opt in"}).status_code == 422
+        assert on_account.get(f"{CHANNEL}/telegram/waiting").status_code in (404, 405)
+
+    def test_more_than_five_new_conversations_a_day_is_refused(self, on_account):
+        assert choose(on_account, telegram={"max_new_conversations_per_day": 6}).status_code == 422
         assert (
             choose(on_account, telegram={"max_new_conversations_per_day": 500}).status_code == 422
         )
@@ -120,11 +122,13 @@ class TestChoosingTheAccount:
     def test_the_client_can_go_back_to_the_bot(self, on_account):
         body = choose(on_account, telegram={"use_account": False}).json()
         assert body["telegram"]["mode"] == "bot"
-        assert on_account.get(ACCOUNT).status_code == 409  # no account routes on a bot
+        # The sign-in does not depend on today's channel: it is made from the Connections screen.
+        assert on_account.get(ACCOUNT).status_code == 200
 
-    def test_the_account_routes_need_that_choice_and_a_session(self, world, alpha, admin):
+    def test_the_account_routes_need_telegram_to_be_open_and_a_session(self, world, alpha, admin):
+        assert alpha.get(ACCOUNT).status_code == 403  # Telegram is not open to this client yet
         allow_telegram(admin)
-        assert alpha.get(ACCOUNT).status_code == 409  # still on WhatsApp
+        assert alpha.get(ACCOUNT).status_code == 200  # open: whatever the channel is today
         assert world.anonymous().get(ACCOUNT).status_code == 401
         for method, path in (
             ("post", f"{ACCOUNT}/start"),
@@ -256,10 +260,10 @@ class TestSigningInThroughTheApi:
 
     def test_the_daily_figures_count_new_conversations(self, world, on_account):
         sign_in(on_account)
-        guard = world.application.send_limits.fixed_guard("alpha", "telegram_new", 10)
+        guard = world.application.send_limits.fixed_guard("alpha", "telegram_new", 5)
         guard.reserve()
         body = on_account.get(ACCOUNT).json()
-        assert body["new_today"] == 1 and body["daily_limit"] == 10
+        assert body["new_today"] == 1 and body["daily_limit"] == 5
 
     def test_one_client_never_reaches_another_clients_account(self, world, on_account, admin):
         beta = world.browser("beta")

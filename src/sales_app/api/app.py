@@ -45,6 +45,7 @@ from sales_app.api.client_conversation_control import create_client_conversation
 from sales_app.api.client_followup import create_client_followup_router
 from sales_app.api.client_gmail import create_application_gmail_router
 from sales_app.api.client_hubspot_oauth import create_client_hubspot_oauth_router
+from sales_app.api.client_connections import create_client_connections_router
 from sales_app.api.client_lanes import create_client_lanes_router
 from sales_app.api.client_mailbox import create_client_mailbox_router
 from sales_app.api.client_notifications import create_client_notifications_router
@@ -181,6 +182,9 @@ def create_app(
     gmail_router = create_application_gmail_router(application)
     if gmail_router is not None:
         app.include_router(gmail_router)
+    connections_router = create_client_connections_router(application)
+    if connections_router is not None:
+        app.include_router(connections_router)
     app.include_router(create_client_lanes_router(application))
     app.include_router(create_client_reporting_router(application))
 

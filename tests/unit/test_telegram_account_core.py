@@ -21,31 +21,23 @@ from sales_core.contracts import (
     ProspectId,
     ProspectStatus,
 )
-from sales_core.safety import BlockReason, check_contactable, has_stated_consent
+from sales_core.safety import BlockReason, check_contactable
 
 ACCOUNT = "777001"
-COLUMN = "telegram_consent"
 
 
-def person(pid="p1", *, consent="yes", account=None, phone="+15550000001", **overrides):
-    attributes = {COLUMN: consent} if consent is not None else {}
+def person(pid="p1", *, account=None, phone="+15550000001", **overrides):
     return prospect(
         pid,
-        **(
-            {
-                "contact": ContactInfo(phone=phone, telegram_chat_id=account),
-                "attributes": attributes,
-            }
-            | overrides
-        ),
+        **({"contact": ContactInfo(phone=phone, telegram_chat_id=account)} | overrides),
     )
 
 
-def harness(*prospects, consent_attribute=COLUMN, **kw):
+def harness(*prospects, first_contact=True, **kw):
     h = build(
         prospects=list(prospects),
         mode=ApprovalMode.AUTONOMOUS,
-        telegram_consent_attribute=consent_attribute,
+        telegram_first_contact=first_contact,
         **kw,
     )
     h.channel = type(h.channel)(h.repo, channel=Channel.TELEGRAM, clock=h.clock)
@@ -72,35 +64,15 @@ def wrote_first(h, pid, account=ACCOUNT):
     )
 
 
-class TestConsentWords:
-    def test_only_a_clear_yes_is_consent(self):
-        for word in ("yes", "YES", " oui ", "true", "1", "ok", "نعم"):
-            assert has_stated_consent(person(consent=word), COLUMN), word
-        for word in ("", "no", "non", "maybe", "0", "2024-05-01", "?"):
-            assert not has_stated_consent(person(consent=word), COLUMN), word
-
-    def test_no_column_no_consent(self):
-        assert not has_stated_consent(person(consent=None), COLUMN)
-        assert not has_stated_consent(person(consent="yes"), None)
-        assert not has_stated_consent(person(consent="yes"), "other_column")
-
-
 class TestFirstMessage:
-    def test_a_consenting_prospect_whose_account_is_known_is_written_to_first(self):
+    def test_a_prospect_whose_account_is_known_is_written_to_first(self):
         h = harness(person("p1", account=ACCOUNT))
         h.engine.run_cycle()
         (sent,) = h.channel.sent
         assert sent.recipient == ACCOUNT and sent.first_contact is True
 
-    def test_without_consent_the_prospect_waits_even_with_an_account(self):
-        h = harness(person("p1", consent=None, account=ACCOUNT))
-        h.engine.run_cycle()
-        assert h.channel.attempts == ()
-        assert h.prospect("p1").status is not ProspectStatus.PAUSED
-        assert [p.prospect_id for p in h.engine.prospects_awaiting_opt_in()] == ["p1"]
-
     def test_a_client_that_did_not_choose_its_account_never_writes_first(self):
-        h = harness(person("p1", account=ACCOUNT), consent_attribute=None)
+        h = harness(person("p1", account=ACCOUNT), first_contact=False)
         h.engine.run_cycle()
         assert h.channel.attempts == ()
 
@@ -112,13 +84,13 @@ class TestFirstMessage:
         assert verdict.reason is BlockReason.NOT_LINKED
 
     def test_a_reply_to_someone_who_wrote_first_is_not_a_first_contact(self):
-        h = harness(person("p1", consent=None, account=ACCOUNT))
+        h = harness(person("p1", account=ACCOUNT))
         wrote_first(h, "p1")
         h.engine.run_cycle()
         (sent,) = h.channel.sent
         assert sent.first_contact is False
 
-    def test_consent_does_not_override_an_opt_out(self):
+    def test_writing_first_does_not_override_an_opt_out(self):
         h = harness(person("p1", account=ACCOUNT, status=ProspectStatus.OPTED_OUT))
         h.engine.run_cycle()
         assert h.channel.attempts == ()
@@ -132,18 +104,17 @@ class TestFindingTheAccount:
             asked.append((phone, name))
             return answers.get(phone)
 
-        return h.engine.link_consented_telegram(resolve, limit=limit), asked
+        return h.engine.link_telegram_by_phone(resolve, limit=limit), asked
 
-    def test_the_account_of_a_consenting_prospect_is_found_and_kept(self):
+    def test_the_account_of_a_prospect_is_found_and_kept(self):
         h = harness(person("p1"))
         linked, asked = self.lookups(h, {"+15550000001": ACCOUNT})
         assert linked == 1 and len(asked) == 1
         assert h.prospect("p1").contact.telegram_chat_id == ACCOUNT
         assert [e for e in h.events("prospect.linked")]
 
-    def test_only_consenting_active_prospects_with_a_number_are_looked_up(self):
+    def test_only_active_prospects_with_a_number_and_no_account_are_looked_up(self):
         h = harness(
-            person("a", consent=None),
             person("b", status=ProspectStatus.PAUSED),
             person("c", phone=None),
             person("d", account="999"),
@@ -173,7 +144,7 @@ class TestFindingTheAccount:
         assert linked == 0 and h.prospect("p2").contact.telegram_chat_id is None
 
     def test_nobody_is_looked_up_when_the_client_did_not_choose_its_account(self):
-        h = harness(person("p1"), consent_attribute=None)
+        h = harness(person("p1"), first_contact=False)
         _, asked = self.lookups(h, {"+15550000001": ACCOUNT})
         assert asked == []
 
@@ -185,7 +156,7 @@ class TestKnownSenders:
         assert not h.engine.knows_inbound_sender(Channel.TELEGRAM, "123")
 
     def test_an_unlinked_account_is_known_by_the_number_telegram_reports(self):
-        h = harness(person("p1", consent=None))
+        h = harness(person("p1"))
         assert h.engine.knows_inbound_sender(Channel.TELEGRAM, ACCOUNT, "+15550000001")
         assert not h.engine.knows_inbound_sender(Channel.TELEGRAM, ACCOUNT, "+15559999999")
         assert not h.engine.knows_inbound_sender(Channel.TELEGRAM, ACCOUNT)

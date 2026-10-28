@@ -72,6 +72,8 @@ class GmailContext:
     changed: Callable[[str], None] = lambda client_id: None
     # How reading the replies goes: ("not_started" | "ok" | "failing", the last read, ISO 8601).
     sync_of: Callable[[str], tuple[str, str | None]] = lambda client_id: ("not_started", None)
+    # The Gmail address the client said it wants to connect (suggested on Google's page), if any.
+    hint_of: Callable[[str], str | None] = lambda client_id: None
 
 
 class GmailStatusResponse(BaseModel):
@@ -152,7 +154,11 @@ def create_client_gmail_router(
         refusal = context.start_refusal(client.client_id)
         if refusal is not None:
             raise HTTPException(refusal[0], refusal[1])
-        return StartResponse(authorize_url=connection.start(client.client_id))
+        return StartResponse(
+            authorize_url=connection.start(
+                client.client_id, login_hint=context.hint_of(client.client_id)
+            )
+        )
 
     @router.get("/callback")
     async def callback(
@@ -235,7 +241,10 @@ def application_gmail_context(
         if found is None:
             return 404, "no such client"
         if channel_provider_of(found[0], found[1]) != EMAIL:
-            return 409, "your channel is not email"
+            # The client connects its Gmail from the Connections screen whatever its channel is
+            # today: the grant is kept, and choosing Email later uses it. The mailbox rules below
+            # concern an account that is on Email now.
+            return None
         if platform_mailbox_assigned(client_id):
             return 409, "a Revansa mailbox is already assigned to your account"
         mode = email_mode_of(channel_settings_of(found[1]))
@@ -264,12 +273,20 @@ def application_gmail_context(
             return "failing", last
         return ("ok", last) if last else ("not_started", None)
 
+    def hint_of(client_id: str) -> str | None:
+        hints = getattr(application, "connection_hints", None)
+        try:
+            return hints.get(client_id, "gmail") if hints is not None else None
+        except Exception:  # noqa: BLE001 - a hint that cannot be read is simply not suggested
+            return None
+
     return GmailContext(
         sync_of=sync_of,
         google_configured=google_configured,
         start_refusal=start_refusal,
         send_cap_configured=cap_configured,
         changed=changed,
+        hint_of=hint_of,
     )
 
 

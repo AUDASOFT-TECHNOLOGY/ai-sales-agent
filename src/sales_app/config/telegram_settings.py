@@ -13,7 +13,14 @@ words are the client's (its customers' language), with a neutral English default
 import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 _TOKEN = re.compile(r"^(\d{5,20}):[A-Za-z0-9_-]{30,64}$")
 
@@ -32,29 +39,24 @@ Line = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max
 
 BOT_MODE = "bot"
 ACCOUNT_MODE = "account"
-DEFAULT_CONSENT_FIELD = "telegram_consent"
-DEFAULT_MAX_NEW_PER_DAY = 10
-MAX_NEW_PER_DAY = 30  # Telegram limits accounts that write to many people who did not expect it
+# Telegram forbids messages nobody asked for and limits the accounts that send them: whatever the
+# client wants, an account starts at most this many conversations a day.
+MAX_NEW_PER_DAY = 5
+DEFAULT_MAX_NEW_PER_DAY = MAX_NEW_PER_DAY
 
 
 class TelegramChannelSettings(BaseModel):
     """One client's Telegram: its own bot (the default), or its own account.
 
     In `account` mode the client writes from its own Telegram account (it signs in with Telegram, the
-    platform never sees its password). First messages go only to people the client marked, in the
-    column `consent_field` of its prospects, as expecting the contact, and at most
-    `max_new_conversations_per_day` of them a day; replies and follow-ups on a conversation the
-    person started or accepted are not rationed. The bot's sentences are used in `bot` mode only."""
+    platform never sees its password). First messages go to the prospects that have a phone number,
+    at most `max_new_conversations_per_day` (never more than 5) of them a day; replies and follow-ups
+    on a conversation the person started or accepted are not rationed. The bot's sentences are used in
+    `bot` mode only."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     mode: Literal["bot", "account"] = BOT_MODE
-    consent_field: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=64, pattern=r"^[\w .-]+$"
-        ),
-    ] = DEFAULT_CONSENT_FIELD
     max_new_conversations_per_day: Annotated[int, Field(ge=1, le=MAX_NEW_PER_DAY)] = (
         DEFAULT_MAX_NEW_PER_DAY
     )
@@ -64,6 +66,19 @@ class TelegramChannelSettings(BaseModel):
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)
     ] = DEFAULT_CONTACT_BUTTON
     not_found_text: Line = DEFAULT_NOT_FOUND
+
+    @model_validator(mode="before")
+    @classmethod
+    def _settings_saved_before(cls, data: object) -> object:
+        """Settings saved when a consent column existed and the daily limit went up to 30 still read:
+        the column is gone and the limit is brought down to today's maximum."""
+        if not isinstance(data, dict):
+            return data
+        data = {k: v for k, v in data.items() if k != "consent_field"}
+        raw = data.get("max_new_conversations_per_day")
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw > MAX_NEW_PER_DAY:
+            data["max_new_conversations_per_day"] = MAX_NEW_PER_DAY
+        return data
 
     @field_validator("contact_prompt", "contact_button", "not_found_text")
     @classmethod

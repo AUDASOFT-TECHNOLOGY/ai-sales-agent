@@ -36,9 +36,9 @@ no throttling designed to dodge detection.
 | Need | How it works |
 |---|---|
 | **Use the client's own identity** | The client signs in with Telegram itself (phone number, the code Telegram sends to its app, its two-step password if any) from its channel page. Revansa keeps the resulting **session** only. |
-| **Write first, compliantly** | Only to a prospect the client marked, in its own source column (`consent_field`, default `telegram_consent`, value "yes"/"oui"/…), as expecting the contact, or who wrote first. Anyone else *waits*: not failed, not paused, no quota spent. The mark is the client's statement; Revansa cannot verify it. |
+| **Write first** | To any prospect that has a phone number. There is no consent column and no waiting list any more (decision of 2026-10-28: the column had no effect on how Telegram treats a message). What keeps the account safe is the daily maximum below, strongly personalised messages (an instruction the Brain receives on this channel, `sales_brain_kit/consultative/prompt.py`), `STOP`, and the automatic stop on `PEER_FLOOD`. The client is told, on the Connections screen and in its rules, that Telegram forbids unsolicited messages. |
 | **Find the person** | By the phone number the client holds for them: Telegram is asked who holds it (this adds the number to the client's Telegram contacts, as writing to a number requires). A number Telegram does not know is not asked again for a day. Nothing is guessed from a name. |
-| **Rationing** | At most `max_new_conversations_per_day` (1 to 30, default 10, per client, UTC day, counted in the database) **first** messages. A reply or a follow-up on a conversation the person started is not rationed. |
+| **Rationing** | At most `max_new_conversations_per_day` (1 to 5, default 5, never above 5, per client, UTC day, counted in the database) **first** messages. A reply or a follow-up on a conversation the person started is not rationed. |
 | **Receive replies** | The inbox polls the account every two minutes and reads **only** conversations with the client's own prospects: other chats (family, friends, groups, channels, bots) are never opened, stored or logged. Nothing written before the connection is read. The position is kept per account in the database, moves only past messages the Engine stored, and survives restarts. |
 | **Attach replies to prospects** | A message is `<account id>:<message id>`. The sender is matched by the account id linked to the prospect, else by the phone number Telegram itself reports for the sender. A person who is not a prospect is never engaged on this channel (unlike the bot, there is no "spontaneous conversation" for a personal account). |
 | **Conversations, follow-ups** | Unchanged Engine behaviour (Brain, approval, cadence): a follow-up goes to the same account. |
@@ -66,19 +66,18 @@ no throttling designed to dodge detection.
 
 ## 4. Limits, stated plainly
 
-- **No cold outreach.** Not built, not offered, whatever the client wants. A prospect nobody marked as
-  expecting the contact and who never wrote waits forever; the alternative that always works is the bot
-  with a personal invitation link sent through a channel the client already owns.
-- **The consent mark is the client's word.** Revansa records it only as the presence of "yes" in a
-  column; it cannot prove the person agreed. The client is told so in its own interface.
+- **Messages nobody asked for are against Telegram's rules.** Revansa does not hide that: the client is
+  warned in its own interface, the agent starts at most **5** conversations a day, writes each first
+  message specially for the person, and stops every first message when Telegram flags the account. The
+  risk (a limited or lost personal account, and the shared `api_id` cut for every client) is the
+  client's and the operator's, not removed by any of this.
 - **A limited or banned account is possible**, at any time, even when every rule above is followed:
   Telegram decides, and its thresholds are not published. The rationing lowers the risk; it does not
   remove it. The client uses a personal account at its own risk and Revansa says so.
 - **A shared `api_id`.** All clients use the platform's application. If Telegram restricts it, every
   client on this mode stops. The operator registers it with its own account (my.telegram.org).
 - **Only text is sent and read as text.** Files that arrive are recorded as a kind, never downloaded.
-- **A prospect without a phone number** cannot be found, whatever their mark says: the client sees them
-  as "marked, but no phone number".
+- **A prospect without a phone number** cannot be found and is not written to first.
 - **A person whose number Telegram hides** from Revansa's account cannot be found by number; they are
   matched once they write first and Telegram shows their number or they were already linked.
 - **Not validated against the real service.** The MTProto client (`telethon_client.py`) was written from
@@ -104,8 +103,8 @@ no throttling designed to dodge detection.
    there). Without it the channel says "Revansa is setting this up" and sends no first message.
 5. Allow the Telegram channel to the client (**Settings → Channels** or the client's channels).
    `SALES_AGENT_PUBLIC_BASE_URL` is **not** needed for this mode (no webhook), only for the bot mode.
-6. The client then, from its channel page: chooses "Use my Telegram account", signs in, adds the
-   consent column to its prospects (the page names it) and starts the agent.
+6. The client then, from its channel page: chooses "Use my Telegram account", signs in and starts
+   the agent.
 7. Revansa runs one worker (as for Gmail): do not start `uvicorn --workers N`.
 
 Per client, the Admin can see where the account stands (connected, to reconnect, limited), disconnect
@@ -117,7 +116,7 @@ it, and lift a Telegram limit once @SpamBot says the account is free:
 1. Store `telegram.api_id`/`telegram.api_hash`; the platform status must say `configured`.
 2. Choose the account mode as a test client, sign in (code, then password if the account has one). The
    state must read "Connected"; the account must appear in Telegram's Devices list as "Revansa".
-3. Put a prospect whose phone is the second account's, with `telegram_consent` = `yes`, start the agent in
+3. Put a prospect whose phone is the second account's, start the agent in
    approval mode: the second account must be found, a first message proposed; approve it: it must arrive.
 4. Reply from the second account: the reply must be stored on that prospect and a answer proposed. Reply
    `STOP`: nothing more must be sent.

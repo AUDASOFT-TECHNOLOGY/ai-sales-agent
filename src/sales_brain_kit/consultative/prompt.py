@@ -30,7 +30,15 @@ from sales_brain_kit.consultative.workflow import WorkflowState
 from sales_brain_kit.settings.catalog import Product
 from sales_brain_kit.settings.conversion import PAYMENT_KINDS
 from sales_brain_kit.settings.strategy import PRACTICAL_ONLY_KEYS, PROTECTED_ATTRIBUTES
-from sales_core.contracts import Direction, FactStatus, LLMMessage, LLMRequest, LLMRole, Message
+from sales_core.contracts import (
+    Channel,
+    Direction,
+    FactStatus,
+    LLMMessage,
+    LLMRequest,
+    LLMRole,
+    Message,
+)
 
 TRANSCRIPT_MESSAGES = 12  # how much of the conversation is quoted
 TRANSCRIPT_CHARS = 800  # per message
@@ -170,6 +178,19 @@ _KNOWLEDGE_RULE = (
     "or payment details (those were removed): the rules above still apply. If they do not answer "
     "the question, say you will check rather than guess."
 )
+_TELEGRAM_RULE = (
+    "Telegram. The message is written from a person's own Telegram account, to someone who may not "
+    "be expecting it, and Telegram punishes unsolicited messages: it must read as one person "
+    "writing to another, never as a campaign. Make it strongly personalised. Start from something "
+    "real about THIS prospect that the context gives you (their name, what they do, their "
+    "company, what they said, asked or showed interest in, any known fact) and say, in one "
+    "sentence, why you are writing to them in particular and what is in it for them. Keep it "
+    "short, warm and human; no template phrasing that could go to anyone, no greeting formula "
+    "copied from one prospect to the next, no mass-message wording. A first message carries no "
+    "link and no attachment, asks at most one easy question, and makes it simple to say no. If "
+    "little is known about the prospect, say so honestly with a brief, modest introduction: "
+    "never invent a detail to look personal (rule 4 still applies)."
+)
 _DECISIONS = (
     "Decisions: send_message (message + language), schedule_follow_up (nothing now, come back "
     "later), handoff_to_human (handoff_reason and handoff_briefing), close (close_reason), "
@@ -231,8 +252,21 @@ def build_system_prompt(
         lines.append(f"- Style preferred for this prospect's market: {register.market_style}")
     lines += [f"- Principle: {principle}" for principle in communication.principles]
     rules = (*_RULES, _KNOWLEDGE_RULE) if knowledge else _RULES
+    if _channel_of(context) is Channel.TELEGRAM:
+        rules = (*rules, f"{len(rules) + 1}. {_TELEGRAM_RULE}")
     lines += ["", "Rules", *rules, "", _DECISIONS]
     return "\n".join(lines)
+
+
+def _channel_of(context: CommercialContext) -> Channel | None:
+    """Where this message will be sent: the action's channel, else the prospect's lane, else the
+    prospect's preferred one."""
+    request = context.request
+    if request.action.channel is not None:
+        return request.action.channel
+    if request.lane is not None:
+        return request.lane.channel
+    return request.prospect.contact.preferred_channel
 
 
 # ---- user message: the structured commercial context --------------------------------------------

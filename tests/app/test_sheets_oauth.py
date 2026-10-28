@@ -100,12 +100,13 @@ def test_requires_a_session():
     assert client.post(f"{BASE}/start").status_code == 401
 
 
-def test_the_link_is_saved_before_the_client_can_authorise():
+def test_the_client_can_authorise_before_a_spreadsheet_is_chosen():
+    # The Google account is connected from the Connections screen; the spreadsheet is chosen on a circuit.
     client, *_ = make(saved=lambda c: False)
     login(client)
     body = client.get(BASE).json()
     assert body["state"] == "not_connected" and body["spreadsheet_saved"] is False
-    assert client.post(f"{BASE}/start").status_code == 409
+    assert client.post(f"{BASE}/start").status_code == 200
 
 
 def test_journey_connect_status_disconnect():

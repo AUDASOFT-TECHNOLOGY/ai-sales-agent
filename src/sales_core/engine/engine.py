@@ -104,7 +104,6 @@ from sales_core.safety import (
     check_contactable,
     check_ready_to_send,
     has_initiated,
-    has_stated_consent,
     is_opt_out_message,
     recipient_for,
 )
@@ -362,10 +361,8 @@ class Engine:
 
     def _initiated(self, prospect: Prospect, channel: Channel) -> bool:
         """Whether the prospect may be written to on `channel`: they wrote first, or (Telegram
-        from the client's own account only) the client recorded that they expect to be contacted."""
-        if channel is Channel.TELEGRAM and has_stated_consent(
-            prospect, self._config.telegram_consent_attribute
-        ):
+        from the client's own account only) the client's account may start the conversation."""
+        if channel is Channel.TELEGRAM and self._config.telegram_first_contact:
             return True
         return self._wrote_first(prospect, channel)
 
@@ -1049,17 +1046,16 @@ class Engine:
         self._emit(ev.PROSPECT_LINKED, prospect_id=claimed.prospect_id, via=via)
         return linked
 
-    def link_consented_telegram(
+    def link_telegram_by_phone(
         self, resolve: Callable[[str, str], str | None], *, limit: int
     ) -> int:
-        """Find the Telegram account of prospects the client says expect to be contacted there.
+        """Find the Telegram account of the prospects the client's account may write to first.
 
         `resolve(phone, display_name)` asks Telegram who holds a number and returns the account id,
-        or None. Only prospects that are active, on a Telegram lane, carry the client's consent mark,
-        have a phone and no Telegram account yet are tried, at most `limit` per call, and one that
+        or None. Only prospects that are active, on a Telegram lane, have a phone and no Telegram account
+        yet are tried, at most `limit` per call, and one that
         could not be found is not tried again for a day. Returns how many were linked."""
-        attribute = self._config.telegram_consent_attribute
-        if not attribute or limit < 1:
+        if not self._config.telegram_first_contact or limit < 1:
             return 0
         with self._lock:
             now = self._clock.now()
@@ -1073,7 +1069,6 @@ class Engine:
                     or p.status not in _ACTIVE_STATUSES
                     or p.contact.telegram_chat_id
                     or not (p.contact.phone or "").strip()
-                    or not has_stated_consent(p, attribute)
                     or self._router.channel_for(p) is not Channel.TELEGRAM
                 ):
                     continue
@@ -1087,7 +1082,7 @@ class Engine:
                     self._emit(
                         ev.INBOUND_LINK_REFUSED,
                         prospect_id=p.prospect_id,
-                        via="consent",
+                        via="phone",
                         reason="no account",
                     )
                     continue
@@ -1095,7 +1090,7 @@ class Engine:
                     self._emit(
                         ev.INBOUND_LINK_REFUSED,
                         prospect_id=p.prospect_id,
-                        via="consent",
+                        via="phone",
                         reason="already linked",
                     )
                     continue
