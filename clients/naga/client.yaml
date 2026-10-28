@@ -2,7 +2,7 @@
 # the database (`sales-agent db clients`); this file is only the fallback until that is applied.
 client_id: naga
 display_name: Naga
-enabled: false
+enabled: true
 mode: approval
 timezone: Africa/Tunis
 daily_action_limit: 20
