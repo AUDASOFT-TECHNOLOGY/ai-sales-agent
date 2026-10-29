@@ -43,3 +43,6 @@ web/.verify-dev.log
 .claude/worktrees/
 .sales-agent.lock
 web/.vitest/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
