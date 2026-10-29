@@ -25,6 +25,7 @@ from sales_brain_kit.consultative.knowledge import KnowledgeSource, retrieve_kno
 from sales_brain_kit.consultative.output import parse_output
 from sales_brain_kit.consultative.prompt import build_llm_request
 from sales_brain_kit.consultative.validation import validate_output
+from sales_brain_kit.learning.reflector import Reflection
 from sales_brain_kit.settings import ConsultativeSalesSettings
 from sales_brain_kit.spec import parse_settings
 from sales_core.contracts import (
@@ -40,7 +41,7 @@ from sales_core.ports import LLMOutputError, LLMProvider
 DEFAULT_ATTEMPTS = 2  # the first answer, and one more after being told what was wrong
 
 
-class ConsultativeSalesBrain:
+class ConsultativeSalesBrain(Reflection):
     """Implements `sales_core.ports.Brain` for any client that supplies settings."""
 
     def __init__(

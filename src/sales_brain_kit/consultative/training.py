@@ -20,10 +20,14 @@ import unicodedata
 from collections.abc import Sequence
 
 from sales_brain_kit.consultative.context import CommercialContext
+from sales_brain_kit.learning.practices import BY_CODE, GENERAL
 from sales_brain_kit.settings.strategy import Playbook, TrainingLesson
+from sales_core.contracts import LearnedNote
 
 # How many lessons of each kind one message shows.
 SHOWN = {"example": 4, "objection": 3, "faq": 3}
+# How many things the agent learned from its results one message shows (the prompt has a budget).
+LEARNED_SHOWN = 4
 
 APPROACH: dict[str, str] = {
     "consultative": (
@@ -288,6 +292,56 @@ def lesson_line(lesson: TrainingLesson) -> str:
             )
 
 
+def chosen_notes(context: CommercialContext) -> list[LearnedNote]:
+    """What the agent learned from its results that helps this message: general notes, and the
+    thematic ones only when the prospect's message is about that theme. Only active notes, only
+    those of the catalog, only products in play, and never one that contradicts the client's own
+    settings. At most `LEARNED_SHOWN`."""
+    notes = context.request.learned_notes
+    if not notes:
+        return []
+    in_play = {p.id for p in context.selection.focus}
+    last = context.history.last_inbound
+    themes = _themes(_tokens(last.text)) if last is not None and last.text else set()
+    no_question = context.settings.communication.message.max_questions == 0
+    scored = []
+    for note in notes:
+        practice = BY_CODE.get(note.code)
+        if practice is None or note.state != "active":
+            continue
+        if note.product is not None and note.product not in in_play:
+            continue
+        if no_question and note.code == "single_question":
+            continue
+        if practice.theme == GENERAL:
+            score = 1
+        elif practice.theme in themes:
+            score = 2
+        else:
+            continue
+        scored.append((score, note.confirmed_by_client, note.cases, note.note_id, note))
+    scored.sort(key=lambda row: row[:4], reverse=True)
+    return [row[4] for row in scored[:LEARNED_SHOWN]]
+
+
+def learned_lines(context: CommercialContext) -> list[str]:
+    """The section of the system message about what the agent learned, after the client's own."""
+    chosen = chosen_notes(context)
+    if not chosen:
+        return []
+    return [
+        "",
+        (
+            "Learned from your own past conversations (a guide to follow when it fits; the "
+            "business's lessons and the Rules below always win)"
+        ),
+        *(
+            f"- {'Works well' if n.kind == 'do' else 'Avoid'}: {BY_CODE[n.code].wording}"
+            for n in chosen
+        ),
+    ]
+
+
 def training_lines(context: CommercialContext) -> list[str]:
     """The sections of the system message about the method and the lessons."""
     communication = context.settings.communication
@@ -299,4 +353,4 @@ def training_lines(context: CommercialContext) -> list[str]:
             "Taught by the business (shapes how you speak and sell; the Rules below always win)",
             *(lesson_line(l) for l in chosen),
         ]
-    return lines
+    return lines + learned_lines(context)

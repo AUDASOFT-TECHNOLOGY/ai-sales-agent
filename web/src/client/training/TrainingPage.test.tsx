@@ -72,7 +72,8 @@ describe("Train your agent", () => {
     stub();
     show();
     await screen.findByTestId("readiness-score");
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Overview", "My way of selling", "My answers", "Fix a message"]);
+    const sections = screen.getAllByRole("tab").filter((t) => !t.hasAttribute("data-mode"));
+    expect(sections.map((t) => t.textContent)).toEqual(["Overview", "My way of selling", "My answers", "Fix a message"]);
     expect(screen.queryByText(/Proof and material/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Material on your products/i)).not.toBeInTheDocument();
   });

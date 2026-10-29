@@ -28,6 +28,9 @@ sales_app ──► sales_core ◄── sales_integrations
   authorised by the client confirms a payment) are in
   [core-facts-and-payments.md](core-facts-and-payments.md). The Core names no payment provider.
 
+How the agent learns from the results of its conversations (neutral traces and results in the Core,
+what counts as good practice in the kit) is in [learning-from-results.md](learning-from-results.md).
+
 `tests/architecture/` enforces these rules.
 
 ## Layers and the future Web Admin

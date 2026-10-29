@@ -8,11 +8,13 @@
  *  that help each message, and its rules always win over a lesson. */
 
 import { useMemo, useState } from "react";
-import { Save } from "lucide-react";
+import { GraduationCap, Save, Sparkles } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { Button, LinkButton } from "../../ui/Button";
 import { FailureNote, Note, PageHead, type Failure } from "../kit";
 import { OfferProvider, useOffer } from "../offer/OfferLayout";
+import { LearnedCard } from "../learning/LearnedCard";
+import "../learning/learning.css";
 import { withLanguages } from "../prepare/agentModel";
 import { AnswersTab } from "./AnswersTab";
 import { FixTab } from "./FixTab";
@@ -42,6 +44,7 @@ function Training() {
   const [draft, setDraft] = useState(saved);
   const [base, setBase] = useState(saved);
   const [tab, setTab] = useState<TabId>("overview");
+  const [mode, setMode] = useState<"taught" | "auto">("taught");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -74,8 +77,37 @@ function Training() {
   const refused = draft.lessons.filter((l) => lessonProblem(l) !== null).length;
   const gone = orphans(draft.lessons, products).length;
 
+  const switcher = (
+    <div className="ln-mode" role="tablist" aria-label={t("rv.mode.label")}>
+      <button type="button" role="tab" aria-selected={mode === "taught"} data-mode="taught" className="ln-mode__item" onClick={() => setMode("taught")}>
+        <GraduationCap size={22} aria-hidden />
+        <span>
+          <strong>{t("rv.mode.taught")}</strong>
+          <small>{t("rv.mode.taught.sub")}</small>
+        </span>
+      </button>
+      <button type="button" role="tab" aria-selected={mode === "auto"} data-mode="auto" className="ln-mode__item" onClick={() => setMode("auto")}>
+        <Sparkles size={22} aria-hidden />
+        <span>
+          <strong>{t("rv.mode.auto")}</strong>
+          <small>{t("rv.mode.auto.sub")}</small>
+        </span>
+      </button>
+    </div>
+  );
+
+  if (mode === "auto") {
+    return (
+      <>
+        {switcher}
+        <LearnedCard />
+      </>
+    );
+  }
+
   return (
     <>
+      {switcher}
       <div className="rv-tabs" role="tablist" aria-label={t("rv.train.tabs")}>
         {TABS.map((id) => (
           <button key={id} type="button" role="tab" id={`train-tab-${id}`} aria-selected={tab === id} aria-controls="train-panel" className={tab === id ? "rv-tabs__item is-active" : "rv-tabs__item"} onClick={() => setTab(id)}>

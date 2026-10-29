@@ -2,6 +2,11 @@
  *  technical term. Keep `client.learn.fr.ts` in step. A point is named by the code the server sends. */
 
 export const enLearn = {
+  "rv.mode.label": "Choose",
+  "rv.mode.taught": "You teach it",
+  "rv.mode.taught.sub": "Your method, answers, red lines",
+  "rv.mode.auto": "It learns by itself",
+  "rv.mode.auto.sub": "From its own conversations",
   "rv.learn.title": "What your agent learned",
   "rv.learn.studied": "conversations studied",
   "rv.learn.empty": "{left} more finished conversation(s) and it starts learning, by itself.",

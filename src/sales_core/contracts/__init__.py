@@ -38,6 +38,7 @@ from sales_core.contracts.ids import (
     ProspectId,
 )
 from sales_core.contracts.lane import ALL_PRODUCTS, LaneRoute
+from sales_core.contracts.learning import Evidence, LearnedNote, NoteKind, NoteState
 from sales_core.contracts.llm import LLMMessage, LLMRequest, LLMResponse
 from sales_core.contracts.messaging import InboundEvent, InboundMessage, OutboundMessage, SendResult
 from sales_core.contracts.payment import (
@@ -94,6 +95,7 @@ __all__ = [
     "ConversationId",
     "DecisionType",
     "Direction",
+    "Evidence",
     "Fact",
     "FactEvidence",
     "FactProposal",
@@ -107,9 +109,12 @@ __all__ = [
     "LLMRole",
     "LaneId",
     "LaneRoute",
+    "LearnedNote",
     "Message",
     "MessageDraft",
     "MessageId",
+    "NoteKind",
+    "NoteState",
     "OutboundMessage",
     "PaymentCase",
     "PaymentConfirmation",

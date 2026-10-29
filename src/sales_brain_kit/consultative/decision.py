@@ -8,6 +8,7 @@ debugging; the Core stores or ignores them and never acts on them.
 from sales_brain_kit.consultative.context import CommercialContext
 from sales_brain_kit.consultative.language import localize
 from sales_brain_kit.consultative.payment import RECEIPT_MEDIA
+from sales_brain_kit.consultative.training import chosen_notes
 from sales_brain_kit.consultative.validation import ValidatedOutput
 from sales_brain_kit.settings.conversion import PAYMENT_KINDS
 from sales_core.contracts import (
@@ -139,6 +140,9 @@ def _metadata(validated: ValidatedOutput, context: CommercialContext) -> dict[st
         "discovery_key": validated.discovery_key,
         "intent": analysis.intent,
         "objection": analysis.objection,
+        "refusal": "true" if analysis.explicit_refusal else None,
+        "stop": ",".join(analysis.stop_signals) or None,
+        "learned_notes": ",".join(n.note_id for n in chosen_notes(context)) or None,
         "follow_up_situation": touch.situation if touch is not None else None,
         "handoff_reason": validated.handoff_reason,
         "handoff_briefing": validated.handoff_briefing,

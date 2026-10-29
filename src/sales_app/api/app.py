@@ -20,13 +20,12 @@ from sales_app.api.admin import create_admin_router
 from sales_app.api.admin_agents import create_admin_agents_router
 from sales_app.api.admin_audit import create_admin_audit_router
 from sales_app.api.admin_billing import create_admin_billing_router
-from sales_app.api.admin_finance import create_admin_finance_router
-from sales_app.api.client_billing import create_client_billing_router
 from sales_app.api.admin_channels import create_admin_channels_router
 from sales_app.api.admin_clients import create_admin_clients_router
 from sales_app.api.admin_costs import create_admin_costs_router
 from sales_app.api.admin_dashboard import create_admin_dashboard_router
 from sales_app.api.admin_email_activation import create_admin_email_activation_router
+from sales_app.api.admin_finance import create_admin_finance_router
 from sales_app.api.admin_hubspot import create_admin_hubspot_router
 from sales_app.api.admin_integrations import create_admin_integrations_router
 from sales_app.api.admin_lanes import create_admin_lanes_router
@@ -38,16 +37,19 @@ from sales_app.api.admin_whatsapp import create_admin_whatsapp_router
 from sales_app.api.audit_middleware import AuditMiddleware
 from sales_app.api.client import create_client_router
 from sales_app.api.client_agent import create_client_agent_router
-from sales_app.api.client_approvals import create_client_approvals_router
-from sales_app.api.client_channel import create_client_channel_router
-from sales_app.api.client_dashboard import create_client_dashboard_router
 from sales_app.api.client_agent_test import create_client_agent_test_router
+from sales_app.api.client_approvals import create_client_approvals_router
+from sales_app.api.client_billing import create_client_billing_router
+from sales_app.api.client_channel import create_client_channel_router
+from sales_app.api.client_connections import create_client_connections_router
 from sales_app.api.client_conversation_control import create_client_conversation_control_router
+from sales_app.api.client_dashboard import create_client_dashboard_router
 from sales_app.api.client_followup import create_client_followup_router
 from sales_app.api.client_gmail import create_application_gmail_router
 from sales_app.api.client_hubspot_oauth import create_client_hubspot_oauth_router
-from sales_app.api.client_connections import create_client_connections_router
 from sales_app.api.client_lanes import create_client_lanes_router
+from sales_app.api.client_learning import create_client_learning_router
+from sales_app.api.client_live import create_client_live_router
 from sales_app.api.client_mailbox import create_client_mailbox_router
 from sales_app.api.client_notifications import create_client_notifications_router
 from sales_app.api.client_payments import create_client_payments_router
@@ -165,6 +167,8 @@ def create_app(
     app.include_router(create_client_payments_router(application))
     app.include_router(create_client_billing_router(application))
     app.include_router(create_client_dashboard_router(application))
+    app.include_router(create_client_live_router(application))
+    app.include_router(create_client_learning_router(application))
     app.include_router(create_client_resources_router(application))
     app.include_router(create_client_training_router(application))
     app.include_router(create_client_prospects_router(application))

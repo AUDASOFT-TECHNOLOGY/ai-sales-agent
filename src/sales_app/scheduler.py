@@ -19,10 +19,11 @@ from zoneinfo import ZoneInfo
 from sales_app.config import ClientConfig
 from sales_app.errors import ClientNotReadyError
 from sales_app.inbox import InboxPoller, PositionStore, poll_inbox
+from sales_app.learning_service import LearningService
 from sales_app.logs import client_logger
 from sales_app.registry import ClientRegistry
 from sales_app.wiring import ClientRuntime
-from sales_core.ports import Clock
+from sales_core.ports import Clock, activity, doing
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ SYNC_BACKOFF_MAX_SECONDS = 1800
 REPORT_EVERY_MINUTES = 5  # how often the daily report is looked at; the report has its own day
 REPORT_BACKOFF_BASE_SECONDS = 60
 REPORT_BACKOFF_MAX_SECONDS = 1800
+LEARN_EVERY_MINUTES = 360  # learning from results is slow work: a few times a day is plenty
 
 
 class Job(StrEnum):
@@ -45,6 +47,7 @@ class Job(StrEnum):
     INBOX = "inbox"  # fetch the replies of a channel that does not call us (a mailbox)
     SYNC = "sync"  # write results back into the sources that are allowed to receive them
     REPORT = "report"  # make the client's daily report if missing and send what is due
+    LEARN = "learn"  # learn from finished conversations; only when nothing else is due
 
 
 class LeaseSupport(Protocol):
@@ -58,6 +61,14 @@ class LeaseSupport(Protocol):
 # The jobs that drive the Engine exclude each other, as they do inside one process; the others have a
 # lease of their own.
 _ENGINE_JOBS = frozenset({Job.DAILY, Job.PREPARE, Job.DISPATCH, Job.RECOVER})
+
+
+# The jobs the Engine does not tell about itself: the live screen still shows them.
+_JOB_ACTIVITY = {
+    Job.INBOX: activity.CHECKING_INBOX,
+    Job.SYNC: activity.SYNCING,
+    Job.REPORT: activity.REPORTING,
+}
 
 
 def lease_name(job: Job) -> str:
@@ -105,6 +116,8 @@ class Scheduler:
         mail_cursors: Callable[[str], PositionStore] | None = None,
         reports: ReportSupport | None = None,
         report_every_minutes: int = REPORT_EVERY_MINUTES,
+        learning: Callable[[str], LearningService] | None = None,
+        learn_every_minutes: int = LEARN_EVERY_MINUTES,
         leases: LeaseSupport | None = None,
         on_job_result: Callable[[JobResult], None] | None = None,
     ) -> None:
@@ -118,6 +131,8 @@ class Scheduler:
         self._sync_every = sync_every_minutes
         self._reports = reports  # None: no daily report (no database)
         self._report_every = report_every_minutes
+        self._learning = learning  # None: the agent does not learn from its results
+        self._learn_every = learn_every_minutes
         self._leases = leases  # None: one process only, nothing to share
         self._executor = executor
         self._owns_executor = executor is None
@@ -134,7 +149,14 @@ class Scheduler:
             jobs = [*jobs, Job.SYNC]
         if self._report_due(runtime, now):
             jobs = [*jobs, Job.REPORT]
+        if not jobs and self._learn_due(runtime, now):
+            jobs = [Job.LEARN]  # never ahead of the work that talks to people
         return jobs
+
+    def _learn_due(self, runtime: ClientRuntime, now: datetime) -> bool:
+        if self._learning is None or runtime.suspended:
+            return False
+        return _elapsed(runtime.state.last_learn_at, now, self._learn_every)
 
     def _report_due(self, runtime: ClientRuntime, now: datetime) -> bool:
         """On its own clock, like the write-back: due whatever the outbound window. The report time
@@ -299,7 +321,7 @@ class Scheduler:
             for job in jobs:
                 result = self._execute(runtime, job, now)
                 results.append(result)
-                if not result.ok and job not in (Job.INBOX, Job.SYNC, Job.REPORT):
+                if not result.ok and job not in (Job.INBOX, Job.SYNC, Job.REPORT, Job.LEARN):
                     break  # a failing client waits for its backoff before anything else
         finally:
             runtime.state.end()
@@ -321,7 +343,12 @@ class Scheduler:
             leases.release(runtime.client_id, name)
 
     def _execute_leased(self, runtime: ClientRuntime, job: Job, now: datetime) -> JobResult:
-        result = self._execute_job(runtime, job, now)
+        kind = _JOB_ACTIVITY.get(job)
+        if kind is None:  # the Engine tells its own steps (reading, thinking, sending...)
+            result = self._execute_job(runtime, job, now)
+        else:
+            with doing(runtime.activity, kind):
+                result = self._execute_job(runtime, job, now)
         if self._on_job_result is not None and job in (Job.SYNC, Job.REPORT, Job.INBOX):
             if job is Job.INBOX and self._inbox is not None:
                 channels = getattr(self._inbox, "inbox_channels", None)
@@ -356,6 +383,8 @@ class Scheduler:
                     return self._sync(runtime, now)
                 elif job is Job.REPORT:
                     return self._report(runtime, engine, now)
+                elif job is Job.LEARN:
+                    return self._learn(runtime, engine, now)
                 else:
                     reports = [engine.recover_pending_replies()]
         except ClientNotReadyError as error:
@@ -363,7 +392,7 @@ class Scheduler:
             logger.warning("job %s skipped: %s", job.value, error)
             return JobResult(runtime.client_id, job, ok=False, errors=(str(error),))
         except Exception as error:
-            if job in (Job.SYNC, Job.REPORT):  # the type only: the message may carry a value
+            if job in (Job.SYNC, Job.REPORT, Job.LEARN):  # the type only: the message may carry a value
                 logger.error("job %s failed (%s)", job.value, type(error).__name__)
             else:
                 logger.exception("job %s failed", job.value)
@@ -373,6 +402,9 @@ class Scheduler:
                 self._block_sync(runtime, now)
                 runtime.health.record_writeback_failure(now)
                 return JobResult(runtime.client_id, job, ok=False, errors=("write-back failed",))
+            elif job is Job.LEARN:  # it only waits for its next turn; the client is not down
+                runtime.state.last_learn_at = now
+                return JobResult(runtime.client_id, job, ok=False, errors=("learning failed",))
             elif job is Job.REPORT:  # its own backoff; it never paints the client as down
                 self._block_report(runtime, now)
                 return JobResult(runtime.client_id, job, ok=False, errors=("report failed",))
@@ -421,6 +453,22 @@ class Scheduler:
         state.report_blocked_until = None
         state.report_failures = 0
         return JobResult(runtime.client_id, Job.REPORT, ok=run.ok, errors=run.errors)
+
+    def _learn(self, runtime: ClientRuntime, engine, now: datetime) -> JobResult:
+        """One learning run, inside the lease: ties traces to finished conversations, has them
+        reviewed and keeps the rules that hold. Counters only; nothing personal."""
+        runtime.state.last_learn_at = now
+        service = self._learning(runtime.client_id) if self._learning is not None else None
+        if service is None:
+            return JobResult(runtime.client_id, Job.LEARN, ok=True)
+        run = service.run(engine, now)
+        client_logger(__name__, runtime.client_id).info(
+            "learning: %d reviewed, %d failed, %d rules active",
+            run.reviewed,
+            run.failed,
+            run.notes_active,
+        )
+        return JobResult(runtime.client_id, Job.LEARN, ok=run.failed == 0)
 
     @staticmethod
     def _block_report(runtime: ClientRuntime, now: datetime) -> None:

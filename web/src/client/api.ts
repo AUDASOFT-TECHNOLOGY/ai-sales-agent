@@ -5,6 +5,8 @@
 
 import { appFetch } from "../demo/transport";
 import { isDemo } from "../demo/demoMode";
+import type { LiveAnswer } from "./live/liveModel";
+import type { Choice, LearnedNote, LearningAnswer } from "./learning/learningModel";
 
 const BASE = "/client/v1";
 
@@ -761,6 +763,24 @@ export function clientConversation(
   return request<ConversationHistory>(`/conversations/${encodeURIComponent(prospectId)}${query}`);
 }
 
+/* ── What the agent is doing right now (client_live.py) ── */
+
+/** The agent's latest steps, newest first, and the ones still running. Asked every second or two. */
+export function clientLive(limit = 80): Promise<LiveAnswer> {
+  return request<LiveAnswer>(`/live?limit=${limit}`);
+}
+
+/* ── What the agent learned from its own results (client_learning.py) ── */
+
+export function clientLearning(): Promise<LearningAnswer> {
+  return request<LearningAnswer>("/learning");
+}
+
+/** Set a point aside ("off"), confirm it ("confirm") or hand the choice back to the agent ("on"). */
+export function clientLearningChoice(id: string, action: Choice): Promise<LearnedNote> {
+  return request<LearnedNote>(`/learning/${encodeURIComponent(id)}/decision`, { method: "POST", body: JSON.stringify({ action }) });
+}
+
 /* ── A person in charge of a conversation (client_conversation_control.py) ── */
 
 export function clientTakeOver(prospectId: string, reason?: string): Promise<ConversationControl> {
@@ -1139,9 +1159,6 @@ export function clientAgentTests(): Promise<{ tests: AgentTest[] }> {
   return request<{ tests: AgentTest[] }>("/agent-test");
 }
 
-export function clientAgentTest(id: string): Promise<{ test: AgentTest; messages: AgentTestMessage[] }> {
-  return request<{ test: AgentTest; messages: AgentTestMessage[] }>(`/agent-test/${encodeURIComponent(id)}`);
-}
 /** What the agent would answer if this test person wrote `text` now. Nothing is stored or sent. */
 export interface Rehearsal {
   decision: string;
@@ -1152,3 +1169,6 @@ export function clientRehearse(id: string, text: string): Promise<Rehearsal> {
   return request<Rehearsal>(`/agent-test/${encodeURIComponent(id)}/rehearse`, { method: "POST", body: JSON.stringify({ text }) });
 }
 
+export function clientAgentTest(id: string): Promise<{ test: AgentTest; messages: AgentTestMessage[] }> {
+  return request<{ test: AgentTest; messages: AgentTestMessage[] }>(`/agent-test/${encodeURIComponent(id)}`);
+}

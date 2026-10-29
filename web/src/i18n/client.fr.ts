@@ -5,6 +5,7 @@
 import type { enClient } from "./client.en";
 import { frConnect } from "./client.connect.fr";
 import { frOffer } from "./client.offer.fr";
+import { frLearn } from "./client.learn.fr";
 import { frV2 } from "./client.v2.fr";
 
 export type ClientCopy = Record<keyof typeof enClient, string>;
@@ -182,4 +183,4 @@ const home = {
   "rv.home.next": "Prochaine relance prévue : {date}",
 } satisfies Partial<ClientCopy>;
 
-export const frClient: ClientCopy = { ...common, ...shell, ...home, ...frOffer, ...frConnect, ...frV2 };
+export const frClient: ClientCopy = { ...common, ...shell, ...home, ...frOffer, ...frConnect, ...frV2, ...frLearn };

@@ -4,6 +4,8 @@
  *  built from `demoData.ts`; `resetDemo()` rebuilds it, and a page reload loses it. A request this
  *  file does not know is answered with a 404 locally: it is never forwarded anywhere. */
 
+import type { LearnedNote, LearningAnswer } from "../client/learning/learningModel";
+import type { LiveStep } from "../client/live/liveModel";
 import type {
   ChannelState,
   ClientProfile,
@@ -49,6 +51,7 @@ interface Extras {
 
 let data: DemoData = buildDemoData();
 let extras: Extras = freshExtras();
+let learning: LearningAnswer = freshLearning();
 
 function freshExtras(): Extras {
   const now = new Date().toISOString();
@@ -127,6 +130,46 @@ function freshExtras(): Extras {
 export function resetDemo(): void {
   data = buildDemoData();
   extras = freshExtras();
+  learning = freshLearning();
+}
+
+/** What the demo agent "learned": an invented story of fourteen finished conversations. */
+function freshLearning(): LearningAnswer {
+  const note = (code: string, kind: LearnedNote["kind"], state: LearnedNote["state"], cases: number, evidence: LearnedNote["evidence"]): LearnedNote => ({
+    id: code,
+    code,
+    kind,
+    state,
+    evidence,
+    cases,
+    against: 0,
+    product: null,
+    confirmed: false,
+    off_by: null,
+    reason: kind === "avoid" ? "loss_cause" : "wins_pattern",
+  });
+  return {
+    counts: { studied: 14, achieved: 6, unfavourable: 8, needed: 5 },
+    notes: [
+      note("acknowledge_first", "do", "active", 7, "high"),
+      note("short_messages", "do", "active", 6, "medium"),
+      note("doubt_ignored", "avoid", "active", 6, "medium"),
+      note("quick_follow_up", "avoid", "active", 5, "medium"),
+      note("ask_before_proposing", "do", "watching", 4, "low"),
+      note("generic_message", "avoid", "watching", 3, "low"),
+    ],
+  };
+}
+
+function decideLearning(id: string, body: Doc): Reply {
+  const note = learning.notes.find((n) => n.id === id);
+  if (!note) return fail(404, "Ce point est inconnu.");
+  const action = body.action;
+  if (action === "off") Object.assign(note, { state: "off", off_by: "client", confirmed: false });
+  else if (action === "confirm") Object.assign(note, { state: "active", off_by: null, confirmed: true });
+  else if (action === "on") Object.assign(note, { state: "watching", off_by: null, confirmed: false });
+  else return fail(422, "Choix inconnu.");
+  return ok(clone(note));
 }
 
 export const demoProfile = (): ClientProfile => ({ ...extras.profile });
@@ -938,6 +981,51 @@ on("PUT", "/lanes/([^/]+)/sync", (m, b) => {
   return laneSync(id1(m));
 });
 
+// What the agent is doing: a short script that repeats, so the Live screen always has something to show.
+const LIVE_CYCLE_MS = 40000;
+const LIVE_SCRIPT: Array<{ kind: string; from: number; to: number; who: 0 | 1 | null }> = [
+  { kind: "reading_prospects", from: 0, to: 4, who: null },
+  { kind: "planning", from: 4, to: 6, who: null },
+  { kind: "checking", from: 6, to: 7, who: 0 },
+  { kind: "reading_history", from: 7, to: 9, who: 0 },
+  { kind: "thinking", from: 9, to: 17, who: 0 },
+  { kind: "sending", from: 17, to: 19, who: 0 },
+  { kind: "checking_inbox", from: 19, to: 23, who: null },
+  { kind: "receiving", from: 23, to: 25, who: 1 },
+  { kind: "checking", from: 25, to: 26, who: 1 },
+  { kind: "reading_history", from: 26, to: 28, who: 1 },
+  { kind: "answering", from: 28, to: 38, who: 1 },
+  { kind: "sending", from: 38, to: 40, who: 1 },
+];
+function live(): Reply {
+  const now = Date.now();
+  const people = data.prospects.map((p) => p.row);
+  const steps: LiveStep[] = [];
+  for (let cycle = Math.floor(now / LIVE_CYCLE_MS); cycle > Math.floor(now / LIVE_CYCLE_MS) - 4; cycle--) {
+    LIVE_SCRIPT.forEach((s, i) => {
+      const started = cycle * LIVE_CYCLE_MS + s.from * 1000;
+      if (started > now) return;
+      const ends = cycle * LIVE_CYCLE_MS + s.to * 1000;
+      const who = s.who === null || people.length === 0 ? null : people[(cycle * 2 + s.who) % people.length]!;
+      steps.push({
+        id: cycle * 100 + i,
+        kind: s.kind,
+        state: ends > now ? "running" : "done",
+        started_at: new Date(started).toISOString(),
+        ended_at: ends > now ? null : new Date(ends).toISOString(),
+        prospect_id: who?.id ?? null,
+        name: who?.display_name ?? null,
+        detail: null,
+      });
+    });
+  }
+  steps.sort((a, b) => b.id - a.id);
+  return ok({ at: new Date(now).toISOString(), today: { sent: 5 + (Math.floor(now / LIVE_CYCLE_MS) % 4), limit: 20 }, now: steps.filter((x) => x.state === "running"), recent: steps });
+}
+on("GET", "/live", () => live());
+on("GET", "/learning", () => ok(clone(learning)));
+on("POST", "/learning/([^/]+)/decision", (m, b) => decideLearning(id1(m), obj(b)));
+
 // Prospects and conversations
 on("GET", "/summary", () => ok(summary()));
 on("GET", "/prospects", (_m, _b, q) => listProspects(q));
@@ -1078,6 +1166,11 @@ const demoTestOf = (t: (typeof demoTests)[number]) => ({
   last_message_at: t.at,
 });
 on("GET", "/agent-test", () => ok({ tests: [...demoTests].reverse().map(demoTestOf) }));
+on("POST", "/agent-test/([^/]+)/rehearse", (_m, b) => {
+  const said = String(b.text ?? "").toLowerCase();
+  const price = /cher|prix|tarif|expensive|price/.test(said);
+  return ok({ decision: "send_message", reply: price ? "Je comprends. Qu’est-ce qui vous inquiète le plus : le prix lui-même, ou d’être sûr que cela vous rapportera ?" : "Avec plaisir. Pouvez-vous me dire ce que vous cherchez en priorité ?" });
+});
 on("GET", "/agent-test/([^/]+)", (m) => {
   const found = demoTests.find((t) => t.id === id1(m));
   if (!found) return fail(404, "no such test");
@@ -1118,8 +1211,3 @@ export async function demoFetch(input: string, init?: RequestInit): Promise<Resp
 }
 
 export type { ProspectRow };
-on("POST", "/agent-test/([^/]+)/rehearse", (_m, b) => {
-  const said = String(b.text ?? "").toLowerCase();
-  const price = /cher|prix|tarif|expensive|price/.test(said);
-  return ok({ decision: "send_message", reply: price ? "Je comprends. Qu’est-ce qui vous inquiète le plus : le prix lui-même, ou d’être sûr que cela vous rapportera ?" : "Avec plaisir. Pouvez-vous me dire ce que vous cherchez en priorité ?" });
-});

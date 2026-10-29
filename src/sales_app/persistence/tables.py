@@ -350,6 +350,87 @@ op_llm_usage = Table(
     Index("ix_op_llm_usage_client", "client_id", "occurred_at"),
 )
 
+# What a client's agent is doing right now, step by step (kept two days). A step holds a kind, the
+# display name of the person it is about and its times: never a message, an address or a credential.
+op_agent_activity = Table(
+    "op_agent_activity",
+    metadata,
+    Column("seq", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("kind", String(32), nullable=False),
+    Column("state", String(16), nullable=False),
+    Column("started_at", UtcDateTime, nullable=False),
+    Column("ended_at", UtcDateTime),
+    Column("prospect_id", String(255)),
+    Column("name", String(120)),
+    Column("detail", String(200)),
+    Index("ix_op_agent_activity_client", "client_id", "seq"),
+    Index("ix_op_agent_activity_started", "client_id", "started_at"),
+)
+
+# What an agent keeps to learn from its results. Anonymous throughout: a person is an opaque
+# reference, a message a length, a rule a code. Traces are deleted once their conversation is reviewed.
+op_learning_traces = Table(
+    "op_learning_traces",
+    metadata,
+    Column("seq", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("case_ref", String(32), nullable=False),
+    Column("action_ref", String(32), nullable=False),
+    Column("at", UtcDateTime, nullable=False),
+    Column("decision", String(32), nullable=False),
+    Column("action_type", String(32), nullable=False),
+    Column("channel", String(16)),
+    Column("length", Integer),
+    Column("questions", Integer),
+    Column("gap_hours", Numeric(10, 1)),
+    Column("unanswered", Integer, nullable=False, server_default="0"),
+    Column("answers_reply", Boolean, nullable=False, server_default=false()),
+    Column("labels", Text, nullable=False, server_default="{}"),
+    UniqueConstraint("client_id", "action_ref", name="uq_op_learning_traces_action"),
+    Index("ix_op_learning_traces_case", "client_id", "case_ref"),
+)
+
+op_learning_reviews = Table(
+    "op_learning_reviews",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("case_ref", String(32), primary_key=True),
+    Column("result", String(16), nullable=False),
+    Column("ended_at", UtcDateTime, nullable=False),
+    Column("reviewed_at", UtcDateTime, nullable=False),
+    Column("causes", Text, nullable=False, server_default=""),
+    Column("practices", Text, nullable=False, server_default=""),
+    Column("confidence", String(8), nullable=False),
+    Column("turning_step", Integer),
+    Column("unknown", Boolean, nullable=False, server_default=false()),
+    Column("product", String(64)),
+    Column("applied_notes", Text, nullable=False, server_default=""),
+    Column("steps_seen", Integer, nullable=False, server_default="0"),
+    Index("ix_op_learning_reviews_ended", "client_id", "ended_at"),
+)
+
+op_learning_notes = Table(
+    "op_learning_notes",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("note_id", String(96), primary_key=True),
+    Column("code", String(48), nullable=False),
+    Column("kind", String(8), nullable=False),
+    Column("theme", String(32), nullable=False),
+    Column("state", String(12), nullable=False),
+    Column("product", String(64)),
+    Column("evidence", String(8), nullable=False),
+    Column("cases", Integer, nullable=False, server_default="0"),
+    Column("against", Integer, nullable=False, server_default="0"),
+    Column("reason", String(32), nullable=False, server_default=""),
+    Column("created_at", UtcDateTime),
+    Column("updated_at", UtcDateTime),
+    Column("active_since", UtcDateTime),
+    Column("off_by", String(8)),
+    Column("confirmed_by_client", Boolean, nullable=False, server_default=false()),
+)
+
 # The Admin's price list for model calls (global, not per client): what a million input and a million
 # output tokens cost for a provider's model, in one currency. A model with no row has no known price.
 llm_pricing = Table(

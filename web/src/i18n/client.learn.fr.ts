@@ -4,6 +4,11 @@
 import type { enLearn } from "./client.learn.en";
 
 export const frLearn: Record<keyof typeof enLearn, string> = {
+  "rv.mode.label": "Choisir",
+  "rv.mode.taught": "Vous lui apprenez",
+  "rv.mode.taught.sub": "Votre méthode, vos réponses, vos interdits",
+  "rv.mode.auto": "Il apprend tout seul",
+  "rv.mode.auto.sub": "À partir de ses conversations",
   "rv.learn.title": "Ce que votre agent a appris",
   "rv.learn.studied": "conversations étudiées",
   "rv.learn.empty": "Encore {left} conversation(s) terminée(s) et il apprend, tout seul.",

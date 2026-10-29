@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import threading
 from collections.abc import Callable, Mapping
 from concurrent.futures import Executor
 from dataclasses import dataclass, field, replace
@@ -11,11 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from sales_app.admin_auth import AdminAuthService, AdminSessionStore, AdminUserStore
+from sales_app.agent_activity import ActivityStore, InMemoryActivityStore
 from sales_app.agent_state import AgentStateStore, InMemoryAgentStateStore
 from sales_app.audit_log import AuditService, InMemoryAuditLog
 from sales_app.billing import InvoiceStore
 from sales_app.billing_service import AutoBilling, BillingLoop
-from sales_app.finance.service import FinanceService
 from sales_app.channel_policy import ChannelPolicyService
 from sales_app.client_auth import ClientAuthService, is_client_active
 from sales_app.client_profiles import ClientProfileStore
@@ -25,6 +26,7 @@ from sales_app.config.channel_access import DEFAULT_ALLOWED
 from sales_app.config.client_wiring import wiring_for
 from sales_app.config.secrets import WHATSAPP_VERIFY_TOKEN
 from sales_app.config_store import ConfigStore
+from sales_app.connection_hints import ConnectionHints
 from sales_app.consent_wiring import check_consent_mode, open_consent_registry
 from sales_app.conversation_control import (
     ControlRows,
@@ -35,22 +37,26 @@ from sales_app.daily_report import DailyReportService
 from sales_app.email_activation import EmailActivationService
 from sales_app.email_platform import AuthLedger
 from sales_app.errors import ConfigurationError
-from sales_app.connection_hints import ConnectionHints
+from sales_app.finance.service import FinanceService
 from sales_app.gmail_wiring import GmailMailService
 from sales_app.hubspot_wiring import HubSpotAccessService
 from sales_app.hubspot_wiring import install as install_hubspot_access
 from sales_app.inbox import PositionStore
+from sales_app.learning_service import LearningService
+from sales_app.learning_store import InMemoryLearningStore, LearningStore
 from sales_app.llm_pricing import LLMPricingStore
 from sales_app.llm_usage import LLMUsageStore
 from sales_app.metrics import MetricsReader
 from sales_app.notification_wiring import job_result_hook, wire_reauth
-from sales_app.operational_signals import OperationalSignals
 from sales_app.notifications import InMemoryNotificationStore, NotificationService
+from sales_app.operational_signals import OperationalSignals
 from sales_app.parsers import ParserTable, build_parsers
 from sales_app.payment_confirmation import PAYMENT_WEBHOOK_SECRET
 from sales_app.payment_provider import PaymentProvider, SignedWebhookProvider
 from sales_app.persistence import AccountStores, build_account_stores
+from sales_app.persistence.agent_activity_rows import SqlActivityStore
 from sales_app.persistence.invoice_rows import SqlInvoiceStore
+from sales_app.persistence.learning_rows import SqlLearningStore
 from sales_app.persistence.llm_pricing_rows import SqlLLMPricingStore
 from sales_app.persistence.llm_usage_rows import SqlLLMUsageStore
 from sales_app.persistence.mail_cursor_rows import SqlMailCursorStore
@@ -468,6 +474,8 @@ def _assemble(
         ),
         writeback=_writeback_support(account_stores),
         llm_usage=_llm_usage_stores(account_stores),
+        activity=_activity_stores(account_stores),
+        learning=_learning_stores(account_stores),
         knowledge=knowledge.for_client if knowledge is not None else None,
         send_guards=send_limits.guard if send_limits is not None else None,
         conversation_control=control_hub.for_client,
@@ -574,6 +582,7 @@ def _assemble(
             inbox=builders,
             mail_cursors=_mail_cursor_stores(account_stores),
             reports=daily_reports,
+            learning=_learning_services(builders, quotas),
             leases=shared.leases,
             on_job_result=job_result_hook(notification_service),
         ),
@@ -812,6 +821,65 @@ def _llm_usage_stores(
     if engine is None:
         return None
     return lambda client_id: SqlLLMUsageStore(engine, client_id)
+
+
+def _activity_stores(
+    account_stores: AccountStores | None,
+) -> Callable[[str], ActivityStore]:
+    """One client's live activity: in the deployment's database when it has one (so that the process
+    that runs the agent and the one that serves the screen share it), else in this process."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is not None:
+        return lambda client_id: SqlActivityStore(engine, client_id)
+    kept: dict[str, ActivityStore] = {}
+    lock = threading.Lock()
+
+    def open_store(client_id: str) -> ActivityStore:
+        with lock:
+            return kept.setdefault(client_id, InMemoryActivityStore(client_id))
+
+    return open_store
+
+
+def _learning_stores(
+    account_stores: AccountStores | None,
+) -> Callable[[str], LearningStore]:
+    """What one client's agent keeps to learn from its results: in the deployment's database when it
+    has one (so that the process that runs the agent and the one that serves the screen share it),
+    else in this process."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is not None:
+        return lambda client_id: SqlLearningStore(engine, client_id)
+    kept: dict[str, LearningStore] = {}
+    lock = threading.Lock()
+
+    def open_store(client_id: str) -> LearningStore:
+        with lock:
+            return kept.setdefault(client_id, InMemoryLearningStore(client_id))
+
+    return open_store
+
+
+def _learning_services(
+    builders: IntegrationBuilders, quotas: QuotaService | None
+) -> Callable[[str], LearningService] | None:
+    """The learning run of a client, which spends model credits only while it has some left."""
+    if builders.learning is None:
+        return None
+    open_store = builders.learning
+
+    def credits_left(client_id: str) -> bool:
+        if quotas is None:
+            return True
+        try:
+            percent = quotas.status(client_id).credits_percent
+        except Exception:  # noqa: BLE001 - credits that cannot be read: do not spend any
+            return False
+        return percent is None or percent < 100
+
+    return lambda client_id: LearningService(
+        client_id, open_store(client_id), may_spend=lambda: credits_left(client_id)
+    )
 
 
 def _writeback_support(account_stores: AccountStores | None) -> WritebackSupport:

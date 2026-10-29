@@ -42,6 +42,7 @@ import { AppShell } from "./shell/AppShell";
 
 // Screens that read the most data are split per route so the shell stays under the initial JavaScript budget.
 const Conversations = lazy(() => import("./screens/Conversations").then((m) => ({ default: m.Conversations })));
+const LivePage = lazy(() => import("./client/live/LivePage").then((m) => ({ default: m.LivePage })));
 const ProspectsRiver = lazy(() => import("./screens/ProspectsRiver").then((m) => ({ default: m.ProspectsRiver })));
 const Prospects = lazy(() => import("./screens/Prospects").then((m) => ({ default: m.Prospects })));
 
@@ -121,6 +122,7 @@ export function App() {
                 <Route path="conversations" element={<Conversations />} />
                 <Route path="conversations/:id" element={<Conversations />} />
                 <Route path="crm" element={<ProspectsRiver />} />
+                <Route path="live" element={<LivePage />} />
                 <Route path="prospects" element={<Prospects />} />
 
                 <Route path="review" element={<ReviewLayout />}>

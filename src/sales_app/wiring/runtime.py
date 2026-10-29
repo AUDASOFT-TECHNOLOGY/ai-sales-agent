@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from sales_app.agent_activity import ActivityRecorder
 from sales_app.brain_registry import BrainRegistry, installed_brains
 from sales_app.config import ClientConfig
 from sales_app.config.runtime_config import (
@@ -18,8 +19,9 @@ from sales_app.config.runtime_config import (
 )
 from sales_app.config.schema import BrainSection
 from sales_app.config.telegram_settings import account_mode_of
-from sales_app.exchange_rates import today_rates
 from sales_app.errors import ClientNotReadyError, ClientUnavailableError, RuntimeBuildError
+from sales_app.exchange_rates import today_rates
+from sales_app.learning_service import StoreNotes, StoreTraceSink
 from sales_app.llm_usage import RecordingLLMProvider
 from sales_app.operational_signals import NotifyingChannel, NotifyingLLMProvider
 from sales_app.send_cap import RefusingChannel, SendCapChannel
@@ -36,7 +38,10 @@ from sales_core.engine import (
     InboundPolicy,
     UnknownSenderPolicy,
 )
+from sales_core.learning import NO_TRACE, TraceSink
 from sales_core.ports import (
+    NO_ACTIVITY,
+    ActivityReporter,
     Brain,
     Clock,
     FactsReader,
@@ -149,6 +154,8 @@ class ScheduleState:
     last_report_at: datetime | None = None
     report_blocked_until: datetime | None = None
     report_failures: int = 0
+    # Learning from results runs rarely and off the conversation path; a failure only delays it.
+    last_learn_at: datetime | None = None
     blocked_until: datetime | None = None  # backoff after a failed job
     _busy: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -185,6 +192,8 @@ class ClientRuntime:
     # The syncers of the sources that are written back to; None for a client that has none. Replaced
     # with the Engine, never on its own.
     writeback: ClientWriteback | None = None
+    # Where this client's agent tells what it is doing, for the screen that shows it live.
+    activity: ActivityReporter = NO_ACTIVITY
     _gate: threading.Condition = field(
         default_factory=threading.Condition, init=False, repr=False, compare=False
     )
@@ -342,6 +351,30 @@ def _record_usage(
     return RecordingLLMProvider(
         llm, store, client_id=client_id, provider=section.provider, model=section.model
     )
+
+
+def _learning_ports(builders: IntegrationBuilders, client_id: str) -> tuple[TraceSink, Any]:
+    """Where the agent keeps how it decided, and where it reads what it learned. A store that cannot
+    be opened must not stop the client: it then keeps nothing and learns nothing."""
+    if builders.learning is None:
+        return NO_TRACE, None
+    try:
+        store = builders.learning(client_id)
+    except Exception as error:  # noqa: BLE001
+        log.warning("%s: learning not kept: %s", client_id, error.__class__.__name__)
+        return NO_TRACE, None
+    return StoreTraceSink(store), StoreNotes(store)
+
+
+def _activity_reporter(builders: IntegrationBuilders, client_id: str) -> ActivityReporter:
+    """Where the agent tells what it does. A store that cannot be opened must not stop the client."""
+    if builders.activity is None:
+        return NO_ACTIVITY
+    try:
+        return ActivityRecorder(builders.activity(client_id))
+    except Exception as error:  # noqa: BLE001 - telling never blocks the client
+        log.warning("%s: activity not shown: %s", client_id, error.__class__.__name__)
+        return NO_ACTIVITY
 
 
 def _require_deployment(config: ClientConfig, builders: IntegrationBuilders, what: str) -> None:
@@ -572,6 +605,8 @@ def build_runtime(
         else:
             channel = _stage(client_id, "channel", lambda: _metered(provider, config, builders))
 
+    reporter = _activity_reporter(builders, client_id)
+    learning_sink, learning_notes = _learning_ports(builders, client_id)
     engine = _stage(
         client_id,
         "engine",
@@ -611,6 +646,11 @@ def build_runtime(
                 if builders.conversation_control is not None
                 else None
             ),
+            activity_reporter=reporter,
+            trace_sink=learning_sink,
+            learned_notes=learning_notes,
         ),
     )
-    return ClientRuntime(config=config, engine=engine, stagger=stagger, writeback=writeback)
+    return ClientRuntime(
+        config=config, engine=engine, stagger=stagger, writeback=writeback, activity=reporter
+    )

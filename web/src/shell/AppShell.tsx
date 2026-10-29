@@ -5,7 +5,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useOverview, OverviewProvider, guideSteps } from "../client/overview";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, FlaskConical, GraduationCap, House, LogOut, MessageSquare, Receipt, Gauge, Rocket, Workflow, UserRound, Waves } from "lucide-react";
+import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, FlaskConical, GraduationCap, House, LogOut, MessageSquare, Radio, Receipt, Gauge, Rocket, Workflow, UserRound, Waves } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { googleReturnOf, hubspotReturnOf, sheetsReturnOf } from "../client/connections/returns";
@@ -39,7 +39,9 @@ const TEST: NavEntry = { to: "/simulation", key: "rv.nav.test", icon: FlaskConic
 const TRAIN: NavEntry = { to: "/training", key: "rv.nav.train", icon: GraduationCap };
 const WORKFLOW: NavEntry = { to: "/workflow", key: "rv.nav.workflow", icon: Workflow };
 const PREPARE: NavEntry[] = [PREPARE_HUB, WORKFLOW, TEST, TRAIN];
+const LIVE: NavEntry = { to: "/live", key: "rv.nav.live", icon: Radio };
 const FOLLOW: NavEntry[] = [
+  LIVE,
   { to: "/conversations", key: "rv.nav.conversations", icon: MessageSquare, also: ["/prospects"] },
   { to: "/crm", key: "rv.nav.crm", icon: Waves },
   { to: "/review", key: "rv.nav.review", icon: CheckSquare },
@@ -47,8 +49,8 @@ const FOLLOW: NavEntry[] = [
 ];
 const USAGE: NavEntry = { to: "/usage", key: "rv.nav.usage", icon: Gauge };
 const ACCOUNT: NavEntry[] = [USAGE, { to: "/account", key: "rv.nav.billing", icon: Receipt, also: ["/billing"] }];
-const TABS = [HOME, FOLLOW[2]!, FOLLOW[0]!, PREPARE_HUB];
-const MORE = [WORKFLOW, TEST, TRAIN, FOLLOW[1]!, FOLLOW[3]!, ...ACCOUNT];
+const TABS = [HOME, FOLLOW[3]!, FOLLOW[1]!, PREPARE_HUB];
+const MORE = [WORKFLOW, TEST, TRAIN, LIVE, FOLLOW[2]!, FOLLOW[4]!, ...ACCOUNT];
 
 function useActive(entry: NavEntry): boolean {
   const { pathname } = useLocation();

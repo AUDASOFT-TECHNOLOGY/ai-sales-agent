@@ -11,6 +11,7 @@ from sales_core.contracts.enums import SCHEDULABLE_ACTION_TYPES, DecisionType, S
 from sales_core.contracts.fact import Fact, FactProposal
 from sales_core.contracts.ids import ClientId
 from sales_core.contracts.lane import LaneRoute
+from sales_core.contracts.learning import LearnedNote
 from sales_core.contracts.prospect import Prospect
 
 
@@ -45,11 +46,15 @@ class BrainRequest:
     # Empty when no rate source is wired or it could not be reached: nothing is then converted.
     exchange_rates: Mapping[str, float] = field(default_factory=dict)
     exchange_rates_at: datetime | None = None
+    # What the agent learned from its own results, for this prospect: shown to the Brain after, and
+    # never over, what the client taught. Empty when nothing was learned (or learning is off).
+    learned_notes: tuple[LearnedNote, ...] = ()
 
     def __post_init__(self) -> None:
         require_aware(self.now, "now")
         object.__setattr__(self, "exchange_rates", freeze_mapping(self.exchange_rates))
         object.__setattr__(self, "facts", tuple(self.facts))
+        object.__setattr__(self, "learned_notes", tuple(self.learned_notes))
         client_id = self.client.client_id
         if (
             self.prospect.client_id != client_id

@@ -17,6 +17,7 @@ Inbound conversations (Phase C) are outside the daily outbound quota and are ask
 with `ContactOrigin.INBOUND`. What happens with a sender who is not a prospect is `InboundPolicy`.
 """
 
+import logging
 import re
 import threading
 from collections.abc import Callable, Mapping
@@ -41,6 +42,7 @@ from sales_core.contracts import (
     Fact,
     InboundMessage,
     LaneId,
+    LearnedNote,
     Message,
     MessageDraft,
     MessageId,
@@ -86,8 +88,20 @@ from sales_core.engine.models import (
 from sales_core.engine.routing import ChannelRouter
 from sales_core.facts import ProposalRejection, review_proposals
 from sales_core.kpi import prospects_contacted
+from sales_core.learning import (
+    NO_TRACE,
+    ConversationSignals,
+    NotesProvider,
+    Reflector,
+    TraceSink,
+    build_trace,
+    is_rehearsal,
+)
+from sales_core.payments.settled import has_settled
 from sales_core.planner import plan_daily_actions
 from sales_core.ports import (
+    NO_ACTIVITY,
+    ActivityReporter,
     Brain,
     Clock,
     ConversationControl,
@@ -96,6 +110,8 @@ from sales_core.ports import (
     FactsWriter,
     MessagingChannel,
     SalesRepository,
+    activity,
+    doing,
 )
 from sales_core.safety import (
     ALLOWED,
@@ -109,6 +125,8 @@ from sales_core.safety import (
     is_opt_out_message,
     recipient_for,
 )
+
+log = logging.getLogger(__name__)
 
 TEST_ID_PREFIX = "inbound-test-"  # ids of people the client asked the agent to write to as a test
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
@@ -150,6 +168,13 @@ def _created_prefix(day: date) -> str:
     return f"inbound-{day.isoformat()}-"
 
 
+def _about(prospect: Prospect | None) -> dict[str, str]:
+    """Who a step is about, for the activity the client watches."""
+    if prospect is None:
+        return {}
+    return {"prospect_id": prospect.prospect_id, "name": prospect.display_name}
+
+
 class Engine:
     """One instance per client. Construct it with that client's collaborators."""
 
@@ -167,6 +192,9 @@ class Engine:
         facts_writer: FactsWriter | None = None,
         control: ConversationControlStore | None = None,
         exchange_rates: Callable[[], tuple[Mapping[str, float], datetime] | None] | None = None,
+        activity_reporter: ActivityReporter = NO_ACTIVITY,
+        trace_sink: TraceSink = NO_TRACE,
+        learned_notes: NotesProvider | None = None,
     ) -> None:
         if repository.client_id != client.client_id:
             raise ValueError("repository is bound to a different client than the engine")
@@ -193,6 +221,9 @@ class Engine:
         self._facts_writer = facts_writer  # None: facts a Brain proposes are refused, not lost
         # None: no conversation can be taken over, and nothing is held back for a person.
         self._control = control
+        self._activity = activity_reporter  # told what the Engine is doing, as it does it
+        self._trace = trace_sink  # told how each decision was taken, anonymously
+        self._notes = learned_notes  # what the agent learned from its results; None: nothing
         self._manual_actors: dict[str, str] = {}  # who wrote the manual message being sent
         self._lock = threading.RLock()
         self._events: list[AuditEvent] = []  # audit events not yet written
@@ -264,6 +295,26 @@ class Engine:
             ),
         )
 
+    def reflector(self) -> Reflector | None:
+        """The Brain, if it can learn from results; None if it cannot."""
+        return self._brain if isinstance(self._brain, Reflector) else None
+
+    def outcome_signals(self, prospect_id: ProspectId) -> ConversationSignals | None:
+        """What is known about how this conversation stands, to tell its result (read-only). None for
+        an unknown prospect."""
+        prospect = self._repo.get_prospect(prospect_id)
+        if prospect is None:
+            return None
+        paid = False
+        if self._facts is not None:
+            paid = has_settled(self._facts.get_facts(prospect_id))
+        return ConversationSignals(
+            status=prospect.status,
+            stage=prospect.stage,
+            paid=paid,
+            with_a_person=self._is_human(prospect_id),
+        )
+
     def conversation_of(self, prospect_id: ProspectId) -> Conversation | None:
         """The history of one of the client's prospects, oldest message first; None if the client
         has no such prospect (read-only). An empty history is a valid answer, not None."""
@@ -288,19 +339,21 @@ class Engine:
         with self._lock:
             run = RunCollector()
             now = self._clock.now()
-            prospects = self._assign_lanes(list(self._repo.list_prospects()), run)
-            actions = list(self._repo.list_actions())
+            with doing(self._activity, activity.READING_PROSPECTS):
+                prospects = self._assign_lanes(list(self._repo.list_prospects()), run)
+                actions = list(self._repo.list_actions())
             explicit = self._router.explicit
-            plan = plan_daily_actions(
-                client=self._client,
-                prospects=prospects,
-                existing_actions=actions,
-                now=now,
-                daily_limit=self._config.daily_action_limit,
-                channel=None if explicit else self._router.any_channel,
-                route_of=self._router.lane_for if explicit else None,
-                held_by_human=self._held_by_human(),
-            )
+            with doing(self._activity, activity.PLANNING):
+                plan = plan_daily_actions(
+                    client=self._client,
+                    prospects=prospects,
+                    existing_actions=actions,
+                    now=now,
+                    daily_limit=self._config.daily_action_limit,
+                    channel=None if explicit else self._router.any_channel,
+                    route_of=self._router.lane_for if explicit else None,
+                    held_by_human=self._held_by_human(),
+                )
             if plan.actions and not self._dry_run:
                 # One batch, BEFORE any Brain call: the quota stays reserved if we crash.
                 self._repo.save_actions(list(plan.actions))
@@ -411,13 +464,20 @@ class Engine:
     def _prepare_one(
         self, action: SalesAction, prospect: Prospect | None, now: datetime, run: RunCollector
     ) -> None:
-        verdict = self._contactable(action, prospect)
+        about = _about(prospect)
+        with doing(self._activity, activity.CHECKING, **about):
+            verdict = self._contactable(action, prospect)
         if prospect is None or not verdict.allowed:
             self._block(action, prospect, verdict, run)
             return
-        request = self._request_for(action, prospect, now)
-        decision = self._brain.decide(request)
+        with doing(self._activity, activity.READING_HISTORY, **about):
+            request = self._request_for(action, prospect, now)
+        answering = action.action_type is SalesActionType.REPLY
+        kind = activity.ANSWERING if answering else activity.THINKING
+        with doing(self._activity, kind, **about):
+            decision = self._brain.decide(request)
         validate_decision(decision, now)
+        self._trace_decision(action, request, decision, now)
         self._emit_for(
             ev.BRAIN_DECISION,
             action,
@@ -550,7 +610,40 @@ class Engine:
             lane=self._router.lane_for(prospect),
             exchange_rates=rates[0] if rates else {},
             exchange_rates_at=rates[1] if rates else None,
+            learned_notes=self._learned_notes(),
         )
+
+    def _learned_notes(self) -> tuple[LearnedNote, ...]:
+        """What was learned, if anything: a failure to read it never stops a message."""
+        if self._notes is None:
+            return ()
+        try:
+            return tuple(self._notes.active_notes())
+        except Exception as error:  # noqa: BLE001
+            log.warning("learned notes not read: %s", error.__class__.__name__)
+            return ()
+
+    def _trace_decision(
+        self, action: SalesAction, request: BrainRequest, decision: BrainDecision, now: datetime
+    ) -> None:
+        """Keep how this decision was taken (no text, no person), best effort."""
+        if self._dry_run or is_rehearsal(action.prospect_id):
+            return
+        try:
+            self._trace.record(
+                build_trace(
+                    client_id=self._client.client_id,
+                    prospect_id=action.prospect_id,
+                    action_id=action.action_id,
+                    action_type=action.action_type,
+                    decision=decision,
+                    channel=str(action.channel) if action.channel else None,
+                    messages=request.conversation.messages,
+                    now=now,
+                )
+            )
+        except Exception as error:  # noqa: BLE001 - keeping a trace never changes the work
+            log.warning("decision not traced: %s", error.__class__.__name__)
 
     def _read_rates(self) -> tuple[Mapping[str, float], datetime] | None:
         """Today's rates, or None: a rate source that fails never stops a conversation."""
@@ -729,27 +822,6 @@ class Engine:
                 self._guard(run, stored, self._dispatch_one, stored, run)
             return placed, run.report()
 
-    def _test_prospect(self, contact: str, name: str, lane_id: LaneId | None) -> Prospect:
-        """The prospect a test makes: the contact is filed where the lane's channel reads it."""
-        route = self._router.lane_or_default(lane_id)
-        if self._router.explicit:
-            if route is None:
-                code = "unknown_lane" if lane_id is not None else "no_channel"
-                raise ManualSendError(code, "This circuit does not exist or has no channel.")
-            channel = route.channel
-        else:
-            channel = self._router.any_channel
-        address = contact.strip()
-        if channel is Channel.EMAIL:
-            valid = _EMAIL.fullmatch(address) is not None
-            key = address.casefold()
-        else:
-            digits = "".join(c for c in address if c.isdigit())
-            valid = 7 <= len(digits) <= 15
-            key = digits
-        if not valid:
-            raise ManualSendError("invalid_contact", "This contact is not valid for this channel.")
-        return Prospect(
     def rehearse(self, prospect_id: ProspectId, text: str) -> BrainDecision:
         """What the agent would decide if the person of a test wrote `text` now.
 
@@ -813,6 +885,27 @@ class Engine:
                 )
             )
 
+    def _test_prospect(self, contact: str, name: str, lane_id: LaneId | None) -> Prospect:
+        """The prospect a test makes: the contact is filed where the lane's channel reads it."""
+        route = self._router.lane_or_default(lane_id)
+        if self._router.explicit:
+            if route is None:
+                code = "unknown_lane" if lane_id is not None else "no_channel"
+                raise ManualSendError(code, "This circuit does not exist or has no channel.")
+            channel = route.channel
+        else:
+            channel = self._router.any_channel
+        address = contact.strip()
+        if channel is Channel.EMAIL:
+            valid = _EMAIL.fullmatch(address) is not None
+            key = address.casefold()
+        else:
+            digits = "".join(c for c in address if c.isdigit())
+            valid = 7 <= len(digits) <= 15
+            key = digits
+        if not valid:
+            raise ManualSendError("invalid_contact", "This contact is not valid for this channel.")
+        return Prospect(
             client_id=self._client.client_id,
             prospect_id=ProspectId(f"{TEST_ID_PREFIX}{key}"),
             display_name=name.strip() or address,
@@ -868,7 +961,14 @@ class Engine:
         # Persist SENDING before the channel call. If this write fails we raise: nothing was sent.
         self._repo.save_actions([sending])
         try:
-            result = adapter.send(outbound)  # type: ignore[union-attr]  # checked above
+            with doing(
+                self._activity,
+                activity.SENDING,
+                prospect_id=prospect.prospect_id,
+                name=prospect.display_name,
+                detail=str(channel),
+            ):
+                result = adapter.send(outbound)  # type: ignore[union-attr]  # checked above
         except Exception as error:  # noqa: BLE001 - outcome unknown, must fail closed
             self._mark_unconfirmed(sending, f"channel raised {describe(error)}", run)
             return
@@ -1058,22 +1158,29 @@ class Engine:
                 message_id=message_id,
                 prospect_id=prospect.prospect_id,
             )
-        self._repo.append_messages(
-            [
-                Message(
-                    message_id=message_id,
-                    client_id=self._client.client_id,
-                    prospect_id=prospect.prospect_id,
-                    conversation_id=conversation.conversation_id,
-                    direction=Direction.INBOUND,
-                    channel=inbound.channel,
-                    text=inbound.text,
-                    timestamp=inbound.timestamp,
-                    external_id=inbound.external_id,
-                    metadata=dict(inbound.metadata),
-                )
-            ]
-        )
+        with doing(
+            self._activity,
+            activity.RECEIVING,
+            prospect_id=prospect.prospect_id,
+            name=prospect.display_name,
+            detail=str(inbound.channel),
+        ):
+            self._repo.append_messages(
+                [
+                    Message(
+                        message_id=message_id,
+                        client_id=self._client.client_id,
+                        prospect_id=prospect.prospect_id,
+                        conversation_id=conversation.conversation_id,
+                        direction=Direction.INBOUND,
+                        channel=inbound.channel,
+                        text=inbound.text,
+                        timestamp=inbound.timestamp,
+                        external_id=inbound.external_id,
+                        metadata=dict(inbound.metadata),
+                    )
+                ]
+            )
         self._touch_last_inbound(prospect, inbound.timestamp)
         self._emit(ev.INBOUND_RECEIVED, prospect_id=prospect.prospect_id, message_id=message_id)
         return InboundReceipt(

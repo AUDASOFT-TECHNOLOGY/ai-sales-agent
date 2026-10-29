@@ -177,6 +177,7 @@ const home = {
 
 import { enConnect } from "./client.connect.en";
 import { enOffer } from "./client.offer.en";
+import { enLearn } from "./client.learn.en";
 import { enV2 } from "./client.v2.en";
 
-export const enClient = { ...common, ...shell, ...home, ...enOffer, ...enConnect, ...enV2 } as const;
+export const enClient = { ...common, ...shell, ...home, ...enOffer, ...enConnect, ...enV2, ...enLearn } as const;

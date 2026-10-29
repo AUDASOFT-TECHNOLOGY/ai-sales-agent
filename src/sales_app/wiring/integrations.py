@@ -15,10 +15,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from sales_app.agent_activity import ActivityStore
 from sales_app.config import ClientConfig
 from sales_app.config.runtime_config import channel_provider_keys
 from sales_app.config.schema import SourceInstance
 from sales_app.inbox import Fetched, InboxPoller
+from sales_app.learning_store import LearningStore
 from sales_app.llm_usage import LLMUsageStore
 from sales_app.send_cap import DailySendGuard
 from sales_app.settings import Settings
@@ -89,6 +91,11 @@ class IntegrationBuilders:
     # One client's LLM usage register, or None when the deployment has no database: calls are then
     # simply not recorded.
     llm_usage: Callable[[str], LLMUsageStore] | None = None
+    # One client's live activity (what its agent is doing now), or None: nothing is then told.
+    activity: Callable[[str], ActivityStore] | None = None
+    # One client's learning registers (what its agent keeps to learn from its results), or None:
+    # nothing is then traced and nothing learned.
+    learning: Callable[[str], LearningStore] | None = None
     # One client's reference documents (what its Brain may consult to answer from the documents the
     # client attached to its products), or None when the deployment keeps none. See
     # `sales_app.resources`.
@@ -193,6 +200,8 @@ def default_builders(
     consent: Callable[[str], ConsentWriter] | None = None,
     writeback: WritebackSupport | None = None,
     llm_usage: Callable[[str], LLMUsageStore] | None = None,
+    activity: Callable[[str], ActivityStore] | None = None,
+    learning: Callable[[str], LearningStore] | None = None,
     knowledge: Callable[[str], Any] | None = None,
     send_guards: Callable[[str, str], DailySendGuard] | None = None,
     conversation_control: Callable[[str], Any] | None = None,
@@ -263,6 +272,8 @@ def default_builders(
         consent=consent,
         writeback=writeback,
         llm_usage=llm_usage,
+        activity=activity,
+        learning=learning,
         knowledge=knowledge,
         send_guards=send_guards,
         conversation_control=conversation_control,
