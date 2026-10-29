@@ -985,44 +985,6 @@ on("POST", "/products/([^/]+)/resources/file", (m, _b, _q, init) => {
   const title = decodeURIComponent(headers.get("X-Resource-Title") ?? name);
   return ok(addResource(id1(m), { kind: "file", category: "document", title, url: null, filename: name, mime_type: file?.type || "application/octet-stream", size_bytes: file?.size ?? 0, status: "stored_only", status_detail: "demo", text_chars: 0 }), 201);
 });
-on("POST", "/products/([^/]+)/resources/note", (m, b) =>
-  ok(addResource(id1(m), { kind: "file", category: (b.category as ProductResource["category"]) ?? "document", title: String(b.title ?? ""), url: null, filename: `${String(b.title ?? "note")}.txt`, mime_type: null, size_bytes: String(b.text ?? "").length, status: "ready", status_detail: null, text_chars: String(b.text ?? "").length }), 201),
-);
-// Training: what the agent can read of each product, and drafts found in it
-on("GET", "/training/material", () => {
-  const list = obj(obj(data.settings.commercial).catalog).products;
-  const ids = (Array.isArray(list) ? list : []).map((p) => String(obj(p).id));
-  return ok({
-    products: ids.map((id) => {
-      const list = extras.resources[id] ?? [];
-      const ready = list.filter((r) => r.status === "ready");
-      const by: Record<string, number> = {};
-      for (const r of list) by[r.category] = (by[r.category] ?? 0) + 1;
-      return {
-        product_id: id,
-        total: list.length,
-        readable: ready.length,
-        readable_chars: ready.reduce((sum, r) => sum + r.text_chars, 0),
-        testimonials: ready.filter((r) => r.category === "testimonial").length,
-        by_category: by,
-        unread: list.filter((r) => r.status !== "ready").map((r) => ({ id: r.id, title: r.title, category: r.category, reason: r.status_detail })),
-      };
-    }),
-  });
-});
-on("GET", "/training/suggestions/([^/]+)", (m) => {
-  const readable = (extras.resources[id1(m)] ?? []).some((r) => r.status === "ready");
-  return ok({
-    suggestions: readable
-      ? [
-          { kind: "faq", when: "Puis-je annuler si ça ne me convient pas ?", text: "Oui, vous pouvez annuler dans les 14 jours et être remboursé intégralement.", source: "Brochure", attribution: null },
-          { kind: "faq", when: "Faut-il de l’expérience pour commencer ?", text: "Non, la première semaine part de zéro et chaque étape est expliquée.", source: "Brochure", attribution: null },
-          { kind: "proof", when: null, text: "En un mois, j’ai doublé mes demandes et je ne cours plus après les clients.", source: "Avis clients", attribution: "Leïla, boulangère" },
-        ]
-      : [],
-    left_out: readable ? 1 : 0,
-  });
-});
 on("DELETE", "/products/([^/]+)/resources/([^/]+)", (m) => {
   const list = extras.resources[id1(m)] ?? [];
   extras.resources[id1(m)] = list.filter((r) => r.id !== decodeURIComponent(m[2]!));
@@ -1137,3 +1099,8 @@ export async function demoFetch(input: string, init?: RequestInit): Promise<Resp
 }
 
 export type { ProspectRow };
+on("POST", "/agent-test/([^/]+)/rehearse", (_m, b) => {
+  const said = String(b.text ?? "").toLowerCase();
+  const price = /cher|prix|tarif|expensive|price/.test(said);
+  return ok({ decision: "send_message", reply: price ? "Je comprends. Qu’est-ce qui vous inquiète le plus : le prix lui-même, ou d’être sûr que cela vous rapportera ?" : "Avec plaisir. Pouvez-vous me dire ce que vous cherchez en priorité ?" });
+});

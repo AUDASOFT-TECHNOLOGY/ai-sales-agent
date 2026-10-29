@@ -1,6 +1,6 @@
 /** Editing lessons of one kind. `SimpleList` is for one-line lessons (a habit, a red line) with ideas to
  *  add in a click; `LessonList` is for lessons that answer a situation (a doubt, a question, a model
- *  answer) or carry a proof. Both write into the whole list of lessons, so the page keeps one draft. */
+ *  answer). Both write into the whole list of lessons, so the page keeps one draft. */
 
 import { Plus, Trash2 } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -66,13 +66,12 @@ export interface LessonCopy {
   when?: { label: string; placeholder: string };
   answer: { label: string; placeholder: string };
   why?: { label: string; placeholder: string };
-  source?: { label: string; placeholder: string };
   add: string;
   /** Situations to cover first, in a click (the `when` is filled in). */
   starters?: { label: string; items: MessageKey[] };
 }
 
-/** Lessons that answer a situation, or carry a proof. */
+/** Lessons that answer a situation. */
 export function LessonList({ kind, lessons, onChange, products, copy, testId, defaultProduct = "" }: { kind: LessonKind; lessons: Lesson[]; onChange: Change; products: ProductOption[]; copy: LessonCopy; testId: string; defaultProduct?: string }) {
   const { t } = useI18n();
   const mine = lessons.filter((l) => l.kind === kind);
@@ -90,7 +89,6 @@ export function LessonList({ kind, lessons, onChange, products, copy, testId, de
           <div className="rv-fieldset stack" key={lesson.uid} role="group" aria-label={`${copy.title} ${i + 1}`}>
             {copy.when ? <Textarea label={copy.when.label} rows={2} maxLength={SHORT_MAX} dir="auto" placeholder={copy.when.placeholder} value={lesson.when} onChange={(e) => onChange(patchOf(lessons, lesson.uid, { when: e.target.value }))} /> : null}
             <Textarea label={copy.answer.label} rows={3} maxLength={TEXT_MAX} dir="auto" placeholder={copy.answer.placeholder} value={lesson.text} onChange={(e) => onChange(patchOf(lessons, lesson.uid, { text: e.target.value }))} />
-            {copy.source ? <TextInput label={copy.source.label} maxLength={SHORT_MAX} dir="auto" placeholder={copy.source.placeholder} value={lesson.source} onChange={(e) => onChange(patchOf(lessons, lesson.uid, { source: e.target.value }))} /> : null}
             {copy.why ? <TextInput label={copy.why.label} maxLength={SHORT_MAX} dir="auto" placeholder={copy.why.placeholder} value={lesson.why} onChange={(e) => onChange(patchOf(lessons, lesson.uid, { why: e.target.value }))} /> : null}
             {lessonProblem(lesson) ? <Note tone="warn">{t("rv.train.lesson.exact")}</Note> : null}
             <div className="row">

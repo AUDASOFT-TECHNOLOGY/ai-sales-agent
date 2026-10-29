@@ -6,10 +6,10 @@ import { Button, LinkButton } from "../../ui/Button";
 import { Card, Note } from "../kit";
 import type { DimensionId, Readiness } from "./readiness";
 
-export type TabId = "overview" | "method" | "answers" | "proof" | "fix";
+export type TabId = "overview" | "method" | "answers" | "fix";
 
 /** The tab where each part of the training is done. */
-export const TAB_OF: Record<DimensionId, TabId> = { method: "method", pitch: "method", voice: "method", redlines: "method", objections: "answers", faq: "answers", examples: "answers", proof: "proof", material: "proof" };
+export const TAB_OF: Record<DimensionId, TabId> = { method: "method", pitch: "method", voice: "method", redlines: "method", objections: "answers", faq: "answers", examples: "answers" };
 
 export function OverviewTab({ readiness, onGo, dirty }: { readiness: Readiness; onGo: (tab: TabId) => void; dirty: boolean }) {
   const { t } = useI18n();

@@ -172,6 +172,11 @@ _RULES = (
         "what, tells you nothing about which. You only report: the system decides what is recorded."
     ),
 )
+_RED_LINE_RULE = (
+    "Red lines. Before you answer, check your message against every 'Never' line above. Set "
+    "breaks_red_line to true if it breaks one (it will then be refused and you will write it "
+    "again); otherwise false."
+)
 _KNOWLEDGE_RULE = (
     "14. Reference material. 'reference_material.excerpts' are passages from documents the "
     "client attached to its products. Use them to answer the prospect's question accurately, "
@@ -255,6 +260,8 @@ def build_system_prompt(
     lines += [f"- Principle: {principle}" for principle in communication.principles]
     lines += training_lines(context)
     rules = (*_RULES, _KNOWLEDGE_RULE) if knowledge else _RULES
+    if any(lesson.kind == "never" for lesson in communication.training):
+        rules = (*rules, f"{len(rules) + 1}. {_RED_LINE_RULE}")
     if _channel_of(context) is Channel.TELEGRAM:
         rules = (*rules, f"{len(rules) + 1}. {_TELEGRAM_RULE}")
     lines += ["", "Rules", *rules, "", _DECISIONS]

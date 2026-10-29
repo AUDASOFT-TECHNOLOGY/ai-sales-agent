@@ -84,3 +84,65 @@ class TestStarting:
         alpha = world.browser("alpha")
         assert alpha.post(TESTS, json={}).status_code == 422
         assert alpha.post(TESTS, json={"contact": PHONE, "channel": "email"}).status_code == 422
+
+
+class TestRehearsing:
+    """What the agent would answer to a sentence, without writing to anyone."""
+
+    def started(self, world):
+        alpha = world.browser("alpha")
+        pid = alpha.post(TESTS, json={"contact": PHONE, "name": "Amel"}).json()["prospect_id"]
+        return alpha, pid
+
+    def test_the_agent_answers_the_sentence_and_nothing_is_stored_or_sent(self, world):
+        alpha, pid = self.started(world)
+        sent_before = len(channel_of(world).sent)
+        response = alpha.post(
+            f"{TESTS}/{pid}/rehearse", json={"text": "It is too expensive for me"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.headers["cache-control"] == "no-store"
+        body = response.json()
+        assert body["decision"] == "send_message" and "hello Amel" in body["reply"]
+        assert len(channel_of(world).sent) == sent_before
+        shown = alpha.get(f"{TESTS}/{pid}").json()
+        assert [m["direction"] for m in shown["messages"]] == ["outbound"]
+
+    def test_the_brain_hears_the_sentence_as_the_latest_message_of_the_person(self, world):
+        alpha, pid = self.started(world)
+        seen = []
+        with world.application.registry.get("alpha").lease() as engine:
+            real = engine._brain.decide
+            engine._brain.decide = lambda request: (seen.append(request), real(request))[1]
+            alpha.post(f"{TESTS}/{pid}/rehearse", json={"text": "Is there a refund?"})
+        (request,) = seen
+        assert request.action.action_type.value == "reply"
+        assert request.conversation.messages[-1].text == "Is there a refund?"
+        assert request.conversation.messages[-1].direction.value == "inbound"
+
+    def test_only_a_test_person_can_be_rehearsed_with(self, world):
+        alpha, _ = self.started(world)
+        assert alpha.post(f"{TESTS}/p1/rehearse", json={"text": "Hello"}).status_code == 404
+        assert (
+            alpha.post(f"{TESTS}/inbound-test-ghost/rehearse", json={"text": "Hello"}).status_code
+            == 404
+        )
+
+    def test_another_clients_test_is_not_found(self, world):
+        _, pid = self.started(world)
+        assert (
+            world.browser("beta")
+            .post(f"{TESTS}/{pid}/rehearse", json={"text": "Hello"})
+            .status_code
+            == 404
+        )
+
+    def test_it_needs_a_session_and_a_sentence(self, world):
+        alpha, pid = self.started(world)
+        assert (
+            world.anonymous().post(f"{TESTS}/{pid}/rehearse", json={"text": "Hello"}).status_code
+            == 401
+        )
+        assert alpha.post(f"{TESTS}/{pid}/rehearse", json={}).status_code == 422
+        assert alpha.post(f"{TESTS}/{pid}/rehearse", json={"text": "   "}).status_code == 422
+        assert alpha.post(f"{TESTS}/{pid}/rehearse", json={"text": "x" * 501}).status_code == 422

@@ -2,7 +2,7 @@
  *
  *  Two parts, both under `communication`: the **sales method** (`playbook`: a few choices that hold for
  *  every product) and the **lessons** (`training`): habits, red lines, answers to situations, to
- *  objections and to frequent questions, and proofs (testimonials). A lesson may be tied to one product.
+ *  objections and to frequent questions. A lesson may be tied to one product.
  *  Everything else in the document is kept as it is. */
 
 import type { Doc } from "../settingsModel";
@@ -13,8 +13,8 @@ export const TEXT_MAX = 600;
 export const SHORT_MAX = 300;
 export const LESSON_MAX = 60;
 
-export type LessonKind = "habit" | "never" | "example" | "objection" | "faq" | "proof";
-export const KINDS: LessonKind[] = ["habit", "never", "example", "objection", "faq", "proof"];
+export type LessonKind = "habit" | "never" | "example" | "objection" | "faq";
+export const KINDS: LessonKind[] = ["habit", "never", "example", "objection", "faq"];
 /** The kinds that answer a situation: they need their `when`. */
 export const SITUATIONAL: LessonKind[] = ["example", "objection", "faq"];
 /** The kinds that hold for every product. */
@@ -29,14 +29,12 @@ export interface Lesson {
   when: string;
   /** The product it is about; "" for every product. */
   product: string;
-  /** Whose words (a proof). */
-  source: string;
   /** The reasoning behind the answer. */
   why: string;
 }
 
 let sequence = 0;
-export const blankLesson = (kind: LessonKind, patch: Partial<Omit<Lesson, "uid">> = {}): Lesson => ({ uid: ++sequence, kind, text: "", when: "", product: "", source: "", why: "", ...patch });
+export const blankLesson = (kind: LessonKind, patch: Partial<Omit<Lesson, "uid">> = {}): Lesson => ({ uid: ++sequence, kind, text: "", when: "", product: "", why: "", ...patch });
 
 export type Approach = "consultative" | "challenger" | "guide" | "direct";
 export type Closing = "soft" | "choice" | "assumptive" | "direct";
@@ -47,14 +45,15 @@ export interface Playbook {
   approach: Approach;
   closing: Closing;
   urgency: "none" | "real_reasons_only";
-  social_proof: "when_relevant" | "never";
+  discounts: "never_offer" | "ask_a_person";
+  competitors: "stay_positive" | "avoid";
   pitch: string;
   ideal_customer: string;
   /** The client made the choices (even to keep the defaults): the method is then written down. */
   chosen: boolean;
 }
 
-export const DEFAULT_PLAYBOOK: Playbook = { chosen: false, approach: "consultative", closing: "choice", urgency: "none", social_proof: "when_relevant", pitch: "", ideal_customer: "" };
+export const DEFAULT_PLAYBOOK: Playbook = { chosen: false, approach: "consultative", closing: "choice", urgency: "none", discounts: "never_offer", competitors: "stay_positive", pitch: "", ideal_customer: "" };
 
 export interface Training {
   playbook: Playbook;
@@ -75,7 +74,8 @@ export function playbookOf(commercial: Doc): Playbook {
     approach: pick(raw.approach, APPROACHES, DEFAULT_PLAYBOOK.approach),
     closing: pick(raw.closing, CLOSINGS, DEFAULT_PLAYBOOK.closing),
     urgency: pick(raw.urgency, ["none", "real_reasons_only"], DEFAULT_PLAYBOOK.urgency),
-    social_proof: pick(raw.social_proof, ["when_relevant", "never"], DEFAULT_PLAYBOOK.social_proof),
+    discounts: pick(raw.discounts, ["never_offer", "ask_a_person"], DEFAULT_PLAYBOOK.discounts),
+    competitors: pick(raw.competitors, ["stay_positive", "avoid"], DEFAULT_PLAYBOOK.competitors),
     pitch: str(raw.pitch),
     ideal_customer: str(raw.ideal_customer),
     chosen: Object.keys(raw).length > 0,
@@ -89,7 +89,7 @@ export function lessonsOf(commercial: Doc): Lesson[] {
   for (const raw of Array.isArray(list) ? list : []) {
     const l = obj(raw);
     if (!KINDS.includes(l.kind as LessonKind) || typeof l.text !== "string") continue;
-    const lesson = blankLesson(l.kind as LessonKind, { text: l.text, when: str(l.when), product: str(l.product), source: str(l.source), why: str(l.why) });
+    const lesson = blankLesson(l.kind as LessonKind, { text: l.text, when: str(l.when), product: str(l.product), why: str(l.why) });
     if (SITUATIONAL.includes(lesson.kind) && lesson.when === "") continue;
     out.push(lesson);
   }
@@ -113,15 +113,14 @@ export function holdsExactValue(text: string): boolean {
 }
 
 export function lessonProblem(lesson: Lesson): "exact" | null {
-  return [lesson.text, lesson.when, lesson.source, lesson.why].some(holdsExactValue) ? "exact" : null;
+  return [lesson.text, lesson.when, lesson.why].some(holdsExactValue) ? "exact" : null;
 }
 
 function documentOf(lesson: Lesson): Doc {
   const out: Doc = { kind: lesson.kind, text: clip(lesson.text, TEXT_MAX) };
   if (SITUATIONAL.includes(lesson.kind)) out.when = clip(lesson.when, SHORT_MAX);
   if (!GLOBAL.includes(lesson.kind) && lesson.product !== "") out.product = lesson.product;
-  if (lesson.kind === "proof" && clip(lesson.source, SHORT_MAX) !== "") out.source = clip(lesson.source, SHORT_MAX);
-  if (!GLOBAL.includes(lesson.kind) && lesson.kind !== "proof" && clip(lesson.why, SHORT_MAX) !== "") out.why = clip(lesson.why, SHORT_MAX);
+  if (!GLOBAL.includes(lesson.kind) && clip(lesson.why, SHORT_MAX) !== "") out.why = clip(lesson.why, SHORT_MAX);
   return out;
 }
 
@@ -135,9 +134,9 @@ export function setTraining(commercial: Doc, training: Training): Doc {
   const p = training.playbook;
   const pitch = clip(p.pitch, SHORT_MAX);
   const ideal = clip(p.ideal_customer, SHORT_MAX);
-  const unchanged = p.approach === DEFAULT_PLAYBOOK.approach && p.closing === DEFAULT_PLAYBOOK.closing && p.urgency === DEFAULT_PLAYBOOK.urgency && p.social_proof === DEFAULT_PLAYBOOK.social_proof;
+  const unchanged = p.approach === DEFAULT_PLAYBOOK.approach && p.closing === DEFAULT_PLAYBOOK.closing && p.urgency === DEFAULT_PLAYBOOK.urgency && p.discounts === DEFAULT_PLAYBOOK.discounts && p.competitors === DEFAULT_PLAYBOOK.competitors;
   if (unchanged && !p.chosen && pitch === "" && ideal === "") delete communication.playbook;
-  else communication.playbook = { approach: p.approach, closing: p.closing, urgency: p.urgency, social_proof: p.social_proof, ...(pitch ? { pitch } : {}), ...(ideal ? { ideal_customer: ideal } : {}) };
+  else communication.playbook = { approach: p.approach, closing: p.closing, urgency: p.urgency, discounts: p.discounts, competitors: p.competitors, ...(pitch ? { pitch } : {}), ...(ideal ? { ideal_customer: ideal } : {}) };
   return { ...commercial, communication };
 }
 

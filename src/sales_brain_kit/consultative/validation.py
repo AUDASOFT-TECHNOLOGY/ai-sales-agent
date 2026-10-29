@@ -110,6 +110,11 @@ def validate_output(output: BrainOutput, context: CommercialContext) -> Validate
     stage = _check_stage(output, context, problems)
     touch = _check_follow_up(decision, output, selected, required, context, problems)
     _check_reasons(decision, output, context, problems)
+    if output.breaks_red_line and message is not None:
+        problems.append(
+            "your message breaks one of the things the business never does (the 'Never' lines): "
+            "write it again without breaking it"
+        )
     _check_payment(decision, output, analysis, context, problems)
     fact_proposals = check_learned(output, context, problems)
 

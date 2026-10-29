@@ -1,5 +1,6 @@
 /** "My way of selling": the choices that hold for every product (how the agent leads, closes, uses
- *  urgency and proof), the business in the client's own words, then writing habits and red lines. */
+ *  urgency, answers a request for a discount, speaks of a competitor), the business in the client's own
+ *  words, then writing habits and red lines. */
 
 import { useI18n, type MessageKey } from "../../i18n";
 import { Segmented, Textarea } from "../../ui/Controls";
@@ -57,13 +58,24 @@ export function MethodTab({ playbook, onPlaybook, lessons, onLessons }: { playbo
         </div>
 
         <Segmented
-          label={t("rv.train.socialproof.label")}
-          layoutId="train-proof"
-          value={playbook.social_proof}
-          onChange={(social_proof) => set({ social_proof })}
+          label={t("rv.train.discounts.label")}
+          layoutId="train-discounts"
+          value={playbook.discounts}
+          onChange={(discounts) => set({ discounts })}
           options={[
-            { value: "when_relevant", label: t("rv.train.socialproof.when") },
-            { value: "never", label: t("rv.train.socialproof.never") },
+            { value: "never_offer", label: t("rv.train.discounts.never_offer") },
+            { value: "ask_a_person", label: t("rv.train.discounts.ask_a_person") },
+          ]}
+        />
+
+        <Segmented
+          label={t("rv.train.competitors.label")}
+          layoutId="train-competitors"
+          value={playbook.competitors}
+          onChange={(competitors) => set({ competitors })}
+          options={[
+            { value: "stay_positive", label: t("rv.train.competitors.stay_positive") },
+            { value: "avoid", label: t("rv.train.competitors.avoid") },
           ]}
         />
       </Card>

@@ -85,22 +85,6 @@ def test_a_frequent_question_is_answered_with_the_clients_answer():
     )
 
 
-def test_a_proof_is_quoted_as_given_with_its_source():
-    prompt = system_for(
-        {"kind": "proof", "text": "Doubled my leads in a month", "source": "Leila, bakery owner"}
-    )
-    assert '(Leila, bakery owner): "Doubled my leads in a month"' in prompt
-    assert "Quote it only as given" in prompt
-
-
-def test_proofs_are_left_out_when_the_client_wants_no_social_proof():
-    prompt = system_for(
-        {"kind": "proof", "text": "Doubled my leads"}, playbook={"social_proof": "never"}
-    )
-    assert "Doubled my leads" not in prompt
-    assert "Do not bring testimonials" in prompt
-
-
 # ---- the sales method ----------------------------------------------------------------------------
 
 
@@ -234,3 +218,58 @@ def test_the_agent_keeps_at_most_sixty_lessons():
     parse_settings(doc_with(*[{"kind": "habit", "text": f"Habit {i}"} for i in range(60)]))
     with pytest.raises(SettingsInvalidError):
         parse_settings(doc_with(*[{"kind": "habit", "text": f"Habit {i}"} for i in range(61)]))
+
+
+# ---- discounts and competitors -------------------------------------------------------------------
+
+
+def test_by_default_the_agent_never_offers_a_discount_and_never_criticises_a_competitor():
+    prompt = build_system_prompt(context_for())
+    assert "Never offer or promise a discount" in prompt
+    assert "never criticise it" in prompt
+
+
+def test_the_client_can_have_discount_requests_go_to_a_person_and_competitors_left_alone():
+    prompt = system_for(playbook={"discounts": "ask_a_person", "competitors": "avoid"})
+    assert "a person will look at it with them" in prompt
+    assert "do not discuss it" in prompt
+
+
+# ---- the same worry in other words ---------------------------------------------------------------
+
+
+def test_a_lesson_is_found_when_the_prospect_says_the_same_thing_in_other_words():
+    lessons = [
+        {"kind": "objection", "when": "It is too expensive", "text": "Price answer"},
+        *[
+            {"kind": "objection", "when": f"Other doubt {i} about topic{i}", "text": f"Other {i}"}
+            for i in range(8)
+        ],
+    ]
+    for said in ("Le tarif me dépasse", "I cannot afford this"):
+        context = context_for(doc_with(*lessons), action=REPLY, messages=turns(("in", said)))
+        prompt = build_system_prompt(context)
+        assert "Price answer" in prompt, said
+
+
+# ---- the red lines are checked ---------------------------------------------------------------------
+
+
+def test_the_model_is_asked_to_check_its_message_against_the_red_lines_only_when_there_are_some():
+    assert "breaks_red_line" in system_for({"kind": "never", "text": "Promise a result"})
+    assert "breaks_red_line" not in system_for({"kind": "habit", "text": "Be brief"})
+
+
+def test_a_message_that_breaks_a_red_line_is_refused_and_written_again():
+    from brain_support import answer, make_brain
+
+    doc = doc_with({"kind": "never", "text": "Promise a result"})
+    brain, llm = make_brain(
+        doc,
+        answer(message="We guarantee results!", breaks_red_line=True),
+        answer(message="Here is what we offer."),
+    )
+    decision = brain.decide(__import__("brain_support").request())
+    assert decision.message.text == "Here is what we offer."
+    assert len(llm.calls) == 2
+    assert "the 'Never' lines" in llm.calls[1].messages[-1].content

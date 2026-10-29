@@ -13,7 +13,6 @@ describe("lessons", () => {
         blankLesson("never", { text: "Promise a result" }),
         blankLesson("objection", { when: "Too expensive", text: "I get it.", why: "Price hides doubt", product: "alpha" }),
         blankLesson("faq", { when: "Refund?", text: "Yes, within 14 days." }),
-        blankLesson("proof", { text: "Doubled my leads", source: "Leila" }),
       ),
     );
     expect(next.communication).toEqual({
@@ -23,15 +22,13 @@ describe("lessons", () => {
         { kind: "never", text: "Promise a result" },
         { kind: "objection", when: "Too expensive", text: "I get it.", why: "Price hides doubt", product: "alpha" },
         { kind: "faq", when: "Refund?", text: "Yes, within 14 days." },
-        { kind: "proof", text: "Doubled my leads", source: "Leila" },
       ],
     });
     expect(plain(lessonsOf(next))).toEqual([
-      { kind: "habit", text: "Write like a chat", when: "", product: "", source: "", why: "" },
-      { kind: "never", text: "Promise a result", when: "", product: "", source: "", why: "" },
-      { kind: "objection", text: "I get it.", when: "Too expensive", product: "alpha", source: "", why: "Price hides doubt" },
-      { kind: "faq", text: "Yes, within 14 days.", when: "Refund?", product: "", source: "", why: "" },
-      { kind: "proof", text: "Doubled my leads", when: "", product: "", source: "Leila", why: "" },
+      { kind: "habit", text: "Write like a chat", when: "", product: "", why: "" },
+      { kind: "never", text: "Promise a result", when: "", product: "", why: "" },
+      { kind: "objection", text: "I get it.", when: "Too expensive", product: "alpha", why: "Price hides doubt" },
+      { kind: "faq", text: "Yes, within 14 days.", when: "Refund?", product: "", why: "" },
     ]);
   });
 
@@ -43,8 +40,8 @@ describe("lessons", () => {
     expect(isComplete(blankLesson("example", { when: "a", text: "b" }))).toBe(true);
   });
 
-  it("never carry a product, a source or a reason where the server refuses one", () => {
-    const next = setTraining({}, withLessons(blankLesson("habit", { text: "x", product: "alpha", source: "s", why: "w" }), blankLesson("example", { when: "w", text: "t", source: "s" })));
+  it("never carry a product or a reason where the server refuses one", () => {
+    const next = setTraining({}, withLessons(blankLesson("habit", { text: "x", product: "alpha", why: "w" }), blankLesson("example", { when: "w", text: "t" })));
     expect(next.communication).toEqual({ training: [{ kind: "habit", text: "x" }, { kind: "example", when: "w", text: "t" }] });
   });
 
@@ -96,9 +93,9 @@ describe("the sales method", () => {
 
   it("is written only once the client made a choice, and not when nothing was said", () => {
     expect(setTraining({}, withLessons()).communication).toEqual({});
-    expect(setTraining({}, { playbook: { ...DEFAULT_PLAYBOOK, chosen: true }, lessons: [] }).communication).toEqual({ playbook: { approach: "consultative", closing: "choice", urgency: "none", social_proof: "when_relevant" } });
+    expect(setTraining({}, { playbook: { ...DEFAULT_PLAYBOOK, chosen: true }, lessons: [] }).communication).toEqual({ playbook: { approach: "consultative", closing: "choice", urgency: "none", discounts: "never_offer", competitors: "stay_positive" } });
     expect(setTraining({}, { playbook: { ...DEFAULT_PLAYBOOK, approach: "guide", chosen: true, pitch: " We help. ", ideal_customer: "Shops" }, lessons: [] }).communication).toEqual({
-      playbook: { approach: "guide", closing: "choice", urgency: "none", social_proof: "when_relevant", pitch: "We help.", ideal_customer: "Shops" },
+      playbook: { approach: "guide", closing: "choice", urgency: "none", discounts: "never_offer", competitors: "stay_positive", pitch: "We help.", ideal_customer: "Shops" },
     });
   });
 

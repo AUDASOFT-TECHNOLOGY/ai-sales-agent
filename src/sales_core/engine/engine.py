@@ -750,6 +750,69 @@ class Engine:
         if not valid:
             raise ManualSendError("invalid_contact", "This contact is not valid for this channel.")
         return Prospect(
+    def rehearse(self, prospect_id: ProspectId, text: str) -> BrainDecision:
+        """What the agent would decide if the person of a test wrote `text` now.
+
+        A rehearsal: the Brain is asked exactly as for a real reply, with the conversation so far and
+        the new message, but nothing is stored, planned, sent or counted, and the person is not
+        written to. Only a test person can be rehearsed with. Raises `LookupError` for any other id and
+        `ManualSendError` (`no_channel`) when the person has no channel to be answered on."""
+        if not prospect_id.startswith(TEST_ID_PREFIX):
+            raise LookupError(prospect_id)
+        with self._lock:
+            prospect = self._repo.get_prospect(prospect_id)
+            if prospect is None:
+                raise LookupError(prospect_id)
+            conversation = self._repo.get_conversation(prospect_id)
+            lane = self._router.lane_for(prospect)
+            channel = (
+                lane.channel
+                if lane is not None
+                else conversation.messages[-1].channel
+                if conversation.messages
+                else self._router.any_channel
+            )
+            if channel is None:
+                raise ManualSendError("no_channel", "This test has no channel to answer on.")
+            now = self._clock.now()
+            action = SalesAction(
+                action_id=ActionId("rehearsal"),
+                client_id=self._client.client_id,
+                prospect_id=prospect_id,
+                action_type=SalesActionType.REPLY,
+                due_at=now,
+                idempotency_key="rehearsal",
+                priority=ActionPriority.HIGH,
+                lane_id=lane.lane_id if lane is not None else None,
+                channel=channel,
+            )
+            heard = Message(
+                message_id=MessageId("rehearsal"),
+                client_id=self._client.client_id,
+                prospect_id=prospect_id,
+                conversation_id=conversation.conversation_id,
+                direction=Direction.INBOUND,
+                channel=channel,
+                text=text,
+                timestamp=now,
+            )
+            rehearsed = replace(conversation, messages=(*conversation.messages, heard))
+            facts = tuple(self._facts.get_facts(prospect_id)) if self._facts else ()
+            rates = self._read_rates()
+            return self._brain.decide(
+                BrainRequest(
+                    client=self._client,
+                    prospect=prospect,
+                    conversation=replace(rehearsed, origin=self._origin_of(action, rehearsed)),
+                    action=action,
+                    now=now,
+                    facts=facts,
+                    lane=lane,
+                    exchange_rates=rates[0] if rates else {},
+                    exchange_rates_at=rates[1] if rates else None,
+                )
+            )
+
             client_id=self._client.client_id,
             prospect_id=ProspectId(f"{TEST_ID_PREFIX}{key}"),
             display_name=name.strip() or address,

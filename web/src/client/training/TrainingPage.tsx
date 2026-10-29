@@ -1,17 +1,16 @@
 /** Train your agent: the client teaches the agent to sell like their best salesperson.
  *
- *  Five sections over ONE draft, saved together: an overview (how ready the agent is and what to do
+ *  Four sections over ONE draft, saved together: an overview (how ready the agent is and what to do
  *  next), the sales method (how it leads and closes, its habits and red lines), the client's own answers
- *  (to doubts, to frequent questions, to any situation), proof and the material behind each product
- *  (documents, pages, testimonials, texts), and the correction of a message from a test. What is taught
+ *  (to doubts, to frequent questions, to any situation), and the correction of a message from a test.
+ *  Documents, testimonials and arguments belong to each product (My offer): the agent reads them by itself. What is taught
  *  lives in `communication.playbook` and `communication.training`; the agent is shown only the lessons
  *  that help each message, and its rules always win over a lesson. */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Save } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { Button, LinkButton } from "../../ui/Button";
-import { clientTrainingMaterial, type ProductMaterial } from "../api";
 import { FailureNote, Note, PageHead, type Failure } from "../kit";
 import { OfferProvider, useOffer } from "../offer/OfferLayout";
 import { withLanguages } from "../prepare/agentModel";
@@ -19,11 +18,10 @@ import { AnswersTab } from "./AnswersTab";
 import { FixTab } from "./FixTab";
 import { MethodTab } from "./MethodTab";
 import { OverviewTab, type TabId } from "./OverviewTab";
-import { ProofTab } from "./ProofTab";
 import { readinessOf } from "./readiness";
 import { countOf, isHalf, lessonProblem, orphans, productOptions, setTraining, signature, trainingOf, type Lesson, type Playbook } from "./trainingModel";
 
-const TABS: TabId[] = ["overview", "method", "answers", "proof", "fix"];
+const TABS: TabId[] = ["overview", "method", "answers", "fix"];
 
 export function TrainingPage() {
   const { t } = useI18n();
@@ -47,8 +45,6 @@ function Training() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [material, setMaterial] = useState<ProductMaterial[] | null>(null);
-  const [stamp, setStamp] = useState(0);
 
   // What the server holds changed (a save, a reload): the screen shows it.
   if (base !== saved && JSON.stringify(base) !== JSON.stringify(saved)) {
@@ -56,21 +52,9 @@ function Training() {
     setDraft(saved);
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    clientTrainingMaterial().then(
-      (found) => !cancelled && setMaterial(found.products),
-      () => undefined, // without it the overview simply counts no material
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [stamp]);
-  const materialChanged = useMemo(() => () => setStamp((n) => n + 1), []);
-
   const products = useMemo(() => productOptions(commercial, locale), [commercial, locale]);
   const dirty = signature(commercial, draft) !== signature(commercial, saved);
-  const readiness = useMemo(() => readinessOf({ commercial, playbook: draft.playbook, lessons: draft.lessons, products, material }), [commercial, draft, products, material]);
+  const readiness = useMemo(() => readinessOf({ commercial, playbook: draft.playbook, lessons: draft.lessons }), [commercial, draft]);
 
   const change = (next: Partial<{ playbook: Playbook; lessons: Lesson[] }>) => {
     setDraft({ ...draft, ...next });
@@ -104,7 +88,6 @@ function Training() {
         {tab === "overview" ? <OverviewTab readiness={readiness} onGo={setTab} dirty={dirty} /> : null}
         {tab === "method" ? <MethodTab playbook={draft.playbook} onPlaybook={(playbook) => change({ playbook })} lessons={draft.lessons} onLessons={(lessons) => change({ lessons })} /> : null}
         {tab === "answers" ? <AnswersTab lessons={draft.lessons} onChange={(lessons) => change({ lessons })} products={products} /> : null}
-        {tab === "proof" ? <ProofTab lessons={draft.lessons} onChange={(lessons) => change({ lessons })} products={products} playbook={draft.playbook} material={material} onMaterialChanged={materialChanged} /> : null}
         {tab === "fix" ? <FixTab lessons={draft.lessons} onChange={(lessons) => change({ lessons })} /> : null}
       </div>
 

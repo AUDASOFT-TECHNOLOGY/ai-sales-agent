@@ -1018,51 +1018,6 @@ export function clientRetryResource(productId: string, resourceId: string): Prom
   return request<ProductResource>(`${productPath(productId)}/${encodeURIComponent(resourceId)}/retry`, { method: "POST" });
 }
 
-/** Text the client writes or pastes (a testimonial, an FAQ, a video's transcript): read like any document. */
-export function clientAddResourceNote(productId: string, body: { title: string; text: string; category: "testimonial" | "document" | "other" }): Promise<ProductResource> {
-  return request<ProductResource>(`${productPath(productId)}/note`, { method: "POST", body: JSON.stringify(body) });
-}
-
-/* ── Training material (see src/sales_app/api/client_training.py) ──
- * What the agent can really read of each product, and draft lessons found in it. */
-
-export interface UnreadResource {
-  id: string;
-  title: string;
-  category: ResourceCategory;
-  /** Why it is not read, as a fixed code (video, image, scanned_pdf, fetch_failed, ...). */
-  reason: string | null;
-}
-
-export interface ProductMaterial {
-  product_id: string;
-  total: number;
-  readable: number;
-  readable_chars: number;
-  /** Testimonials the agent can read. */
-  testimonials: number;
-  by_category: Record<string, number>;
-  unread: UnreadResource[];
-}
-
-export function clientTrainingMaterial(): Promise<{ products: ProductMaterial[] }> {
-  return request<{ products: ProductMaterial[] }>("/training/material");
-}
-
-export interface LessonSuggestion {
-  kind: "faq" | "proof";
-  text: string;
-  /** The question, for a frequent question. */
-  when: string | null;
-  /** The document it comes from. */
-  source: string;
-  attribution: string | null;
-}
-
-export function clientTrainingSuggestions(productId: string): Promise<{ suggestions: LessonSuggestion[]; left_out: number }> {
-  return request<{ suggestions: LessonSuggestion[]; left_out: number }>(`/training/suggestions/${encodeURIComponent(productId)}`);
-}
-
 /** The file travels as the raw request body (no multipart): its name and title ride in the headers. */
 export async function clientUploadResource(productId: string, file: File, title: string): Promise<ProductResource> {
   let response: Response;
@@ -1187,3 +1142,13 @@ export function clientAgentTests(): Promise<{ tests: AgentTest[] }> {
 export function clientAgentTest(id: string): Promise<{ test: AgentTest; messages: AgentTestMessage[] }> {
   return request<{ test: AgentTest; messages: AgentTestMessage[] }>(`/agent-test/${encodeURIComponent(id)}`);
 }
+/** What the agent would answer if this test person wrote `text` now. Nothing is stored or sent. */
+export interface Rehearsal {
+  decision: string;
+  reply: string | null;
+}
+
+export function clientRehearse(id: string, text: string): Promise<Rehearsal> {
+  return request<Rehearsal>(`/agent-test/${encodeURIComponent(id)}/rehearse`, { method: "POST", body: JSON.stringify({ text }) });
+}
+

@@ -23,7 +23,7 @@ from sales_brain_kit.consultative.context import CommercialContext
 from sales_brain_kit.settings.strategy import Playbook, TrainingLesson
 
 # How many lessons of each kind one message shows.
-SHOWN = {"example": 4, "objection": 3, "faq": 3, "proof": 2}
+SHOWN = {"example": 4, "objection": 3, "faq": 3}
 
 APPROACH: dict[str, str] = {
     "consultative": (
@@ -66,12 +66,27 @@ URGENCY: dict[str, str] = {
         "truly states it; never invent urgency."
     ),
 }
-PROOF: dict[str, str] = {
-    "when_relevant": (
-        "When it helps the prospect decide, bring one proof at a time (a result or a testimonial "
-        "from the lessons or the verified proof points), tied to their situation."
+# Testimonials and proof points belong to each product (its sheet and its documents), not to the training.
+PROOF = (
+    "When it helps the prospect decide, bring one verified proof point or testimonial of the "
+    "product, tied to their situation, and only as it is given."
+)
+DISCOUNTS: dict[str, str] = {
+    "never_offer": (
+        "Never offer or promise a discount or a special deal; if asked, say what the offer "
+        "includes and why it is worth it."
     ),
-    "never": "Do not bring testimonials or results into the conversation.",
+    "ask_a_person": (
+        "If the prospect asks for a discount, do not offer or promise anything: say that a "
+        "person will look at it with them, and hand over when the decisions open allow it."
+    ),
+}
+COMPETITORS: dict[str, str] = {
+    "stay_positive": (
+        "If a competitor is mentioned, stay positive and factual: never criticise it, speak "
+        "only about what this business offers and what you know."
+    ),
+    "avoid": "If a competitor is mentioned, do not discuss it; bring the conversation back to the prospect's need.",
 }
 # Always true, whatever the method: the discipline that makes the agent convincing and honest.
 CRAFT = (
@@ -98,6 +113,91 @@ _SKIP = frozenset(
 )
 
 
+# Words that mean the same thing for a prospect, in the languages clients sell in. A lesson and a
+# message that speak of the same theme are close even when they share no word ("too expensive" and
+# "the rate is beyond my means"). Stems, accents folded.
+THEMES: dict[str, tuple[str, ...]] = {
+    "price": (
+        "cher",
+        "prix",
+        "tarif",
+        "cout",
+        "budget",
+        "expens",
+        "price",
+        "cost",
+        "afford",
+        "cheap",
+        "moyens",
+        "غال",
+        "سعر",
+        "ثمن",
+        "تكلف",
+    ),
+    "think": ("reflech", "penser", "think", "consider", "decid", "نفكر", "أفكر"),
+    "compare": (
+        "compar",
+        "concurren",
+        "competi",
+        "alternativ",
+        "ailleurs",
+        "elsewhere",
+        "autres",
+        "قارن",
+        "منافس",
+    ),
+    "time": ("moment", "timing", "later", "tard", "busy", "occup", "temps", "وقت", "لاحق"),
+    "trust": (
+        "confian",
+        "fiab",
+        "arnaq",
+        "scam",
+        "trust",
+        "serieu",
+        "reliab",
+        "legit",
+        "ثق",
+        "نصب",
+    ),
+    "partner": (
+        "associ",
+        "conjoint",
+        "femme",
+        "mari",
+        "partner",
+        "boss",
+        "patron",
+        "equipe",
+        "team",
+        "شريك",
+        "زوج",
+    ),
+    "already": ("deja", "already", "existant", "current", "actuel", "satisf", "عندي"),
+    "need": ("besoin", "utile", "necessa", "need", "useful", "interess", "حاجة", "فايدة"),
+    "cancel": (
+        "rembours",
+        "refund",
+        "annul",
+        "cancel",
+        "resili",
+        "engag",
+        "contract",
+        "contrat",
+        "ألغ",
+    ),
+    "discount": ("remise", "reduc", "rabais", "discount", "promo", "negoc", "deal", "تخفيض", "خصم"),
+    "how": ("comment", "fonction", "works", "marche", "how", "كيف"),
+}
+
+
+def _themes(tokens: set[str]) -> set[str]:
+    return {
+        theme
+        for theme, stems in THEMES.items()
+        if any(token.startswith(stem) for token in tokens for stem in stems)
+    }
+
+
 def _tokens(text: str) -> set[str]:
     folded = unicodedata.normalize("NFKD", text.casefold())
     folded = "".join(c for c in folded if not unicodedata.combining(c))
@@ -115,7 +215,9 @@ def playbook_lines(playbook: Playbook) -> list[str]:
         f"- Approach: {APPROACH[playbook.approach]}",
         f"- Closing: {CLOSING[playbook.closing]}",
         f"- Urgency: {URGENCY[playbook.urgency]}",
-        f"- Proof: {PROOF[playbook.social_proof]}",
+        f"- Proof: {PROOF}",
+        f"- Discounts: {DISCOUNTS[playbook.discounts]}",
+        f"- Competitors: {COMPETITORS[playbook.competitors]}",
     ]
     if playbook.pitch:
         lines.append(f"- The business in the client's own words: {playbook.pitch}")
@@ -129,10 +231,13 @@ def _relevant(
     lessons: Sequence[TrainingLesson], message: set[str], limit: int
 ) -> list[TrainingLesson]:
     """The `limit` lessons closest to the message, the others in the client's order when none is."""
-    scored = [
-        (len(message & _tokens(f"{l.when or ''} {l.text}")), -position, l)
-        for position, l in enumerate(lessons)
-    ]
+    themes = _themes(message)
+    scored = []
+    for position, lesson in enumerate(lessons):
+        own = _tokens(f"{lesson.when or ''} {lesson.text}")
+        # A shared theme counts more than a shared word: it is what the prospect is worried about.
+        score = len(message & own) + 3 * len(themes & _themes(own))
+        scored.append((score, -position, lesson))
     scored.sort(key=lambda row: (row[0], row[1]), reverse=True)
     return [l for _, _, l in scored[:limit]]
 
@@ -148,8 +253,6 @@ def chosen_lessons(context: CommercialContext) -> list[TrainingLesson]:
     message = _tokens(last.text) if last is not None and last.text else set()
     out = [l for l in lessons if l.kind == "never"] + [l for l in lessons if l.kind == "habit"]
     for kind, limit in SHOWN.items():
-        if kind == "proof" and context.settings.communication.playbook.social_proof == "never":
-            continue
         # Without a product in focus only the lessons that hold for every product are shown.
         pool = [
             l for l in lessons if l.kind == kind and (l.product is None or l.product in in_play)
@@ -182,12 +285,6 @@ def lesson_line(lesson: TrainingLesson) -> str:
             return (
                 f'- Frequent question{where}: "{lesson.when}" The business answers: '
                 f'"{lesson.text}" Use it only if the prospect really asks this.{why}'
-            )
-        case _:  # proof
-            who = f" ({lesson.source})" if lesson.source else ""
-            return (
-                f'- Proof the business stands behind{where}{who}: "{lesson.text}" '
-                "Quote it only as given, only when it helps this prospect decide."
             )
 
 

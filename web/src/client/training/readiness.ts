@@ -1,13 +1,12 @@
-/** How ready the agent is to sell, from what the client taught it and what it can read: nine things
- *  that make a salesperson convincing, each worth a share of 100. The score is a guide to what to do
- *  next, never a promise of results: it counts only what exists (a lesson written, a document the
- *  agent can really read), not how good it is. */
+/** How ready the agent is to sell, from what the client taught it: seven things that make a salesperson
+ *  convincing, each worth a share of 100. The score is a guide to what to do next, never a promise of
+ *  results: it counts only what exists (a lesson written), not how good it is. What belongs to each
+ *  product (its documents, its testimonials, its arguments) is done in the product sheet, not here. */
 
 import type { Doc } from "../settingsModel";
-import type { ProductMaterial } from "../api";
-import { configuredObjections, countOf, type Lesson, type Playbook, type ProductOption } from "./trainingModel";
+import { configuredObjections, countOf, type Lesson, type Playbook } from "./trainingModel";
 
-export type DimensionId = "method" | "pitch" | "voice" | "redlines" | "objections" | "faq" | "examples" | "proof" | "material";
+export type DimensionId = "method" | "pitch" | "voice" | "redlines" | "objections" | "faq" | "examples";
 export type Level = "start" | "progress" | "strong" | "excellent";
 
 export interface Dimension {
@@ -28,16 +27,13 @@ export interface Readiness {
   next: DimensionId[];
 }
 
-const WEIGHTS: Record<DimensionId, number> = { method: 15, pitch: 10, voice: 10, redlines: 5, objections: 20, faq: 10, examples: 5, proof: 10, material: 15 };
+const WEIGHTS: Record<DimensionId, number> = { method: 20, pitch: 10, voice: 10, redlines: 10, objections: 30, faq: 10, examples: 10 };
 
 const part = (have: number, goal: number) => (goal <= 0 ? 1 : Math.min(1, have / goal));
 
-export function readinessOf(input: { commercial: Doc; playbook: Playbook; lessons: Lesson[]; products: ProductOption[]; material: ProductMaterial[] | null }): Readiness {
-  const { commercial, playbook, lessons, products, material } = input;
+export function readinessOf(input: { commercial: Doc; playbook: Playbook; lessons: Lesson[] }): Readiness {
+  const { commercial, playbook, lessons } = input;
   const objectionGoal = Math.max(4, Math.min(8, configuredObjections(commercial).length));
-  const readable = (material ?? []).filter((m) => m.readable > 0 && products.some((p) => p.id === m.product_id)).length;
-  const testimonials = (material ?? []).reduce((sum, m) => sum + m.testimonials, 0);
-  const proofs = countOf(lessons, "proof") + testimonials;
   const pitchRatio = (playbook.pitch.trim() ? 0.6 : 0) + (playbook.ideal_customer.trim() ? 0.4 : 0);
 
   const raw: Array<[DimensionId, number, number]> = [
@@ -48,8 +44,6 @@ export function readinessOf(input: { commercial: Doc; playbook: Playbook; lesson
     ["objections", countOf(lessons, "objection"), objectionGoal],
     ["faq", countOf(lessons, "faq"), 5],
     ["examples", countOf(lessons, "example"), 3],
-    ["proof", playbook.social_proof === "never" ? 2 : proofs, 2],
-    ["material", readable, Math.max(1, products.length)],
   ];
   const dimensions: Dimension[] = raw.map(([id, have, goal]) => ({ id, weight: WEIGHTS[id], ratio: part(have, goal), have: Math.min(have, goal), goal }));
   const score = Math.round(dimensions.reduce((sum, d) => sum + d.weight * d.ratio, 0));

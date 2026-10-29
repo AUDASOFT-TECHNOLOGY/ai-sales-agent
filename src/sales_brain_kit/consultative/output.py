@@ -88,6 +88,8 @@ class BrainOutput(Model):
     # What the message says about the payment: nothing, that it is being verified, or that it is
     # confirmed. `confirmed` is only open once a person at the client confirmed it (see validation).
     payment_statement: Literal["none", "awaiting_verification", "confirmed"] = "none"
+    # The model's own check against the business's "Never" lines: true if its message breaks one.
+    breaks_red_line: bool = False
     rationale: str = Field(default="", max_length=2000)
 
 
@@ -227,6 +229,7 @@ def response_schema(context: CommercialContext) -> dict[str, Any]:
                 "type": "string",
                 "enum": ["none", "awaiting_verification", *(["confirmed"] if paid else [])],
             },
+            "breaks_red_line": {"type": "boolean"},
             "rationale": {"type": "string"},
         }
     )

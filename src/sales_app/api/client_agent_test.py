@@ -12,6 +12,12 @@
   conversation).
 - `GET /client/v1/agent-test`: the tests so far, newest first.
 - `GET /client/v1/agent-test/{prospect_id}`: one test and its conversation, oldest message first.
+- `POST /client/v1/agent-test/{prospect_id}/rehearse` (`{text}`): what the agent would answer if this
+  person wrote `text` now, with the settings in force. Nothing is stored, sent or counted in the
+  conversation; `decision` is `send_message` (then `reply` is the message) or what the agent would do
+  instead (`handoff_to_human`, `schedule_follow_up`, `close`, `no_action`), with no reply. The same
+  sentence can be tried again after the training changed, to compare. Errors: `agent_not_loaded`,
+  `no_channel`, and 404 for anything that is not a test.
 
 A test is a prospect like any other: it counts in the conversations, the prospects and the results,
 and in the daily limit. It is recognised by its id (`inbound-test-...`), so a later filter can leave it
@@ -84,6 +90,17 @@ class TestListResponse(BaseModel):
 class TestConversationResponse(BaseModel):
     test: TestSummary
     messages: list[TestMessage]
+
+
+class RehearseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class RehearseResponse(BaseModel):
+    decision: str
+    reply: str | None
 
 
 class StartTestResponse(BaseModel):
@@ -199,6 +216,25 @@ def create_client_agent_test_router(application: Application) -> APIRouter:
                     TestMessage(direction=m.direction.value, text=m.text, sent_at=m.timestamp)
                     for m in history.messages
                 ],
+            )
+
+        return run(client, response, work)
+
+    @router.post("/{prospect_id}/rehearse", response_model=RehearseResponse)
+    def rehearse(
+        prospect_id: str,
+        body: RehearseRequest,
+        response: Response,
+        client: ClientProfile = Depends(get_current_client),
+    ) -> RehearseResponse:
+        def work(engine: Engine) -> RehearseResponse:
+            try:
+                decision = engine.rehearse(ProspectId(prospect_id), body.text)
+            except ManualSendError as refusal:
+                raise refuse(409, refusal.code, refusal.message) from None
+            return RehearseResponse(
+                decision=decision.decision_type.value,
+                reply=decision.message.text if decision.message is not None else None,
             )
 
         return run(client, response, work)

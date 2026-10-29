@@ -123,7 +123,7 @@ class MessageSettings(Model):
     greeting: Literal["first_message_only", "every_message", "never"] = "first_message_only"
 
 
-LessonKind = Literal["habit", "example", "objection", "faq", "proof", "never"]
+LessonKind = Literal["habit", "example", "objection", "faq", "never"]
 # Lessons that answer a situation: they say when they apply (`when`) and are shown when they are close
 # to what the prospect just said.
 SITUATIONAL_LESSONS: frozenset[str] = frozenset({"example", "objection", "faq"})
@@ -142,7 +142,6 @@ class TrainingLesson(Model):
     - `objection`: how the client answers a doubt or a refusal (`when` is how it sounds, `text` the
       answer, `why` the reasoning behind it).
     - `faq`: a question prospects ask (`when`) and the answer the client gives (`text`).
-    - `proof`: a testimonial, a result or a story the client stands behind (`text`; `source` says whose).
 
     `product` ties a lesson to one product: it is shown only when that product is in play. Prices,
     links, e-mail addresses and account numbers never go in a lesson: they reach a prospect only
@@ -152,7 +151,6 @@ class TrainingLesson(Model):
     text: Paragraph
     when: ShortText | None = None
     product: Slug | None = None
-    source: ShortText | None = None
     why: ShortText | None = None
 
     @model_validator(mode="after")
@@ -163,15 +161,13 @@ class TrainingLesson(Model):
             raise ValueError(f"a '{self.kind}' lesson has no 'when'")
         if self.kind in GLOBAL_LESSONS and self.product:
             raise ValueError(f"a '{self.kind}' lesson holds for every product: it has no 'product'")
-        if self.kind != "proof" and self.source:
-            raise ValueError("only a 'proof' lesson has a 'source'")
         if self.kind in GLOBAL_LESSONS and self.why:
             raise ValueError(f"a '{self.kind}' lesson has no 'why'")
         return self
 
     @model_validator(mode="after")
     def _holds_no_exact_value(self) -> "TrainingLesson":
-        for name in ("text", "when", "source", "why"):
+        for name in ("text", "when", "why"):
             value = getattr(self, name)
             if value and strip_exact_values(value) != value:
                 raise ValueError(
@@ -195,8 +191,10 @@ class Playbook(Model):
     # `real_reasons_only`: the agent may mention a deadline or a limited place only if the catalog
     # or a lesson really says so; it never invents urgency.
     urgency: Literal["none", "real_reasons_only"] = "none"
-    # Whether the agent may bring a testimonial or a result when it helps the prospect decide.
-    social_proof: Literal["when_relevant", "never"] = "when_relevant"
+    # A prospect asks for a discount: the agent never offers one, or hands the request to a person.
+    discounts: Literal["never_offer", "ask_a_person"] = "never_offer"
+    # A prospect names a competitor: the agent stays positive and factual, or does not discuss it.
+    competitors: Literal["stay_positive", "avoid"] = "stay_positive"
     pitch: ShortText | None = None  # the business in one breath, in the client's own words
     ideal_customer: ShortText | None = None  # who the business serves best
 
