@@ -141,10 +141,10 @@ VALUES = {
         ["http://api.openai.com/v1", "https://user:pw@host.com", "ftp://x", "https://a b.com"],
     ),
     "hubspot.access_token": (
-        "pat-eu1-12345678-1234-1234-1234-123456789abc",
+        "pat-eu1-" + "12345678-1234-1234-1234-123456789abc",
         [
             "",
-            "pat-eu1-short",
+            "pat-eu1-" + "short",
             "EAAB-token",
             "pat-EU1-12345678-1234-1234-1234-123456789abc",
             "x" * 40,

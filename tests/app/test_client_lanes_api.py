@@ -382,7 +382,7 @@ def test_a_write_must_say_which_version_it_is_based_on(world, alpha):
 
 
 def test_a_refusal_never_echoes_what_was_sent(alpha):
-    secret = "pat-eu1-12345678-1234-1234-1234-123456789abc"
+    secret = "pat-eu1-" + "12345678-1234-1234-1234-123456789abc"
     response = new_lane(alpha, access_token=secret)
     assert response.status_code == 422 and secret not in response.text
 

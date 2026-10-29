@@ -14,7 +14,7 @@ import pytest
 
 from sales_app.connection_tests import check_google_sheets, check_hubspot
 
-TOKEN = "pat-eu1-12345678-1234-1234-1234-123456789abc"
+TOKEN = "pat-eu1-" + "12345678-1234-1234-1234-123456789abc"
 
 
 def hubspot_http(handler):

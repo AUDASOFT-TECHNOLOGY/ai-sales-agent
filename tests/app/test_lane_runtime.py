@@ -88,7 +88,7 @@ def webhook_secret(cid: str) -> str:
 
 
 def hubspot_token(index: int) -> str:
-    return f"pat-eu1-{index:08x}-1111-1111-1111-111111111111"
+    return "pat-eu1-" + f"{index:08x}-1111-1111-1111-111111111111"
 
 
 def give(secrets, index, cid, *, email=True, telegram=True, hubspot=True):

@@ -30,8 +30,8 @@ from sales_core.contracts import AuditEvent, ContactInfo, ProspectStatus
 from sales_integrations.fakes import FakeClock
 from sales_integrations.hubspot import HubSpotClient
 
-TOKEN_A = "pat-eu1-aaaaaaaa-1111-1111-1111-111111111111"
-TOKEN_B = "pat-eu1-bbbbbbbb-2222-2222-2222-222222222222"
+TOKEN_A = "pat-eu1-" + "aaaaaaaa-1111-1111-1111-111111111111"
+TOKEN_B = "pat-eu1-" + "bbbbbbbb-2222-2222-2222-222222222222"
 HUBSPOT_SETTINGS = {
     "status_mapping": {"NEW": "new", "BAD_TIMING": "paused", "UNQUALIFIED": "closed"},
 }

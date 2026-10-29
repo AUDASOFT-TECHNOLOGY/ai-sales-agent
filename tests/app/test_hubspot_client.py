@@ -19,7 +19,7 @@ from sales_integrations.hubspot import (
     HubSpotUnavailableError,
 )
 
-TOKEN = "pat-eu1-12345678-1234-1234-1234-123456789abc"
+TOKEN = "pat-eu1-" + "12345678-1234-1234-1234-123456789abc"
 PROPS = ("firstname", "email")
 SECRET_WORDS = ("Leak Person", "leak@example.com", "internal-detail")
 

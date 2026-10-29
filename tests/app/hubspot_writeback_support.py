@@ -9,8 +9,8 @@ the write was applied).
 
 import httpx
 
-TOKEN_A = "pat-eu1-aaaaaaaa-1111-1111-1111-111111111111"
-TOKEN_B = "pat-eu1-bbbbbbbb-2222-2222-2222-222222222222"
+TOKEN_A = "pat-eu1-" + "aaaaaaaa-1111-1111-1111-111111111111"
+TOKEN_B = "pat-eu1-" + "bbbbbbbb-2222-2222-2222-222222222222"
 
 STATUS_MAPPING = {
     "NEW": "new",

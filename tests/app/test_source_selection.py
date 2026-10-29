@@ -32,7 +32,7 @@ from sales_app.wiring.providers.hubspot import HubSpotSourceSettings
 from sales_core.approval import ApprovalMode
 from sales_integrations.fakes import FakeClock
 
-TOKEN = "pat-eu1-12345678-1234-1234-1234-123456789abc"
+TOKEN = "pat-eu1-" + "12345678-1234-1234-1234-123456789abc"
 
 
 def legacy(**overrides):
@@ -170,16 +170,16 @@ class TestTheHubSpotDescriptor:
     @pytest.mark.parametrize(
         "token",
         [
-            "pat-eu1-12345678-1234-1234-1234-123456789abc",
-            "pat-na1-ABCDEF01-aaaa-BBBB-cccc-1234567890ab",
-            "pat-ap1-12345678-1234-1234-1234-123456789abc",
+            "pat-eu1-" + "12345678-1234-1234-1234-123456789abc",
+            "pat-na1-" + "ABCDEF01-aaaa-BBBB-cccc-1234567890ab",
+            "pat-ap1-" + "12345678-1234-1234-1234-123456789abc",
         ],
     )
     def test_the_shape_hubspot_issues_is_accepted(self, token):
         assert self.descriptor.credentials[0].pattern.match(token)
 
     @pytest.mark.parametrize(
-        "token", ["", "pat-", "pat-eu1-xyz", "eu1-12345678-1234-1234-1234-123456789abc", "sk-abc"]
+        "token", ["", "pat-", "pat-eu1-" + "xyz", "eu1-12345678-1234-1234-1234-123456789abc", "sk-abc"]
     )
     def test_anything_else_is_refused(self, token):
         assert not self.descriptor.credentials[0].pattern.match(token)
