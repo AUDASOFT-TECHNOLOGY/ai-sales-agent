@@ -415,7 +415,9 @@ def _assemble(
     send_caps, send_limits = _send_limits(account_stores, plans, clock)
     quotas = None
     if send_limits is not None:
-        quotas = QuotaService(send_limits, notification_service, clock, plans)
+        quotas = QuotaService(
+            send_limits, notification_service, clock, plans, _llm_usage_stores(account_stores)
+        )
         send_limits.attach_observer(quotas.observe)  # before any guard is built
     # Resolved at each use from the Admin's credentials: no restart when they change.
     shared = _shared_state(account_stores)

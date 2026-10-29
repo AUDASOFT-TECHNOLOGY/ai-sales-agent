@@ -327,6 +327,21 @@ class TestQuotas:
         assert status.credits_used is None and status.credits_basis == UNAVAILABLE
         assert "reached" in status.message and status.action
 
+    def test_credits_come_from_the_model_register_a_credit_being_a_thousand_tokens(self):
+        from sales_app.llm_usage import InMemoryLLMUsageStore, LLMUsageRecord
+
+        rig = Rig(cap=10)
+        store = InMemoryLLMUsageStore("alpha")
+        for at, tin, tout in ((NOW, 1200, 300), (NOW, None, None), (datetime(2026, 4, 30, tzinfo=UTC), 9000, 0)):
+            store.record(LLMUsageRecord("alpha", at, "openai", "m", "ok", tin, tout))
+        quotas = QuotaService(rig.limits, rig.notes, rig.clock, rig.plans, lambda _c: store)
+        rig.send()
+        status = quotas.status("alpha")
+        assert (status.included_credits, status.credits_used, status.credits_today) == (5000, 2, 2)
+        assert (status.credits_remaining, status.calls, status.calls_without_figures) == (4998, 2, 1)
+        assert status.credits_basis == MEASURED and status.month_limit == 310
+        assert status.month_actions_used == 1 and status.days[0]["actions"] == 1
+
     def test_the_effective_cap_refuses_without_burning_attempts(self):
         rig = Rig(cap=2)
         assert [type(rig.send()).__name__ for _ in range(3)] == [

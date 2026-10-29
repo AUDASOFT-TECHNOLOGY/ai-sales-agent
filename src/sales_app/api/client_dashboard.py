@@ -107,7 +107,7 @@ class _ClientBuilder:
         if self.app.quotas is None:
             return {"availability": "not_tracked", "reason": NO_DATABASE}
         status = usage_response(self.app.quotas.status(self.client_id), admin=False)
-        return {"availability": MEASURED, **status.model_dump(mode="json")}
+        return {"availability": MEASURED, **status.model_dump(mode="json", exclude={"days"})}
 
     def billing(self) -> dict[str, Any]:
         invoices, plans = self.app.invoices, self.app.plans

@@ -28,6 +28,7 @@ import { ResultsLayout } from "./client/results/ResultsLayout";
 import { SetupPage } from "./client/setup/SetupPage";
 import { PreparePage } from "./client/prepare/PreparePage";
 import { WorkflowPage } from "./client/workflow/WorkflowPage";
+import { UsagePage } from "./client/usage/UsagePage";
 import { SimulationPage } from "./client/prepare/SimulationPage";
 import { TrainingPage } from "./client/training/TrainingPage";
 import { RulesPage } from "./client/offer/RulesPage";
@@ -101,6 +102,7 @@ export function App() {
                 <Route path="setup" element={<SetupPage />} />
                 <Route path="prepare" element={<PreparePage />} />
                 <Route path="workflow" element={<WorkflowPage />} />
+                <Route path="usage" element={<UsagePage />} />
                 <Route path="simulation" element={<SimulationPage />} />
                 <Route path="training" element={<TrainingPage />} />
 

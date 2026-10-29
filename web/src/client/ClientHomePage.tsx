@@ -344,7 +344,7 @@ export function ClientHomePage() {
       <div className="rv-grid-3">
         <Glass level={1} className="rv-card" data-testid="home-usage">
           <div className="rv-card__head">
-            <h3>{t("rv.home.usage.title")}</h3>
+            <h3><Link to="/usage">{t("rv.home.usage.title")}</Link></h3>
           </div>
           {usage && usage.availability !== "not_tracked" ? (
             <>

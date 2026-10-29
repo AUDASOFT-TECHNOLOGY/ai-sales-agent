@@ -5,7 +5,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useOverview, OverviewProvider, guideSteps } from "../client/overview";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, FlaskConical, GraduationCap, House, LogOut, MessageSquare, Receipt, Rocket, Workflow, UserRound, Waves } from "lucide-react";
+import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, FlaskConical, GraduationCap, House, LogOut, MessageSquare, Receipt, Gauge, Rocket, Workflow, UserRound, Waves } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { googleReturnOf, hubspotReturnOf, sheetsReturnOf } from "../client/connections/returns";
@@ -45,7 +45,8 @@ const FOLLOW: NavEntry[] = [
   { to: "/review", key: "rv.nav.review", icon: CheckSquare },
   { to: "/results", key: "rv.nav.results", icon: ChartNoAxesColumn, also: ["/reports", "/dashboard"] },
 ];
-const ACCOUNT: NavEntry[] = [{ to: "/account", key: "rv.nav.billing", icon: Receipt, also: ["/billing"] }];
+const USAGE: NavEntry = { to: "/usage", key: "rv.nav.usage", icon: Gauge };
+const ACCOUNT: NavEntry[] = [USAGE, { to: "/account", key: "rv.nav.billing", icon: Receipt, also: ["/billing"] }];
 const TABS = [HOME, FOLLOW[2]!, FOLLOW[0]!, PREPARE_HUB];
 const MORE = [WORKFLOW, TEST, TRAIN, FOLLOW[1]!, FOLLOW[3]!, ...ACCOUNT];
 

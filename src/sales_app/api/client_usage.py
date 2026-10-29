@@ -1,9 +1,8 @@
 """Client API: the client's own usage against its plan's quota.
 
 `GET /client/v1/usage`. It takes no client id: the session decides it. Every figure is read from the
-real send counters (`usage_basis: measured`); the plan's included credits are shown as the plan's own
-term, and the credits consumed are `unavailable` (no credit-per-message rule is defined, so none is
-invented). `state` is `ok`, `warning` (from 80%), `reached`, `not_configured` or `unavailable`, with
+real send counters (`usage_basis: measured`); the credits consumed this month come from the LLM
+usage register (`credits_basis: measured`, `unavailable` when it cannot be read). `state` is `ok`, `warning` (from 80%), `reached`, `not_configured` or `unavailable`, with
 a plain `message` and the `action` to take. Nothing technical (no store, token or cost) is shown.
 """
 
@@ -28,14 +27,23 @@ class UsageResponse(BaseModel):
     daily_percent: int | None
     month_used: int | None
     included_credits: int | None
-    credits_used: int | None  # null: not available
-    credits_basis: str  # unavailable
+    credits_used: int | None  # this month; null: not available
+    credits_basis: str  # measured | unavailable
     usage_basis: str  # measured
     state: str
     message: str
     action: str
     plan_daily_quota: int | None = None
     admin_cap: int | None = None
+    month_limit: int | None = None
+    month_actions_used: int | None = None
+    month_percent: int | None = None
+    credits_today: int | None = None
+    credits_remaining: int | None = None
+    credits_percent: int | None = None
+    calls: int | None = None
+    calls_without_figures: int | None = None
+    days: list[dict[str, object]] = []
 
 
 def usage_response(status: QuotaStatus, *, admin: bool = True) -> UsageResponse:
@@ -59,6 +67,15 @@ def usage_response(status: QuotaStatus, *, admin: bool = True) -> UsageResponse:
         action=status.action,
         plan_daily_quota=status.plan_daily_quota if admin else None,
         admin_cap=status.admin_cap if admin else None,
+        month_limit=status.month_limit,
+        month_actions_used=status.month_actions_used,
+        month_percent=status.month_percent,
+        credits_today=status.credits_today,
+        credits_remaining=status.credits_remaining,
+        credits_percent=status.credits_percent,
+        calls=status.calls,
+        calls_without_figures=status.calls_without_figures,
+        days=list(status.days),
     )
 
 

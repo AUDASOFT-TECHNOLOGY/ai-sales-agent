@@ -1018,6 +1018,25 @@ on("GET", "/subscription", () => {
   });
 });
 on("GET", "/dashboard", () => ok(dashboard()));
+on("GET", "/usage", () => {
+  const today = new Date();
+  const days = Array.from({ length: today.getUTCDate() }, (_, i) => {
+    const day = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), i + 1)).toISOString().slice(0, 10);
+    return { day, actions: (i * 7) % 23, credits: 60 + ((i * 37) % 90) };
+  });
+  const credits = days.reduce((sum, row) => sum + (row.credits ?? 0), 0);
+  const actions = days.reduce((sum, row) => sum + row.actions, 0);
+  const last = days[days.length - 1]!;
+  const daysInMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).getUTCDate();
+  return ok({
+    plan_name: "Plan Pro", day_utc: last.day, month: last.day.slice(0, 7),
+    daily_limit: 20, daily_used: last.actions, daily_remaining: 20 - last.actions, daily_percent: Math.round((last.actions * 100) / 20),
+    month_limit: 20 * daysInMonth, month_actions_used: actions, month_percent: Math.round((actions * 100) / (20 * daysInMonth)),
+    included_credits: 5000, credits_used: credits, credits_today: last.credits, credits_remaining: 5000 - credits,
+    credits_percent: Math.round((credits * 100) / 5000), credits_basis: "measured", calls: days.length * 14, calls_without_figures: 0,
+    state: "ok", message: "", action: "", days,
+  });
+});
 
 // Notifications
 const unread = () => data.notifications.filter((n) => !n.read_at).length;

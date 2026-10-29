@@ -1319,3 +1319,32 @@ main { outline: none; }
 .rv-wfa__hand-link { stroke-width: 2.5; }
 .rv-wfa__brings li { padding: 8px 14px; font-size: 13.5px; }
 .rv-wfa__brings { gap: 8px; }
+
+/* ── Usage ───────────────────────────────────────── */
+.rv-usage__top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.rv-usage__plan { padding: 4px 12px; border-radius: var(--radius-full); background: rgb(255 255 255 / 0.08); font-size: 0.875rem; }
+.rv-usage > .rv-card, .rv-usage__quotas { margin-bottom: 16px; }
+.rv-usage__hero { display: flex; flex-direction: column; gap: 12px; padding: 28px; }
+.rv-usage__big strong { font-size: clamp(2.5rem, 8vw, 3.75rem); line-height: 1; letter-spacing: -0.02em; }
+.rv-usage__bar-track { height: 10px; }
+.rv-usage__hero .rv-usage__bar-track { height: 14px; }
+.rv-usage [data-level="warning"] .rv-progress__fill { background: var(--warning, #d9a441); box-shadow: none; }
+.rv-usage [data-level="reached"] .rv-progress__fill { background: var(--danger, #d95f5f); box-shadow: none; }
+.rv-usage__pace { padding: 10px 14px; border-radius: var(--radius-md, 12px); background: rgb(255 255 255 / 0.06); }
+.rv-usage__pace[data-run-out="true"] { background: rgb(217 164 65 / 0.16); }
+.rv-usage__quotas { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.rv-usage__quota { display: flex; flex-direction: column; gap: 10px; padding: 20px 24px; }
+.rv-usage__figure strong { font-size: 2rem; }
+.rv-usage__notice { display: flex; align-items: center; gap: 14px; padding: 16px 20px; flex-wrap: wrap; }
+.rv-usage__notice > div { flex: 1 1 220px; }
+.rv-usage__chart { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 160px; margin-top: 16px; }
+.rv-usage__col { flex: 1 1 0; height: 100%; display: flex; align-items: flex-end; min-width: 0; }
+.rv-usage__col i { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; background: rgb(255 255 255 / 0.22); }
+.rv-usage__col[data-today="true"] i { background: var(--brand-grad); }
+.rv-usage__line { position: absolute; inset-inline: 0; border-top: 1px dashed rgb(255 255 255 / 0.4); pointer-events: none; }
+.rv-usage__line em { position: absolute; inset-inline-end: 0; bottom: 2px; font-size: 0.75rem; font-style: normal; color: var(--text-2); }
+.rv-usage__detail { margin-top: 16px; }
+.rv-usage__detail summary { cursor: pointer; color: var(--text-2); }
+.rv-usage__table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.rv-usage__table th, .rv-usage__table td { padding: 8px 4px; text-align: start; border-bottom: 1px solid rgb(255 255 255 / 0.08); font-weight: 400; }
+.rv-usage__table .num { text-align: end; }
