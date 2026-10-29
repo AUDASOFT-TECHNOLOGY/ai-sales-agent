@@ -134,8 +134,8 @@ export function App() {
 
                 <Route path="account" element={<AccountLayout />}>
                   <Route index element={<ClientInvoicesPage />} />
-                  <Route path="profile" element={<ClientProfilePage />} />
                 </Route>
+                <Route path="profile" element={<ClientProfilePage />} />
                 <Route path="notifications" element={<ClientNotificationsPage />} />
 
                 {/* Addresses of the previous menus keep working. */}
@@ -146,7 +146,7 @@ export function App() {
                 <Route path="reporting" element={<Navigate to="/results/daily" replace />} />
                 <Route path="dashboard" element={<Navigate to="/results" replace />} />
                 <Route path="billing" element={<Navigate to="/account" replace />} />
-                <Route path="profile" element={<Navigate to="/account/profile" replace />} />
+                <Route path="account/profile" element={<Navigate to="/profile" replace />} />
                 <Route path="agent" element={<Navigate to="/home" replace />} />
                 <Route path="history" element={<Navigate to="/home" replace />} />
                 <Route path="approvals" element={<Navigate to="/review" replace />} />

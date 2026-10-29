@@ -45,7 +45,7 @@ const FOLLOW: NavEntry[] = [
   { to: "/review", key: "rv.nav.review", icon: CheckSquare },
   { to: "/results", key: "rv.nav.results", icon: ChartNoAxesColumn, also: ["/reports", "/dashboard"] },
 ];
-const ACCOUNT: NavEntry[] = [{ to: "/account", key: "rv.nav.billing", icon: Receipt, also: ["/billing", "/profile"] }];
+const ACCOUNT: NavEntry[] = [{ to: "/account", key: "rv.nav.billing", icon: Receipt, also: ["/billing"] }];
 const TABS = [HOME, FOLLOW[2]!, FOLLOW[0]!, PREPARE_HUB];
 const MORE = [WORKFLOW, TEST, TRAIN, FOLLOW[1]!, FOLLOW[3]!, ...ACCOUNT];
 
@@ -165,7 +165,7 @@ function AccountMenu({ compact }: { compact?: boolean }) {
         </div>
       </div>
       <hr className="divider" />
-      <LinkButton to="/account/profile" variant="ghost" leading={<UserRound size={16} aria-hidden />}>
+      <LinkButton to="/profile" variant="ghost" leading={<UserRound size={16} aria-hidden />}>
         {t("rv.nav.account")}
       </LinkButton>
       <Button variant="ghost" leading={<LogOut size={16} aria-hidden />} onClick={() => void logout()}>
