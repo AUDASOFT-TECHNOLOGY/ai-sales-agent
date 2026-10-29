@@ -18,7 +18,6 @@ import { ClientNotificationsPage } from "./client/notifications/ClientNotificati
 import { ClientHomePage } from "./client/ClientHomePage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
 import { ClientProfilePage } from "./client/ClientProfilePage";
-import { ClientReportingPage } from "./client/ClientReportingPage";
 import { ClientRoute } from "./client/ClientRoute";
 import { ClientTheme } from "./client/ClientTheme";
 import { AccountLayout } from "./client/account/AccountLayout";
@@ -131,7 +130,6 @@ export function App() {
 
                 <Route path="results" element={<ResultsLayout />}>
                   <Route index element={<ClientDashboardPage />} />
-                  <Route path="daily" element={<ClientReportingPage />} />
                 </Route>
 
                 <Route path="account" element={<AccountLayout />}>
@@ -144,8 +142,9 @@ export function App() {
                 <Route path="connections/*" element={<Navigate to="/connections" replace />} />
                 <Route path="channel" element={<Navigate to="/connections" replace />} />
                 <Route path="lanes" element={<Navigate to="/circuits" replace />} />
-                <Route path="reports" element={<Navigate to="/results/daily" replace />} />
-                <Route path="reporting" element={<Navigate to="/results/daily" replace />} />
+                <Route path="reports" element={<Navigate to="/notifications" replace />} />
+                <Route path="reporting" element={<Navigate to="/notifications" replace />} />
+                <Route path="results/daily" element={<Navigate to="/notifications" replace />} />
                 <Route path="dashboard" element={<Navigate to="/results" replace />} />
                 <Route path="billing" element={<Navigate to="/account" replace />} />
                 <Route path="account/profile" element={<Navigate to="/profile" replace />} />

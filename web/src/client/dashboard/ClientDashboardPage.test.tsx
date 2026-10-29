@@ -62,14 +62,13 @@ function serve(response: () => Response | Promise<Response>) {
 }
 
 describe("ClientDashboardPage", () => {
-  it("shows the client's activity, results, payments and invoices, without any client id", async () => {
+  it("shows the client's funnel, activity and results, without any client id", async () => {
     window.localStorage.setItem("revansa.locale", "en");
     const calls = serve(() => new Response(JSON.stringify(payload())));
     renderPage();
-    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
     expect(await screen.findByText("Prospects handled")).toBeInTheDocument();
-    expect(screen.getByText("Declared by buyers")).toBeInTheDocument();
-    expect(screen.getByText("INV-1")).toBeInTheDocument();
+    expect(screen.queryByText("INV-1")).toBeNull();
+    expect(screen.queryByText("Usage and quota")).toBeNull();
     expect(screen.getByRole("img", { name: /Messages sent and received/ })).toBeInTheDocument();
     expect(calls[0]).toMatch(/^\/client\/v1\/dashboard\?from=\d{4}-\d{2}&to=\d{4}-\d{2}$/);
     expect(calls[0]).not.toContain("client_id");
@@ -90,7 +89,6 @@ describe("ClientDashboardPage", () => {
     window.localStorage.setItem("revansa.locale", "fr");
     serve(() => new Response(JSON.stringify(payload())));
     renderPage();
-    expect(await screen.findByRole("heading", { name: "Tableau de bord" })).toBeInTheDocument();
     expect(await screen.findByText("Prospects traités")).toBeInTheDocument();
     expect(screen.getAllByText("Non suivi").length).toBeGreaterThan(0);
   });

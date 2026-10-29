@@ -23,6 +23,8 @@ function stub(over: { unread?: number; subscription?: unknown; failNotifications
         if (over.failNotifications) return json(500, {});
         return json(200, { items: [], total: 0, unread_count: over.unread ?? 0 });
       }
+      if (url.endsWith("/reporting")) return json(200, { settings: null, channels: [], languages: [], latest: null });
+      if (url.endsWith("/reports") || url.includes("/reports?")) return json(200, { reports: [] });
       if (url.endsWith("/subscription")) return json(200, over.subscription ?? { status: "active", plan: null, next_billing_at: null, unpaid_invoices: 0, overdue_invoices: 0, last_payment: null });
       return json(200, { proposals: [] });
     }),
