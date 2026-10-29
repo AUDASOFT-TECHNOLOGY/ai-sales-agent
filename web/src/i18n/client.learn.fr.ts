@@ -1,0 +1,37 @@
+/** Copie de l’espace Client (français) : ce que l’agent a appris de ses résultats. Quelques mots chacun,
+ *  aucun terme technique. Garder `client.learn.en.ts` en phase. */
+
+import type { enLearn } from "./client.learn.en";
+
+export const frLearn: Record<keyof typeof enLearn, string> = {
+  "rv.learn.title": "Ce que votre agent a appris",
+  "rv.learn.studied": "conversations étudiées",
+  "rv.learn.empty": "Encore {left} conversation(s) terminée(s) et il apprend, tout seul.",
+  "rv.learn.nothing": "Rien de net pour l’instant. Il continue d’observer.",
+  "rv.learn.works": "Ça marche",
+  "rv.learn.avoids": "Il évite",
+  "rv.learn.watching": "À l’étude",
+  "rv.learn.off": "Écartés",
+  "rv.learn.cases": "{n} conversations",
+  "rv.learn.stop": "Écarter",
+  "rv.learn.confirm": "Valider",
+  "rv.learn.back": "Remettre",
+  "rv.learn.failed": "Indisponible pour l’instant. Réessayez dans un instant.",
+  "rv.learn.privacy": "Aucune donnée personnelle gardée.",
+  "rv.learn.code.short_messages": "Messages courts, faciles à lire",
+  "rv.learn.code.single_question": "Une seule question claire à la fin",
+  "rv.learn.code.spaced_follow_ups": "Des jours entre les relances",
+  "rv.learn.code.acknowledge_first": "Montrer qu’il a compris d’abord",
+  "rv.learn.code.answer_doubt_first": "Répondre d’abord au doute",
+  "rv.learn.code.ask_before_proposing": "Comprendre le besoin d’abord",
+  "rv.learn.code.easy_next_step": "Finir par une étape simple",
+  "rv.learn.code.long_messages": "Messages trop longs",
+  "rv.learn.code.quick_follow_up": "Relancer trop vite",
+  "rv.learn.code.pushy_after_hesitation": "Pousser quand ils hésitent",
+  "rv.learn.code.doubt_ignored": "Ignorer leur doute",
+  "rv.learn.code.needless_question": "Questions inutiles",
+  "rv.learn.code.unkept_promise": "Promesses non confirmées",
+  "rv.learn.code.generic_message": "Messages génériques",
+  "rv.learn.code.proposal_too_early": "Proposer trop tôt",
+  "rv.learn.code.repeating_yourself": "Se répéter",
+};
