@@ -7,13 +7,15 @@ import { Link } from "react-router-dom";
 import { useI18n } from "../../i18n";
 import { clientHubSpotAccess, clientSheetsAccess } from "../api";
 import { Note } from "../kit";
+import { useAddress } from "../prepare/links";
 
 export function ConnectionNeeded({ text, platform }: { text?: string; platform?: boolean }) {
   const { t } = useI18n();
+  const address = useAddress();
   return (
     <Note tone="warn" title={t("rv.conn.needed.title")}>
       <span dir="auto">{text ?? t(platform ? "rv.conn.needed.platform" : "rv.conn.needed.text")}</span>{" "}
-      <Link to="/connections" className="link-btn">
+      <Link to={address({ to: "connections" })} className="link-btn">
         {t("rv.conn.needed.link")}
       </Link>
     </Note>

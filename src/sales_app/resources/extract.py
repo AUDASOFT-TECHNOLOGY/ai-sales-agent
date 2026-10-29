@@ -135,8 +135,8 @@ def clean_text(text: str) -> str:
 
 
 def chunk_text(text: str, size: int = CHUNK_CHARS) -> list[str]:
-    """Passages of about `size` characters, split at paragraph and sentence ends, with the last piece
-    of a passage repeated at the start of the next so that an answer is not cut in two."""
+    """Passages of about `size` characters, split at paragraph and sentence ends (one per line), with
+    the last piece of a passage repeated at the start of the next so that an answer is not cut in two."""
     units: list[str] = []
     for paragraph in re.split(r"\n\s*\n|\n", text):
         paragraph = paragraph.strip()
@@ -156,13 +156,13 @@ def chunk_text(text: str, size: int = CHUNK_CHARS) -> list[str]:
     length = 0
     for unit in units:
         if current and length + len(unit) + 1 > size:
-            chunks.append(" ".join(current))
+            chunks.append("\n".join(current))
             tail = current[-1]
             current, length = ([tail], len(tail)) if len(tail) <= size // 4 else ([], 0)
         current.append(unit)
         length += len(unit) + 1
     if current:
-        chunks.append(" ".join(current))
+        chunks.append("\n".join(current))
     return [c for c in chunks if c.strip()]
 
 

@@ -1018,6 +1018,51 @@ export function clientRetryResource(productId: string, resourceId: string): Prom
   return request<ProductResource>(`${productPath(productId)}/${encodeURIComponent(resourceId)}/retry`, { method: "POST" });
 }
 
+/** Text the client writes or pastes (a testimonial, an FAQ, a video's transcript): read like any document. */
+export function clientAddResourceNote(productId: string, body: { title: string; text: string; category: "testimonial" | "document" | "other" }): Promise<ProductResource> {
+  return request<ProductResource>(`${productPath(productId)}/note`, { method: "POST", body: JSON.stringify(body) });
+}
+
+/* ── Training material (see src/sales_app/api/client_training.py) ──
+ * What the agent can really read of each product, and draft lessons found in it. */
+
+export interface UnreadResource {
+  id: string;
+  title: string;
+  category: ResourceCategory;
+  /** Why it is not read, as a fixed code (video, image, scanned_pdf, fetch_failed, ...). */
+  reason: string | null;
+}
+
+export interface ProductMaterial {
+  product_id: string;
+  total: number;
+  readable: number;
+  readable_chars: number;
+  /** Testimonials the agent can read. */
+  testimonials: number;
+  by_category: Record<string, number>;
+  unread: UnreadResource[];
+}
+
+export function clientTrainingMaterial(): Promise<{ products: ProductMaterial[] }> {
+  return request<{ products: ProductMaterial[] }>("/training/material");
+}
+
+export interface LessonSuggestion {
+  kind: "faq" | "proof";
+  text: string;
+  /** The question, for a frequent question. */
+  when: string | null;
+  /** The document it comes from. */
+  source: string;
+  attribution: string | null;
+}
+
+export function clientTrainingSuggestions(productId: string): Promise<{ suggestions: LessonSuggestion[]; left_out: number }> {
+  return request<{ suggestions: LessonSuggestion[]; left_out: number }>(`/training/suggestions/${encodeURIComponent(productId)}`);
+}
+
 /** The file travels as the raw request body (no multipart): its name and title ride in the headers. */
 export async function clientUploadResource(productId: string, file: File, title: string): Promise<ProductResource> {
   let response: Response;
@@ -1103,4 +1148,42 @@ export function clientSetHint(kind: HintKind, value: string): Promise<Connection
 
 export function clientClearHint(kind: HintKind): Promise<ConnectionsInfo> {
   return request<ConnectionsInfo>(`/connections/hints/${kind}`, { method: "DELETE" });
+}
+
+/** Testing the agent on a person the client names (`/client/v1/agent-test`). */
+export interface AgentTest {
+  prospect_id: string;
+  name: string;
+  contact: string;
+  channel: string | null;
+  circuit_id: string | null;
+  status: string;
+  messages: number;
+  replies: number;
+  last_message_at: string | null;
+}
+
+export interface AgentTestMessage {
+  direction: "outbound" | "inbound";
+  text: string;
+  sent_at: string;
+}
+
+export interface AgentTestStart {
+  prospect_id: string;
+  /** `sent`: the first message is out. `waiting`: nothing sent yet (limit reached, or the person must open the chat). `not_sent`: refused. */
+  state: "sent" | "waiting" | "not_sent";
+  detail: string | null;
+}
+
+export function clientStartAgentTest(body: { contact: string; name?: string; circuit_id?: string }): Promise<AgentTestStart> {
+  return request<AgentTestStart>("/agent-test", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function clientAgentTests(): Promise<{ tests: AgentTest[] }> {
+  return request<{ tests: AgentTest[] }>("/agent-test");
+}
+
+export function clientAgentTest(id: string): Promise<{ test: AgentTest; messages: AgentTestMessage[] }> {
+  return request<{ test: AgentTest; messages: AgentTestMessage[] }>(`/agent-test/${encodeURIComponent(id)}`);
 }

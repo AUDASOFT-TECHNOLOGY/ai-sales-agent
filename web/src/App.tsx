@@ -26,6 +26,10 @@ import { CircuitsPage } from "./client/circuits/CircuitsPage";
 import { ConnectionsPage } from "./client/connections/ConnectionsPage";
 import { ResultsLayout } from "./client/results/ResultsLayout";
 import { SetupPage } from "./client/setup/SetupPage";
+import { PreparePage } from "./client/prepare/PreparePage";
+import { WorkflowPage } from "./client/workflow/WorkflowPage";
+import { SimulationPage } from "./client/prepare/SimulationPage";
+import { TrainingPage } from "./client/training/TrainingPage";
 import { RulesPage } from "./client/offer/RulesPage";
 import { OfferLayout } from "./client/offer/OfferLayout";
 import { PaymentsPage } from "./client/offer/PaymentsPage";
@@ -95,6 +99,10 @@ export function App() {
                 <Route index element={<Navigate to="/home" replace />} />
                 <Route path="home" element={<ClientHomePage />} />
                 <Route path="setup" element={<SetupPage />} />
+                <Route path="prepare" element={<PreparePage />} />
+                <Route path="workflow" element={<WorkflowPage />} />
+                <Route path="simulation" element={<SimulationPage />} />
+                <Route path="training" element={<TrainingPage />} />
 
                 <Route path="offer" element={<OfferLayout />}>
                   <Route index element={<Navigate to="products" replace />} />

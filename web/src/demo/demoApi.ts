@@ -985,6 +985,44 @@ on("POST", "/products/([^/]+)/resources/file", (m, _b, _q, init) => {
   const title = decodeURIComponent(headers.get("X-Resource-Title") ?? name);
   return ok(addResource(id1(m), { kind: "file", category: "document", title, url: null, filename: name, mime_type: file?.type || "application/octet-stream", size_bytes: file?.size ?? 0, status: "stored_only", status_detail: "demo", text_chars: 0 }), 201);
 });
+on("POST", "/products/([^/]+)/resources/note", (m, b) =>
+  ok(addResource(id1(m), { kind: "file", category: (b.category as ProductResource["category"]) ?? "document", title: String(b.title ?? ""), url: null, filename: `${String(b.title ?? "note")}.txt`, mime_type: null, size_bytes: String(b.text ?? "").length, status: "ready", status_detail: null, text_chars: String(b.text ?? "").length }), 201),
+);
+// Training: what the agent can read of each product, and drafts found in it
+on("GET", "/training/material", () => {
+  const list = obj(obj(data.settings.commercial).catalog).products;
+  const ids = (Array.isArray(list) ? list : []).map((p) => String(obj(p).id));
+  return ok({
+    products: ids.map((id) => {
+      const list = extras.resources[id] ?? [];
+      const ready = list.filter((r) => r.status === "ready");
+      const by: Record<string, number> = {};
+      for (const r of list) by[r.category] = (by[r.category] ?? 0) + 1;
+      return {
+        product_id: id,
+        total: list.length,
+        readable: ready.length,
+        readable_chars: ready.reduce((sum, r) => sum + r.text_chars, 0),
+        testimonials: ready.filter((r) => r.category === "testimonial").length,
+        by_category: by,
+        unread: list.filter((r) => r.status !== "ready").map((r) => ({ id: r.id, title: r.title, category: r.category, reason: r.status_detail })),
+      };
+    }),
+  });
+});
+on("GET", "/training/suggestions/([^/]+)", (m) => {
+  const readable = (extras.resources[id1(m)] ?? []).some((r) => r.status === "ready");
+  return ok({
+    suggestions: readable
+      ? [
+          { kind: "faq", when: "Puis-je annuler si ça ne me convient pas ?", text: "Oui, vous pouvez annuler dans les 14 jours et être remboursé intégralement.", source: "Brochure", attribution: null },
+          { kind: "faq", when: "Faut-il de l’expérience pour commencer ?", text: "Non, la première semaine part de zéro et chaque étape est expliquée.", source: "Brochure", attribution: null },
+          { kind: "proof", when: null, text: "En un mois, j’ai doublé mes demandes et je ne cours plus après les clients.", source: "Avis clients", attribution: "Leïla, boulangère" },
+        ]
+      : [],
+    left_out: readable ? 1 : 0,
+  });
+});
 on("DELETE", "/products/([^/]+)/resources/([^/]+)", (m) => {
   const list = extras.resources[id1(m)] ?? [];
   extras.resources[id1(m)] = list.filter((r) => r.id !== decodeURIComponent(m[2]!));
@@ -1036,6 +1074,37 @@ on("POST", "/notifications/(\\d+)/read", (m) => {
 function answer(reply: Reply): Response {
   return new Response(reply.status === 204 ? null : JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
 }
+
+const demoTests: { id: string; name: string; contact: string; channel: string; circuit: string | null; at: string }[] = [];
+on("POST", "/agent-test", (_m, b) => {
+  const contact = String(b.contact ?? "").trim();
+  if (contact.length < 3) return fail(422, { code: "invalid_contact", message: "Ce contact n'est pas valide pour ce canal." });
+  if (demoTests.some((t) => t.contact === contact)) return fail(409, { code: "contact_in_use", message: "Ce contact est déjà l'un de vos prospects." });
+  const lane = data.lanes.find((l) => l.id === b.circuit_id) ?? data.lanes[0];
+  const id = `inbound-test-${contact.toLowerCase()}`;
+  demoTests.push({ id, name: String(b.name ?? "").trim() || contact, contact, channel: lane?.channel.channel ?? "email", circuit: lane?.id ?? null, at: nowIso() });
+  return ok({ prospect_id: id, state: "sent", detail: null }, 201);
+});
+const demoTestOf = (t: (typeof demoTests)[number]) => ({
+  prospect_id: t.id,
+  name: t.name,
+  contact: t.contact,
+  channel: t.channel,
+  circuit_id: t.circuit,
+  status: "active",
+  messages: 1,
+  replies: 0,
+  last_message_at: t.at,
+});
+on("GET", "/agent-test", () => ok({ tests: [...demoTests].reverse().map(demoTestOf) }));
+on("GET", "/agent-test/([^/]+)", (m) => {
+  const found = demoTests.find((t) => t.id === id1(m));
+  if (!found) return fail(404, "no such test");
+  return ok({
+    test: demoTestOf(found),
+    messages: [{ direction: "outbound", text: `Bonjour ${found.name}, je suis l'assistant de votre entreprise (message d'essai du mode démonstration).`, sent_at: found.at }],
+  });
+});
 
 function parseBody(init?: RequestInit): Doc {
   if (typeof init?.body !== "string") return {};

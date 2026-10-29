@@ -155,6 +155,7 @@ export function ListEditor({
   placeholder,
   addLabel,
   maxItems = 20,
+  maxLength = 300,
   disabled,
 }: {
   label: string;
@@ -164,6 +165,7 @@ export function ListEditor({
   placeholder?: string;
   addLabel: string;
   maxItems?: number;
+  maxLength?: number;
   disabled?: boolean;
 }) {
   const { t } = useI18n();
@@ -178,7 +180,7 @@ export function ListEditor({
             aria-label={`${label} ${i + 1}`}
             value={value}
             placeholder={placeholder}
-            maxLength={300}
+            maxLength={maxLength}
             onChange={(e) => onChange(values.map((v, n) => (n === i ? e.target.value : v)))}
             dir="auto"
           />

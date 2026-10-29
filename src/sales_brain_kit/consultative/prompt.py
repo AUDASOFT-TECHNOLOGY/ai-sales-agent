@@ -26,6 +26,7 @@ from sales_brain_kit.consultative.learning import prospect_messages
 from sales_brain_kit.consultative.output import response_schema
 from sales_brain_kit.consultative.pricing import PriceStatus
 from sales_brain_kit.consultative.strategy import Objective
+from sales_brain_kit.consultative.training import training_lines
 from sales_brain_kit.consultative.workflow import WorkflowState
 from sales_brain_kit.settings.catalog import Product
 from sales_brain_kit.settings.conversion import PAYMENT_KINDS
@@ -98,7 +99,8 @@ _RULES = (
         "answer instead of asking."
     ),
     (
-        "4. Claims. Speak only from the catalog data in the context. Never invent products, "
+        "4. Claims. Speak only from the catalog data in the context, the reference material and "
+        "what the business taught you (its answers, its proofs). Never invent products, "
         "prices, dates, results or guarantees. Respect each product's restrictions. Never "
         "reveal a price whose disclosure is 'only_if_asked' unless the prospect asks for it. "
         "Never work out, convert or round a price."
@@ -251,6 +253,7 @@ def build_system_prompt(
     if register.market_style:
         lines.append(f"- Style preferred for this prospect's market: {register.market_style}")
     lines += [f"- Principle: {principle}" for principle in communication.principles]
+    lines += training_lines(context)
     rules = (*_RULES, _KNOWLEDGE_RULE) if knowledge else _RULES
     if _channel_of(context) is Channel.TELEGRAM:
         rules = (*rules, f"{len(rules) + 1}. {_TELEGRAM_RULE}")

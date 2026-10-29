@@ -10,6 +10,7 @@ import { clientWhatsAppStatus } from "../../whatsapp/api";
 import { useI18n } from "../../i18n";
 import { useClientAuth } from "../ClientAuthContext";
 import { Card, Loading, PageHead } from "../kit";
+import { CompactConnections } from "./ConnectionRow";
 import { EmailRow, HubSpotRow, SheetsRow } from "./OAuthRows";
 import { TelegramRow, WhatsAppRow } from "./ChatRows";
 import { summaryOf, viewsOf, type ConnectionData, type ConnectionView } from "./connectionModel";
@@ -46,7 +47,7 @@ async function read(number: string | null): Promise<ConnectionData> {
   };
 }
 
-export function ConnectionsPage() {
+export function ConnectionsPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const { profile } = useClientAuth();
   const number = profile?.whatsapp_number ?? null;
@@ -107,8 +108,9 @@ export function ConnectionsPage() {
   };
 
   return (
+    <CompactConnections.Provider value={embedded}>
     <div className="rv-page">
-      <PageHead title={t("rv.conn.title")} text={t("rv.conn.intro")} />
+      {embedded ? null : <PageHead title={t("rv.conn.title")} text={t("rv.conn.intro")} />}
       {summary.total > 0 ? (
         <Card aria-label={t("rv.conn.title")}>
           <div className="rv-conn__summary" data-testid="connections-summary">
@@ -120,5 +122,6 @@ export function ConnectionsPage() {
       {group("write", "rv.conn.group.write")}
       {group("read", "rv.conn.group.read")}
     </div>
+    </CompactConnections.Provider>
   );
 }

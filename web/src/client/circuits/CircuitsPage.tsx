@@ -373,7 +373,7 @@ function SingleCircuit({ source, channel, readiness, onChanged }: { source: Sour
 
 /* ── The page ─────────────────────────────────────────────────────────────────────────────── */
 
-export function CircuitsPage() {
+export function CircuitsPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const { logout } = useClientAuth();
   const [lanes, setLanes] = useState<LanesState | null>(null);
@@ -455,19 +455,19 @@ export function CircuitsPage() {
     return hit ? { ok: hit.ok, message: hit.message } : null;
   };
 
+  const newButton = several ? (
+    <Button variant="primary" leading={<Plus size={16} aria-hidden />} onClick={() => { setNotice(null); setForm("new"); }} disabled={form !== null || lanes.channel_options.length === 0} disabledReason={lanes.channel_options.length === 0 ? t("rv.src.noChannel") : undefined}>
+      {t("rv.circ.new")}
+    </Button>
+  ) : undefined;
+
   return (
     <div className="rv-page">
-      <PageHead
-        title={t("rv.circ.title")}
-        text={t("rv.circ.intro")}
-        actions={
-          several ? (
-            <Button variant="primary" leading={<Plus size={16} aria-hidden />} onClick={() => { setNotice(null); setForm("new"); }} disabled={form !== null || lanes.channel_options.length === 0} disabledReason={lanes.channel_options.length === 0 ? t("rv.src.noChannel") : undefined}>
-              {t("rv.circ.new")}
-            </Button>
-          ) : undefined
-        }
-      />
+      {embedded ? (
+        newButton ? <div className="rv-actions">{newButton}</div> : null
+      ) : (
+        <PageHead title={t("rv.circ.title")} text={t("rv.circ.intro")} actions={newButton} />
+      )}
 
       <div className="rv-howto" aria-label={t("rv.circ.title")}>
         {(

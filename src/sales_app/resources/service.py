@@ -47,6 +47,7 @@ from sales_app.resources.models import (
     DETAIL_UNSAFE_ADDRESS,
     DETAIL_VIDEO,
     LINK_CATEGORIES,
+    Chunk,
     Extraction,
     Resource,
     ResourceKind,
@@ -57,6 +58,8 @@ from sales_app.resources.store import ResourceStore
 MAX_PER_PRODUCT = 30
 MAX_PER_CLIENT = 300
 MAX_TITLE = 200
+MAX_NOTE_CHARS = 20_000
+NOTE_CATEGORIES = ("testimonial", "document", "other")
 MAX_URL = 2048
 _HTTPS = re.compile(r"^https://[^\s/$.?#][^\s]*$")
 
@@ -214,6 +217,59 @@ class ResourceService:
         resource = self._with_reading(resource, extraction, chunks)
         self._store.add(resource, content=content, chunks=chunks)
         return resource
+
+    def add_note(
+        self,
+        client_id: str,
+        product_id: str,
+        *,
+        title: str,
+        text: str,
+        category: str,
+        by: str,
+    ) -> Resource:
+        """Text the client wrote or pasted (a testimonial, an FAQ, the story of a customer, the
+        transcript of a video): kept as a text file, read like any other so the agent can draw on it."""
+        body = text.strip()
+        if category not in NOTE_CATEGORIES:
+            raise ResourceError(422, "this kind of note is not accepted")
+        if not body:
+            raise ResourceError(422, "the note is empty")
+        if len(body) > MAX_NOTE_CHARS:
+            raise ResourceError(413, "the note is too long")
+        name = _title(title, "note")
+        content = body.encode("utf-8")
+        self._room_for_one(client_id, product_id)
+        digest = hashlib.sha256(content).hexdigest()
+        if any(r.sha256 == digest for r in self._store.for_product(client_id, product_id)):
+            raise ResourceError(409, "this note is already in the list")
+        extraction = extract_file("txt", content)
+        chunks = chunk_text(extraction.text) if extraction.status is ResourceStatus.READY else []
+        resource = Resource(
+            id=self._new_id(),
+            client_id=client_id,
+            product_id=product_id,
+            kind=ResourceKind.FILE,
+            category=category,
+            title=name,
+            url=None,
+            filename=_title(f"{name}.txt", "note.txt"),
+            mime_type=None,
+            size_bytes=len(content),
+            sha256=digest,
+            status=ResourceStatus.STORED_ONLY,
+            status_detail=None,
+            text_chars=0,
+            created_at=self._clock(),
+            created_by=by,
+        )
+        resource = self._with_reading(resource, extraction, chunks)
+        self._store.add(resource, content=content, chunks=chunks)
+        return resource
+
+    def chunks_of(self, client_id: str, product_id: str) -> list[Chunk]:
+        """The readable passages of a product, in order (for suggestions drawn from them)."""
+        return self._store.chunks(client_id, product_id)
 
     def retry(self, client_id: str, product_id: str, resource_id: str) -> Resource:
         """Reads a link again (a page that was down). Files are read once, when they are added."""

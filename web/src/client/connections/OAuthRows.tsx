@@ -70,6 +70,7 @@ function ProviderRow({
       name={name}
       standing={view.standing}
       reconnect={view.reconnect}
+      forceOpen={!!returned || !!s.error}
       detail={t(view.detail, view.vars)}
       action={
         override ??

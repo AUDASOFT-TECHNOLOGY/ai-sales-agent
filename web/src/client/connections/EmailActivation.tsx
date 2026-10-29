@@ -6,10 +6,12 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { Button } from "../../ui/Button";
 import { clientRequestEmailActivation, type ChannelState } from "../api";
 import { Note } from "../kit";
+import { useAddress } from "../prepare/links";
 import { RowError, useRowState } from "./connectionKit";
 
 export function EmailActivation({ channel, onChanged }: { channel: ChannelState; onChanged: () => Promise<void> | void }) {
   const { t } = useI18n();
+  const address = useAddress();
   const s = useRowState();
   const email = channel.email;
   if (!email) return null;
@@ -33,7 +35,7 @@ export function EmailActivation({ channel, onChanged }: { channel: ChannelState;
           {named ? null : (
             <span className="c-3 t-body-sm">
               {t("channel.activation.needName")}{" "}
-              <Link to="/offer/rules" className="link-btn">
+              <Link to={address({ to: "rules" })} className="link-btn">
                 {t("rv.conn.act.rules")}
               </Link>
             </span>

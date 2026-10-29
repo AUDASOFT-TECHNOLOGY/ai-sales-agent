@@ -6,29 +6,30 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { Button } from "../../ui/Button";
 import { TextInput, Textarea, ToggleChips } from "../../ui/Controls";
 import { Card, FailureNote, Note, type Failure } from "../kit";
+import type { ClientSettings } from "../api";
 import { WEEKDAYS, defaultLanguage, localizedText, setBusiness, setLanguages, setToneStyle, splitList, type Doc } from "../settingsModel";
 import { useOffer } from "./OfferLayout";
 
-const LANGUAGES = [
+export const LANGUAGES = [
   { value: "fr", label: "Français" },
   { value: "en", label: "English" },
   { value: "ar", label: "العربية" },
 ];
-const FORMALITY = ["formal", "neutral", "informal"] as const;
-const HTTPS = /^https:\/\/[^\s/$.?#][^\s]*$/;
-const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+export const FORMALITY = ["formal", "neutral", "informal"] as const;
+export const HTTPS = /^https:\/\/[^\s/$.?#][^\s]*$/;
+export const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function obj(value: unknown): Doc {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Doc) : {};
 }
 
-function timeZones(current: string): string[] {
+export function timeZones(current: string): string[] {
   const supported = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
   const all = supported ? supported("timeZone") : ["Africa/Tunis", "Europe/Paris", "UTC"];
   return current && !all.includes(current) ? [current, ...all] : all;
 }
 
-interface Draft {
+export interface Draft {
   name: string;
   website: string;
   summary: string;
@@ -42,7 +43,7 @@ interface Draft {
   stopWords: string;
 }
 
-function draftOf(commercial: Doc, settings: { timezone?: string; opt_out_keywords?: string[]; schedule?: { daily_at?: string; days?: string[] } }): Draft {
+export function draftOf(commercial: Doc, settings: { timezone?: string; opt_out_keywords?: string[]; schedule?: { daily_at?: string; days?: string[] } }): Draft {
   const lang = defaultLanguage(commercial);
   const business = obj(commercial.business);
   const languages = obj(obj(commercial.communication).languages);
@@ -60,6 +61,31 @@ function draftOf(commercial: Doc, settings: { timezone?: string; opt_out_keyword
     days: settings.schedule?.days ?? [],
     stopWords: (settings.opt_out_keywords ?? []).join(", "),
   };
+}
+
+/** What to write for the business answers, in groups so a questionnaire can save one answer at a time. */
+export type BusinessGroup = "company" | "languages" | "tone" | "schedule";
+
+export function businessChanges(commercial: Doc, draft: Draft, groups: BusinessGroup[] = ["company", "languages", "tone", "schedule"]): ClientSettings {
+  let next = commercial;
+  if (groups.includes("company")) next = setBusiness(next, { name: draft.name.trim(), website: draft.website.trim(), summary: draft.summary.trim() });
+  if (groups.includes("languages")) {
+    const lang = draft.supported.includes(draft.defaultLang) ? draft.defaultLang : (draft.supported[0] ?? "");
+    next = setLanguages(next, { supported: draft.supported, default: lang });
+  }
+  if (groups.includes("tone")) {
+    next = setToneStyle(next, draft.tone);
+    const communication = obj(next.communication);
+    const toneDoc = obj(communication.tone);
+    next = { ...next, communication: { ...communication, tone: { ...toneDoc, formality: { ...obj(toneDoc.formality), default: draft.formality } } } };
+  }
+  const changes: ClientSettings = { commercial: next };
+  if (groups.includes("schedule")) {
+    changes.timezone = draft.timezone.trim() || undefined;
+    changes.opt_out_keywords = splitList(draft.stopWords);
+    changes.schedule = { ...(draft.dailyAt.trim() ? { daily_at: draft.dailyAt.trim() } : {}), days: draft.days };
+  }
+  return changes;
 }
 
 export function BusinessPage() {
@@ -100,22 +126,10 @@ export function BusinessPage() {
     setProblems(found);
     if (found.length > 0) return;
 
-    const lang = draft.supported.includes(draft.defaultLang) ? draft.defaultLang : (draft.supported[0] ?? "");
-    let next = setBusiness(commercial, { name: draft.name.trim(), website: draft.website.trim(), summary: draft.summary.trim() });
-    next = setLanguages(next, { supported: draft.supported, default: lang });
-    next = setToneStyle(next, draft.tone);
-    const communication = obj(next.communication);
-    const toneDoc = obj(communication.tone);
-    next = { ...next, communication: { ...communication, tone: { ...toneDoc, formality: { ...obj(toneDoc.formality), default: draft.formality } } } };
     setBusy(true);
     setFailure(null);
     setDone(false);
-    const problem = await save({
-      commercial: next,
-      timezone: draft.timezone.trim() || undefined,
-      opt_out_keywords: splitList(draft.stopWords),
-      schedule: { ...(draft.dailyAt.trim() ? { daily_at: draft.dailyAt.trim() } : {}), days: draft.days },
-    });
+    const problem = await save(businessChanges(commercial, draft));
     setBusy(false);
     if (problem) setFailure(problem);
     else setDone(true);

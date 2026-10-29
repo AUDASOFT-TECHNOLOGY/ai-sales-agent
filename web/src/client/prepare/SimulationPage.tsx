@@ -4,7 +4,7 @@
  *  channel, gives the address or number, and follows the conversation here. Nothing technical is asked. */
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, FlaskConical, MessageSquare, RefreshCw, Route, Send } from "lucide-react";
+import { ArrowLeft, FlaskConical, GraduationCap, MessageSquare, RefreshCw, Route, Send } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { Button, LinkButton } from "../../ui/Button";
 import { Chip } from "../../ui/Chip";
@@ -83,6 +83,9 @@ export function SimulationPage() {
       <div className="rv-actions">
         <LinkButton to="/prepare" variant="secondary" leading={<ArrowLeft size={16} className="mirror" aria-hidden />}>
           {t("rv.prep.sim.back")}
+        </LinkButton>
+        <LinkButton to="/training" variant="secondary" leading={<GraduationCap size={16} aria-hidden />}>
+          {t("rv.test.train")}
         </LinkButton>
       </div>
     </div>

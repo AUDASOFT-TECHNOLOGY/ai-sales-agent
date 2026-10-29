@@ -11,9 +11,11 @@ from sales_brain_kit.settings.common import (
     LocalizedShort,
     LocalizedText,
     Model,
+    Paragraph,
     ShortText,
     Slug,
 )
+from sales_brain_kit.settings.exact_values import strip_exact_values
 
 # Facts about a prospect that adaptation may never key on (a client may add more, never fewer).
 PROTECTED_ATTRIBUTES = frozenset(
@@ -121,12 +123,100 @@ class MessageSettings(Model):
     greeting: Literal["first_message_only", "every_message", "never"] = "first_message_only"
 
 
+LessonKind = Literal["habit", "example", "objection", "faq", "proof", "never"]
+# Lessons that answer a situation: they say when they apply (`when`) and are shown when they are close
+# to what the prospect just said.
+SITUATIONAL_LESSONS: frozenset[str] = frozenset({"example", "objection", "faq"})
+# Lessons that hold for every conversation, whatever the product: never tied to one.
+GLOBAL_LESSONS: frozenset[str] = frozenset({"habit", "never"})
+MAX_LESSONS = 60
+
+
+class TrainingLesson(Model):
+    """One thing the client taught the agent so that it sells like the client's own people.
+
+    - `habit`: a way of writing to keep (`text`).
+    - `never`: a red line, something the agent never says or does (`text`).
+    - `example`: how the client would answer a situation (`when` is what the prospect says or does,
+      `text` the client's own answer). The Brain takes the spirit and the wording, not a script.
+    - `objection`: how the client answers a doubt or a refusal (`when` is how it sounds, `text` the
+      answer, `why` the reasoning behind it).
+    - `faq`: a question prospects ask (`when`) and the answer the client gives (`text`).
+    - `proof`: a testimonial, a result or a story the client stands behind (`text`; `source` says whose).
+
+    `product` ties a lesson to one product: it is shown only when that product is in play. Prices,
+    links, e-mail addresses and account numbers never go in a lesson: they reach a prospect only
+    through the exact values of the catalog and the payment methods."""
+
+    kind: LessonKind
+    text: Paragraph
+    when: ShortText | None = None
+    product: Slug | None = None
+    source: ShortText | None = None
+    why: ShortText | None = None
+
+    @model_validator(mode="after")
+    def _is_understandable(self) -> "TrainingLesson":
+        if self.kind in SITUATIONAL_LESSONS and not self.when:
+            raise ValueError(f"a '{self.kind}' lesson needs 'when': the situation it answers")
+        if self.kind not in SITUATIONAL_LESSONS and self.when:
+            raise ValueError(f"a '{self.kind}' lesson has no 'when'")
+        if self.kind in GLOBAL_LESSONS and self.product:
+            raise ValueError(f"a '{self.kind}' lesson holds for every product: it has no 'product'")
+        if self.kind != "proof" and self.source:
+            raise ValueError("only a 'proof' lesson has a 'source'")
+        if self.kind in GLOBAL_LESSONS and self.why:
+            raise ValueError(f"a '{self.kind}' lesson has no 'why'")
+        return self
+
+    @model_validator(mode="after")
+    def _holds_no_exact_value(self) -> "TrainingLesson":
+        for name in ("text", "when", "source", "why"):
+            value = getattr(self, name)
+            if value and strip_exact_values(value) != value:
+                raise ValueError(
+                    f"'{name}' holds a price, a link, an e-mail address or an account number: "
+                    "those are never taught, they come from the catalog and the payment methods"
+                )
+        return self
+
+
+# How the agent leads a conversation. The wording of each choice is the platform's (see
+# `consultative/training.py`), so that a choice always means the same well-tested thing.
+SellingApproach = Literal["consultative", "challenger", "guide", "direct"]
+ClosingStyle = Literal["soft", "choice", "assumptive", "direct"]
+
+
+class Playbook(Model):
+    """The client's way of selling, in a few choices that hold for every product."""
+
+    approach: SellingApproach = "consultative"
+    closing: ClosingStyle = "choice"
+    # `real_reasons_only`: the agent may mention a deadline or a limited place only if the catalog
+    # or a lesson really says so; it never invents urgency.
+    urgency: Literal["none", "real_reasons_only"] = "none"
+    # Whether the agent may bring a testimonial or a result when it helps the prospect decide.
+    social_proof: Literal["when_relevant", "never"] = "when_relevant"
+    pitch: ShortText | None = None  # the business in one breath, in the client's own words
+    ideal_customer: ShortText | None = None  # who the business serves best
+
+    @model_validator(mode="after")
+    def _holds_no_exact_value(self) -> "Playbook":
+        for name in ("pitch", "ideal_customer"):
+            value = getattr(self, name)
+            if value and strip_exact_values(value) != value:
+                raise ValueError(f"'{name}' holds a price, a link or an e-mail address")
+        return self
+
+
 class CommunicationSettings(Model):
     languages: LanguageSettings
     tone: ToneSettings = Field(default_factory=ToneSettings)
     principles: tuple[ShortText, ...] = Field(default=(), max_length=10)
     message: MessageSettings = Field(default_factory=MessageSettings)
     register_rules: tuple[RegisterRule, ...] = Field(default=(), max_length=30)
+    playbook: Playbook = Field(default_factory=Playbook)
+    training: tuple[TrainingLesson, ...] = Field(default=(), max_length=MAX_LESSONS)
 
 
 class Goal(Model):

@@ -5,6 +5,7 @@
  *  answer. A write sends only what changed, so what a page does not edit is kept by the server. */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Outlet } from "react-router-dom";
 import { useI18n } from "../../i18n";
 import { clientSaveSettings, clientSettings, type ClientSettings, type SettingsState } from "../api";
@@ -29,8 +30,9 @@ export function useOffer(): OfferContext {
   return ctx;
 }
 
-export function OfferLayout() {
-  const { t } = useI18n();
+/** Loads and writes the commercial settings for whatever is drawn inside it. "My offer" and
+ *  "Prepare your agent" both use it, so there is still a single writer of the document. */
+export function OfferProvider({ children }: { children: ReactNode }) {
   const { logout } = useClientAuth();
   const [state, setState] = useState<SettingsState | null>(null);
   const [loadFailure, setLoadFailure] = useState<Failure | null>(null);
@@ -84,6 +86,16 @@ export function OfferLayout() {
   );
 
   return (
+    <>
+      {loadFailure ? <FailureNote failure={loadFailure} onRetry={() => void reload()} /> : null}
+      {value ? <Ctx.Provider value={value}>{children}</Ctx.Provider> : loadFailure ? null : <Loading />}
+    </>
+  );
+}
+
+export function OfferLayout() {
+  const { t } = useI18n();
+  return (
     <div className="rv-page">
       <PageHead title={t("rv.offer.title")} text={t("rv.offer.intro")} />
       <SubTabs
@@ -94,14 +106,9 @@ export function OfferLayout() {
           { to: "/offer/rules", label: t("rv.offer.tab.business") },
         ]}
       />
-      {loadFailure ? <FailureNote failure={loadFailure} onRetry={() => void reload()} /> : null}
-      {value ? (
-        <Ctx.Provider value={value}>
-          <Outlet />
-        </Ctx.Provider>
-      ) : loadFailure ? null : (
-        <Loading />
-      )}
+      <OfferProvider>
+        <Outlet />
+      </OfferProvider>
     </div>
   );
 }

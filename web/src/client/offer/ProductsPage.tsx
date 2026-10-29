@@ -18,11 +18,15 @@ import { methodsOf } from "./paymentModel";
 import { findProduct, formOfProduct, priceSummary, productList } from "./productModel";
 import { zoneCounts } from "./ResourcesPanel";
 import { useOffer } from "./OfferLayout";
+import { useAddress } from "../prepare/links";
+import { useTerms } from "../prepare/terms";
 
 const STATUS_TINT = { active: "success", coming_soon: "attention", inactive: "neutral" } as const;
 
 export function ProductsPage() {
   const { t } = useI18n();
+  const address = useAddress();
+  const tt = useTerms();
   const { commercial, save } = useOffer();
   const lang = defaultLanguage(commercial);
   const products = productList(commercial);
@@ -69,11 +73,11 @@ export function ProductsPage() {
     <div className="rv-page">
       <div className="rv-head">
         <div className="rv-head__text">
-          <h3 className="t-h2">{t("rv.prod.title")}</h3>
+          <h3 className="t-h2">{tt("rv.prod.title")}</h3>
           <p>{t("rv.prod.intro")}</p>
         </div>
-        <LinkButton to="/offer/products/new" variant="primary" leading={<Plus size={16} aria-hidden />}>
-          {t("rv.prod.add")}
+        <LinkButton to={address({ to: "product", id: "new" })} variant="primary" leading={<Plus size={16} aria-hidden />}>
+          {tt("rv.prod.add")}
         </LinkButton>
       </div>
 
@@ -86,8 +90,8 @@ export function ProductsPage() {
             title={t("rv.prod.empty.title")}
             text={t("rv.prod.empty.text")}
             action={
-              <LinkButton to="/offer/products/new" variant="primary" leading={<Plus size={16} aria-hidden />}>
-                {t("rv.prod.add")}
+              <LinkButton to={address({ to: "product", id: "new" })} variant="primary" leading={<Plus size={16} aria-hidden />}>
+                {tt("rv.prod.add")}
               </LinkButton>
             }
           />
@@ -120,7 +124,7 @@ export function ProductsPage() {
                     </span>
                     <div className="rv-row__main">
                       <span className="rv-productcard__name">
-                        <Link to={`/offer/products/${encodeURIComponent(id)}`} className="rv-row__title" dir="auto">
+                        <Link to={address({ to: "product", id })} className="rv-row__title" dir="auto">
                           {localizedText(p.name, lang) || id}
                         </Link>
                         <Chip tint={STATUS_TINT[status] ?? "neutral"}>{t(`rv.prod.status.${status}` as MessageKey)}</Chip>
@@ -141,7 +145,7 @@ export function ProductsPage() {
                       </div>
                     ) : null}
                     <div className="rv-actions">
-                      <LinkButton to={`/offer/products/${encodeURIComponent(id)}`} size="sm" variant={score < 100 && status !== "inactive" ? "primary" : "secondary"}>
+                      <LinkButton to={address({ to: "product", id })} size="sm" variant={score < 100 && status !== "inactive" ? "primary" : "secondary"}>
                         {score < 100 && status !== "inactive" ? t("rv.pl.edit") : t("rv.common.edit")}
                       </LinkButton>
                       {status === "inactive" ? (

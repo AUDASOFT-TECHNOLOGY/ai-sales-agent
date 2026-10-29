@@ -1259,3 +1259,63 @@ main { outline: none; }
 .rv-phrases__suggestion { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; min-height: 32px; border-radius: var(--radius-full); border: 1px dashed var(--line-control); color: var(--text-2); font-size: 13.5px; }
 @media (hover: hover) { .rv-phrases__suggestion:hover { color: var(--text-1); border-color: rgb(var(--tint-agent) / 0.6); } }
 @media (max-width: 600px) { .rv-phrases__add { flex-wrap: wrap; } .rv-phrases__add .btn { width: 100%; } }
+
+/* ── Workflow: one animated picture. The light crosses the steps, each one lights up as it passes. ───── */
+.rv-wfa { margin: 0; padding: 12px 8px; border-radius: var(--radius-xl); background: radial-gradient(120% 90% at 50% 0%, rgb(var(--tint-agent) / 0.18), transparent 70%), rgb(255 255 255 / 0.03); border: 1px solid rgb(var(--tint-agent) / 0.3); }
+.rv-wfa__scroll { overflow-x: auto; }
+.rv-wfa__svg { display: block; width: 100%; min-width: 820px; height: auto; font-family: inherit; }
+.rv-wfa__zone { fill: rgb(var(--tint-agent) / 0.06); stroke: rgb(var(--tint-agent) / 0.55); stroke-width: 1.5; stroke-dasharray: 3 7; stroke-linecap: round; }
+.rv-wfa__zone-tag { fill: rgb(var(--tint-agent) / 0.22); }
+.rv-wfa__zone-icon { stroke: var(--text-1); }
+.rv-wfa__zone-t { fill: var(--text-1); font-size: 14px; font-weight: 600; }
+.rv-wfa__track { stroke: var(--line-2); stroke-width: 4; stroke-linecap: round; }
+.rv-wfa__flow { stroke: rgb(var(--tint-agent) / 0.8); stroke-width: 4; stroke-linecap: round; stroke-dasharray: 2 14; animation: rv-wfa-dash 1.4s linear infinite; }
+.rv-wfa__flow--short { stroke-width: 3; }
+.rv-wfa__light { animation: rv-wfa-run var(--cycle, 14s) linear infinite; }
+.rv-wfa__spark { fill: #fff; }
+.rv-wfa__disc { fill: var(--surface-1, #12151d); stroke: rgb(var(--tint-agent) / 0.7); stroke-width: 2; }
+.rv-wfa__disc--small { stroke-width: 1.5; }
+.rv-wfa__halo { fill: none; stroke: rgb(var(--tint-agent) / 0); stroke-width: 6; transform-box: fill-box; transform-origin: center; animation: rv-wfa-pulse var(--cycle, 14s) ease-out infinite; animation-delay: inherit; }
+.rv-wfa__step { animation-duration: var(--cycle, 14s); }
+.rv-wfa__step .rv-wfa__halo { animation-delay: inherit; }
+.rv-wfa__icon { stroke: var(--text-1); }
+.rv-wfa__num { fill: #fff; font-size: 12px; font-weight: 700; }
+.rv-wfa__label { fill: var(--text-1); font-size: 15px; font-weight: 650; }
+.rv-wfa__label--small { font-size: 14px; font-weight: 600; }
+.rv-wfa__drop { fill: none; stroke: rgb(var(--tint-agent) / 0.9); stroke-width: 2.5; stroke-linecap: round; }
+.rv-wfa__follow { fill: rgb(var(--tint-agent) / 0.1); stroke: rgb(var(--tint-agent) / 0.45); stroke-width: 1.5; }
+.rv-wfa__follow-t { fill: var(--text-2); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; }
+.rv-wfa__tip { fill: none; stroke: rgb(var(--tint-agent) / 0.95); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.rv-wfa__tip--hand { stroke: var(--attention, #e0a030); }
+.rv-wfa__hand-link, .rv-wfa__report { fill: none; stroke: var(--attention, #e0a030); stroke-width: 2; stroke-dasharray: 6 6; animation: rv-wfa-dash-slow 2.4s linear infinite; }
+.rv-wfa__report { animation-direction: normal; }
+.rv-wfa__report-t { fill: var(--text-1); font-size: 14px; font-weight: 650; }
+.rv-wfa__you { fill: rgb(224 160 48 / 0.16); stroke: var(--attention, #e0a030); stroke-width: 2; }
+.rv-wfa__you-icon { stroke: var(--attention-text, var(--attention, #e0a030)); }
+.rv-wfa__you-t { fill: var(--text-1); font-size: 16px; font-weight: 650; }
+.rv-wfa__pill { fill: rgb(224 160 48 / 0.1); stroke: rgb(224 160 48 / 0.55); stroke-width: 1.2; }
+.rv-wfa__pill-t { fill: var(--text-1); font-size: 13.5px; }
+.rv-wfa__brings { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.rv-wfa__brings li { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: var(--radius-full); background: rgb(255 255 255 / 0.05); border: 1px solid var(--line-2); font-size: 14.5px; font-weight: 600; }
+.rv-wfa__brings svg { color: rgb(var(--tint-agent)); }
+@keyframes rv-wfa-run { 0% { transform: translate(150px, 190px); opacity: 0; } 3% { opacity: 1; } 82% { opacity: 1; } 85%, 100% { transform: translate(1050px, 190px); opacity: 0; } }
+@keyframes rv-wfa-pulse { 0% { stroke: rgb(var(--tint-agent) / 0.95); transform: scale(0.95); } 8% { stroke: rgb(var(--tint-agent) / 0.35); transform: scale(1.22); } 16%, 100% { stroke: rgb(var(--tint-agent) / 0); transform: scale(1.3); } }
+@keyframes rv-wfa-dash { to { stroke-dashoffset: -32; } }
+@keyframes rv-wfa-dash-slow { to { stroke-dashoffset: -24; } }
+@media (prefers-reduced-motion: reduce) {
+  .rv-wfa__flow, .rv-wfa__hand-link, .rv-wfa__report, .rv-wfa__halo { animation: none; }
+  .rv-wfa__light { display: none; }
+}
+.rv-wfa__pill--tiles { fill: rgb(255 255 255 / 0.06); stroke: var(--line-control); stroke-dasharray: none; }
+.rv-wfa__plug { fill: rgb(255 255 255 / 0.07); stroke: rgb(var(--tint-agent) / 0.55); stroke-width: 1.2; }
+.rv-wfa__plug-line { stroke: rgb(var(--tint-agent) / 0.6); stroke-width: 1.5; stroke-dasharray: 2 4; stroke-linecap: round; }
+.rv-wfa__plug-dot { fill: rgb(var(--tint-agent) / 0.9); }
+.rv-wfa__tip-hand { fill: var(--attention, #e0a030); }
+.rv-wfa__bracket { fill: none; stroke: rgb(var(--tint-agent) / 0.7); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.rv-wfa__chip { fill: rgb(var(--tint-agent) / 0.22); stroke: rgb(var(--tint-agent) / 0.6); stroke-width: 1.2; }
+.rv-wfa__chip-t { fill: var(--text-1); font-size: 14px; font-weight: 600; }
+.rv-wfa__lane { fill: rgb(var(--tint-agent) / 0.1); stroke: rgb(var(--tint-agent) / 0.4); stroke-width: 1.2; }
+.rv-wfa__panel { fill: rgb(224 160 48 / 0.08); stroke: rgb(224 160 48 / 0.5); stroke-width: 1.5; }
+.rv-wfa__hand-link { stroke-width: 2.5; }
+.rv-wfa__brings li { padding: 8px 14px; font-size: 13.5px; }
+.rv-wfa__brings { gap: 8px; }

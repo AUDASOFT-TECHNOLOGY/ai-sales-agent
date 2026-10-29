@@ -5,7 +5,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useOverview, OverviewProvider, guideSteps } from "../client/overview";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, FlaskConical, House, LogOut, MessageSquare, Receipt, Rocket, UserRound, Waves } from "lucide-react";
+import { Bell, ChartNoAxesColumn, CheckSquare, Ellipsis, FlaskConical, GraduationCap, House, LogOut, MessageSquare, Receipt, Rocket, Workflow, UserRound, Waves } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { googleReturnOf, hubspotReturnOf, sheetsReturnOf } from "../client/connections/returns";
@@ -36,7 +36,9 @@ const HOME: NavEntry = { to: "/home", key: "rv.nav.home", icon: House };
 // The screens that used to have their own entry (setup guide, connections, offer, circuits) are reached from here.
 const PREPARE_HUB: NavEntry = { to: "/prepare", key: "rv.nav.prepare", icon: Rocket, also: ["/setup", "/connections", "/offer", "/circuits"] };
 const TEST: NavEntry = { to: "/simulation", key: "rv.nav.test", icon: FlaskConical };
-const PREPARE: NavEntry[] = [PREPARE_HUB, TEST];
+const TRAIN: NavEntry = { to: "/training", key: "rv.nav.train", icon: GraduationCap };
+const WORKFLOW: NavEntry = { to: "/workflow", key: "rv.nav.workflow", icon: Workflow };
+const PREPARE: NavEntry[] = [PREPARE_HUB, WORKFLOW, TEST, TRAIN];
 const FOLLOW: NavEntry[] = [
   { to: "/conversations", key: "rv.nav.conversations", icon: MessageSquare, also: ["/prospects"] },
   { to: "/crm", key: "rv.nav.crm", icon: Waves },
@@ -45,7 +47,7 @@ const FOLLOW: NavEntry[] = [
 ];
 const ACCOUNT: NavEntry[] = [{ to: "/account", key: "rv.nav.billing", icon: Receipt, also: ["/billing", "/profile"] }];
 const TABS = [HOME, FOLLOW[2]!, FOLLOW[0]!, PREPARE_HUB];
-const MORE = [TEST, FOLLOW[1]!, FOLLOW[3]!, ...ACCOUNT];
+const MORE = [WORKFLOW, TEST, TRAIN, FOLLOW[1]!, FOLLOW[3]!, ...ACCOUNT];
 
 function useActive(entry: NavEntry): boolean {
   const { pathname } = useLocation();

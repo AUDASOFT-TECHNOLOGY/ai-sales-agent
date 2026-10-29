@@ -21,29 +21,23 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from sales_brain_kit.settings import ConsultativeSalesSettings
+from sales_brain_kit.settings import exact_values as _values
+from sales_brain_kit.settings.exact_values import strip_exact_values
+
+__all__ = ["strip_exact_values"]  # also what the settings refuse in free text (see exact_values.py)
+
+_HTTP, _BARE_DOMAIN, _AMOUNT = _values.HTTP, _values.BARE_DOMAIN, _values.AMOUNT
+_LONG_DIGITS, _DIGIT_GROUPS, _IBAN_LIKE = (
+    _values.LONG_DIGITS,
+    _values.DIGIT_GROUPS,
+    _values.IBAN_LIKE,
+)
 
 KINDS = ("price", "payment", "booking")
 MAX_EXPANDED_CHARS = 3900  # what one message may grow to once the exact values are in
 
 _PLACEHOLDER = re.compile(r"\[\[(price|payment|booking):([a-z0-9][a-z0-9_-]{0,63})\]\]")
 _LOOKS_LIKE_ONE = re.compile(r"(?i)[\[{(<]\s*(?:price|payment|booking)\s*:")
-_HTTP = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"'\]]+")
-_BARE_DOMAIN = re.compile(r"(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)+/[^\s<>\"'\]]*")
-_CURRENCY_SYMBOLS = "$€£¥₹₺₽₩₦₫₪"
-_AMOUNT = re.compile(
-    rf"(?:(?<![A-Za-z])[A-Z]{{3}}(?![A-Za-z])\s?\d|\d\s?(?<![A-Za-z])[A-Z]{{3}}(?![A-Za-z])"
-    rf"|[{_CURRENCY_SYMBOLS}]\s?\d|\d\s?[{_CURRENCY_SYMBOLS}])"
-)
-_LONG_DIGITS = re.compile(r"\d{9,}")
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-# A number with its currency (a three-letter code or a symbol), removed whole, whichever side it is on.
-_AMOUNT_FULL = re.compile(
-    rf"(?:(?<![A-Za-z])[A-Z]{{3}}(?![A-Za-z])\s?\d[\d  .,]*"
-    rf"|\d[\d  .,]*\s?(?<![A-Za-z])[A-Z]{{3}}(?![A-Za-z])"
-    rf"|[{_CURRENCY_SYMBOLS}]\s?\d[\d  .,]*|\d[\d  .,]*\s?[{_CURRENCY_SYMBOLS}])"
-)
-_DIGIT_GROUPS = re.compile(r"(?<!\d)\d{3,4}(?:[  ]\d{3,4}){2,}(?!\d)")
-_IBAN_LIKE = re.compile(r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,}\b")
 _TRAILING = ".,;:!?)\"'"
 
 
@@ -122,18 +116,3 @@ def configured_links(settings: ConsultativeSalesSettings) -> frozenset[str]:
             if step.registration is not None and step.registration.url:
                 urls.add(step.registration.url)
     return frozenset(_normalise_url(url) for url in urls)
-
-
-def strip_exact_values(text: str) -> str:
-    """The text without anything that looks like an exact value: links, e-mail addresses, amounts
-    with a currency, account-like numbers. Material shown to the model for reference goes through
-    this, so it can never become a source of prices, links or payment details."""
-    cleaned = _HTTP.sub("[…]", text)
-    cleaned = _BARE_DOMAIN.sub("[…]", cleaned)
-    cleaned = _EMAIL.sub("[…]", cleaned)
-    cleaned = _IBAN_LIKE.sub("[…]", cleaned)
-    cleaned = _DIGIT_GROUPS.sub("[…]", cleaned)
-    cleaned = _LONG_DIGITS.sub("[…]", cleaned)
-    # An amount is a number next to a currency: drop the number with its currency, keep the words.
-    cleaned = _AMOUNT_FULL.sub("[…]", cleaned)
-    return cleaned

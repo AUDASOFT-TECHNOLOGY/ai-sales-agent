@@ -49,6 +49,7 @@ def _exact(max_length: int) -> object:
 
 Hint = _text(200)
 ShortText = _text(300)
+Paragraph = _text(600)
 Text = _text(3000)
 ExactShort = _exact(200)
 ExactText = _exact(1500)

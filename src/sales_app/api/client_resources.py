@@ -9,6 +9,8 @@ is `Cache-Control: no-store`.
   really read of each, and the limits;
 - `POST   /client/v1/products/{product}/resources/link`       `{title, url, category}`: a public
   https page. It is opened by the platform through a fetcher that refuses private networks;
+- `POST   /client/v1/products/{product}/resources/note`       `{title, text, category}`: text the client
+  wrote or pasted (a testimonial, an FAQ, a video's transcript), read like any other document;
 - `POST   /client/v1/products/{product}/resources/file`       the file as the raw request body
   (`X-File-Name`, `X-Resource-Title`, both URL-encoded): type, size and content are checked;
 - `POST   /client/v1/products/{product}/resources/{id}/retry` reads a link again;
@@ -47,6 +49,14 @@ class LinkRequest(BaseModel):
     title: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] = ""
     url: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2048)]
     category: Literal["web", "video", "testimonial", "other"] = "web"
+
+
+class NoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20_000)]
+    category: Literal["testimonial", "document", "other"] = "document"
 
 
 class ResourceResponse(BaseModel):
@@ -176,6 +186,30 @@ def create_client_resources_router(application: Application) -> APIRouter:
                     product_id,
                     title=body.title,
                     url=body.url,
+                    category=body.category,
+                    by=f"client:{client.client_id}",
+                )
+            )
+        )
+        return _response(added)
+
+    @router.post("/{product_id}/resources/note", response_model=ResourceResponse, status_code=201)
+    async def add_note(
+        product_id: str,
+        body: NoteRequest,
+        response: Response,
+        client: ClientProfile = Depends(get_current_client),
+    ) -> ResourceResponse:
+        response.headers["Cache-Control"] = "no-store"
+        docs = service()
+        own_product(client, product_id)
+        added = await run_in_threadpool(
+            lambda: guarded(
+                lambda: docs.add_note(
+                    client.client_id,
+                    product_id,
+                    title=body.title,
+                    text=body.text,
                     category=body.category,
                     by=f"client:{client.client_id}",
                 )

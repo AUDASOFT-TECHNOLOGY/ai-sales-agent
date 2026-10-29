@@ -234,6 +234,8 @@ export type ProductProblem =
   | "variantPrice"
   | "variantCountries"
   | "url"
+  | "onlineChoice"
+  | "onlineUrl"
   | "ctaUrl"
   | "comingSoonLink"
   | "objection";
@@ -255,6 +257,9 @@ export function productProblems(form: ProductForm): ProductProblem[] {
     if (v.countries.trim() === "") problems.push("variantCountries");
   }
   if (form.url.trim() !== "" && !HTTPS.test(form.url.trim())) problems.push("url");
+  // Sold online or not must be answered; a product sold online needs the page of its sheet on the client's site.
+  if (form.payMode === "all") problems.push("onlineChoice");
+  else if (form.payOnline && !HTTPS.test(form.url.trim())) problems.push("onlineUrl");
   const needsLink = form.ctaKind === "enrol_link";
   if (needsLink && !HTTPS.test((form.ctaUrl.trim() || form.url.trim()))) problems.push("ctaUrl");
   if (needsLink && form.status === "coming_soon") problems.push("comingSoonLink");

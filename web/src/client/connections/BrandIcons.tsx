@@ -3,9 +3,9 @@
 
 import type { ReactNode } from "react";
 
-export type Brand = "gmail" | "whatsapp" | "telegram" | "hubspot" | "drive";
+export type Brand = "gmail" | "whatsapp" | "telegram" | "hubspot" | "drive" | "sheets";
 
-const MARKS: Record<Brand, ReactNode> = {
+export const MARKS: Record<Brand, ReactNode> = {
   gmail: (
     <>
       <path fill="#4285F4" d="M2 8.2V18a2 2 0 0 0 2 2h3v-9z" />
@@ -13,6 +13,13 @@ const MARKS: Record<Brand, ReactNode> = {
       <path fill="#FBBC04" d="M17 5.5V11l5-3.8v-.9c0-1.4-1.6-2.2-2.7-1.4z" />
       <path fill="#EA4335" d="M7 11V5.5l5 3.8 5-3.8V11l-5 3.8z" />
       <path fill="#C5221F" d="M2 6.3v.9L7 11V5.5L4.7 4.9C3.6 4.1 2 4.9 2 6.3z" />
+    </>
+  ),
+  sheets: (
+    <>
+      <path fill="#0F9D58" d="M6 2h8l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
+      <path fill="#87CEAC" d="M14 2l5 5h-4a1 1 0 0 1-1-1z" />
+      <path fill="#fff" d="M7.5 11h9v7.5h-9zm1.4 1.4v1.5h2.2v-1.5zm3.6 0v1.5h3.1v-1.5zm-3.6 2.9v1.8h2.2v-1.8zm3.6 0v1.8h3.1v-1.8z" />
     </>
   ),
   drive: (

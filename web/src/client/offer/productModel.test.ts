@@ -120,7 +120,7 @@ describe("product form", () => {
 });
 
 describe("product problems", () => {
-  const ok: ProductForm = { ...blankProduct("x"), name: "X", summary: "S" };
+  const ok: ProductForm = { ...blankProduct("x"), name: "X", summary: "S", payMode: "custom", payOnline: false };
   it("accepts a minimal product", () => {
     expect(productProblems(ok)).toEqual([]);
   });
@@ -137,6 +137,12 @@ describe("product problems", () => {
     expect(productProblems({ ...ok, url: "http://x.example" })).toContain("url");
     expect(productProblems({ ...ok, ctaKind: "enrol_link", ctaUrl: "" })).toContain("ctaUrl");
     expect(productProblems({ ...ok, ctaKind: "enrol_link", url: "https://x.example", status: "coming_soon" })).toContain("comingSoonLink");
+  });
+  it("asks whether the product is sold online, and for its page on the site when it is", () => {
+    expect(productProblems({ ...ok, payMode: "all" })).toEqual(["onlineChoice"]);
+    expect(productProblems({ ...ok, payOnline: true, url: "" })).toEqual(["onlineUrl"]);
+    expect(productProblems({ ...ok, payOnline: true, url: "http://x.example" })).toEqual(expect.arrayContaining(["url", "onlineUrl"]));
+    expect(productProblems({ ...ok, payOnline: true, url: "https://x.example/p" })).toEqual([]);
   });
   it("refuses an objection with only one half", () => {
     expect(productProblems({ ...ok, objections: [{ code: "", example: "trop cher", response: "" }] })).toContain("objection");
