@@ -33,6 +33,7 @@ from sales_app.api.admin_llm_pricing import create_admin_llm_pricing_router
 from sales_app.api.admin_plans import create_admin_plans_router
 from sales_app.api.admin_send_cap import create_admin_send_cap_router
 from sales_app.api.admin_settings import create_admin_settings_router
+from sales_app.api.admin_site import create_admin_site_router
 from sales_app.api.admin_whatsapp import create_admin_whatsapp_router
 from sales_app.api.audit_middleware import AuditMiddleware
 from sales_app.api.client import create_client_router
@@ -53,6 +54,7 @@ from sales_app.api.client_live import create_client_live_router
 from sales_app.api.client_mailbox import create_client_mailbox_router
 from sales_app.api.client_notifications import create_client_notifications_router
 from sales_app.api.client_payments import create_client_payments_router
+from sales_app.api.client_plan_payment import create_client_plan_payment_router
 from sales_app.api.client_prospects import create_client_prospects_router
 from sales_app.api.client_reporting import create_client_reporting_router
 from sales_app.api.client_resources import create_client_resources_router
@@ -164,6 +166,8 @@ def create_app(
     app.include_router(create_admin_email_activation_router(application, mail_login_probe))
     app.include_router(create_client_router(application))
     app.include_router(create_client_signup_router(application))
+    app.include_router(create_client_plan_payment_router(application))
+    app.include_router(create_admin_site_router(application))
     app.include_router(create_client_agent_router(application))
     app.include_router(create_client_approvals_router(application))
     app.include_router(create_client_payments_router(application))

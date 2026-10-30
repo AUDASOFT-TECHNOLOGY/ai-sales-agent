@@ -936,3 +936,47 @@ client_free_accounts = Table(
     Column("credits", Integer, nullable=False),
     Column("created_at", UtcDateTime, nullable=False),
 )
+
+
+# What the Admin writes for visitors (Contact, Privacy, Terms) and for clients (bank details):
+# one text per page and language (`sales_app.site_content`).
+site_pages = Table(
+    "site_pages",
+    metadata,
+    Column("page_key", String(32), primary_key=True),
+    Column("locale", String(8), primary_key=True),
+    Column("title", String(120), nullable=False),
+    Column("body", Text, nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+    Column("updated_by", String(255), nullable=False),
+)
+
+# A client's offline payment of a plan, with its receipt (`sales_app.plan_payments`). At most one
+# request per client waits for the Admin: the database itself refuses a second pending one.
+plan_payment_requests = Table(
+    "plan_payment_requests",
+    metadata,
+    Column("request_id", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("plan_id", String(64), ForeignKey("plans.plan_id"), nullable=False),
+    Column("plan_name", String(80), nullable=False),
+    Column("amount", Numeric(18, 2), nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("reference", String(120), nullable=False, server_default=""),
+    Column("receipt_type", String(32), nullable=False),
+    Column("receipt_size", Integer, nullable=False),
+    Column("receipt_data", LargeBinary, nullable=False),
+    Column("status", String(12), nullable=False),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("decided_at", UtcDateTime),
+    Column("decided_by", String(255)),
+    Column("reason", String(300)),
+    Index("ix_plan_payment_requests_client", "client_id", "created_at"),
+    Index(
+        "uq_plan_payment_requests_pending",
+        "client_id",
+        unique=True,
+        postgresql_where=text("status = 'pending'"),
+        sqlite_where=text("status = 'pending'"),
+    ),
+)

@@ -29,7 +29,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useClientAuth } from "../client/ClientAuthContext";
-import { publicPlans, type PublicPlan } from "../client/accessApi";
+import { publicPageKeys, publicPlans, type PublicPlan } from "../client/accessApi";
 import { PlanFacts, planPrice } from "../client/PlansPage";
 import { useFetched } from "../client/useFetched";
 import { useI18n, type Locale, type MessageKey } from "../i18n";
@@ -462,19 +462,15 @@ function FinalCta() {
   );
 }
 
-/** The addresses of the legal pages and of the contact are the company's to give: they come from the
- *  build settings. Until one is set, the entry says "coming soon" instead of pointing nowhere. */
-function externalLink(value: unknown): string | null {
-  return typeof value === "string" && /^(https?:|mailto:)/.test(value) ? value : null;
-}
-
 function Footer() {
   const { t } = useI18n();
-  const env = import.meta.env as Record<string, unknown>;
-  const external: Array<[MessageKey, string | null]> = [
-    ["lp.footer.contact", externalLink(env.VITE_CONTACT_URL)],
-    ["lp.footer.privacy", externalLink(env.VITE_PRIVACY_URL)],
-    ["lp.footer.terms", externalLink(env.VITE_TERMS_URL)],
+  // The pages are the administrator's: a link exists only for a page that was written.
+  const loadKeys = useCallback(() => publicPageKeys(), []);
+  const written = new Set(useFetched(loadKeys).value ?? []);
+  const external: Array<[MessageKey, string]> = [
+    ["lp.footer.contact", "contact"],
+    ["lp.footer.privacy", "privacy"],
+    ["lp.footer.terms", "terms"],
   ];
   return (
     <footer className="lp-footer">
@@ -493,12 +489,12 @@ function Footer() {
                 {t("lp.footer.pricing")}
               </button>
             </li>
-            {external.map(([key, href]) => (
+            {external.map(([key, page]) => (
               <li key={key}>
-                {href ? (
-                  <a className="lp-nav__link" href={href} rel="noopener noreferrer">
+                {written.has(page) ? (
+                  <Link className="lp-nav__link" to={`/page/${page}`}>
                     {t(key)}
-                  </a>
+                  </Link>
                 ) : (
                   <span className="lp-footer__soon">
                     {t(key)} <small>· {t("lp.footer.soon")}</small>

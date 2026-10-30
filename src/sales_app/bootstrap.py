@@ -69,6 +69,8 @@ from sales_app.persistence.provider_cost_rows import SqlCostStore
 from sales_app.persistence.read_model_rows import SqlProspectReadModel
 from sales_app.persistence.resource_rows import SqlResourceStore
 from sales_app.persistence.send_cap_rows import SqlSendCapStore, SqlSendCounter
+from sales_app.persistence.site_rows import SqlPlanPaymentStore, SqlSitePageStore
+from sales_app.plan_payments import PlanPaymentStore
 from sales_app.plans import PlanStore, current_daily_quota
 from sales_app.provider_costs import CostService
 from sales_app.quotas import QuotaService
@@ -92,6 +94,7 @@ from sales_app.settings import Settings
 from sales_app.shared_state import JobLeaseGuard, SharedPendingAuthorizations
 from sales_app.sheets_wiring import SheetsAccessService
 from sales_app.sheets_wiring import install as install_sheets_access
+from sales_app.site_content import SitePageStore
 from sales_app.source_checks import InMemorySourceCheckStore, SourceCheckStore
 from sales_app.sourcing.ports import OperationalStore
 from sales_app.sourcing.sql_store import SqlOperationalStore
@@ -160,6 +163,10 @@ class Application:
     commercial_access: CommercialAccess = field(
         default_factory=lambda: CommercialAccess(None, None)
     )
+    # The public pages and the bank details the Admin writes, and the offline plan payment requests
+    # clients send with their receipt; None without a database (the APIs say so).
+    site_pages: SitePageStore | None = None
+    plan_payments: PlanPaymentStore | None = None
     # The monthly invoices; None without a database (the Admin API says so).
     invoices: InvoiceStore | None = None
     # Resolves the payment provider that confirms invoice payments, or None when none is configured
@@ -622,6 +629,8 @@ def _assemble(
         llm_pricing=_llm_pricing_store(account_stores),
         plans=plans,
         commercial_access=access,
+        site_pages=_engine_store(account_stores, SqlSitePageStore),
+        plan_payments=_engine_store(account_stores, SqlPlanPaymentStore),
         send_caps=send_caps,
         send_limits=send_limits,
         gmail=gmail,
@@ -760,6 +769,11 @@ def _payment_provider_resolver(secrets: SecretStore) -> Callable[[], PaymentProv
 def _plan_store(account_stores: AccountStores | None) -> PlanStore | None:
     engine = account_stores.engine if account_stores is not None else None
     return SqlPlanStore(engine) if engine is not None else None
+
+
+def _engine_store(account_stores: AccountStores | None, factory):
+    engine = account_stores.engine if account_stores is not None else None
+    return factory(engine) if engine is not None else None
 
 
 def _free_account_store(account_stores: AccountStores | None) -> FreeAccountStore | None:

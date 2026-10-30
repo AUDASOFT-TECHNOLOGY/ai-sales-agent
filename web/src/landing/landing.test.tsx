@@ -158,16 +158,56 @@ describe("Upgrade prompt", () => {
     expect(screen.queryByTestId("upgrade-banner")).toBeNull();
   });
 
-  it("lets a Free client pick a plan and tells it the request was received", async () => {
+
+  it("walks a Free client through the bank transfer: details, amount, receipt, then waiting for review", async () => {
+    const requests: unknown[] = [];
     const calls = serve({
       "/auth/me": json(PROFILE),
       "/account/access": json({ tier: "free", free_credits: 50, credits_remaining: 50 }),
       "/public/plans": json({ plans: PLANS }),
-      "/account/plan-request": json({ status: "requested", plan_id: "business" }, 202),
+      "/account/bank-details?locale=en": json({ title: "Our bank", body: "IBAN TN59 0000" }),
+      "/account/payment-requests": (init) =>
+        init?.method === "POST"
+          ? (requests.push(1), new Response(JSON.stringify({ request_id: 1, status: "pending" }), { status: 201 }))
+          : new Response(JSON.stringify({ requests: requests.length ? [{ request_id: 1, plan_id: "business", plan_name: "Business", amount: "129.00", currency: "USD", reference: "", status: "pending", created_at: "2026-10-30T10:00:00Z", decided_at: null, reason: null }] : [] })),
     });
     at("/plans?plan=business", <PlansPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Choose Business" }));
-    expect(await screen.findByText(/Request received for the Business plan/)).toBeInTheDocument();
-    expect(JSON.parse(String(calls.find((c) => c.path === "/account/plan-request")?.init?.body))).toEqual({ plan_id: "business" });
+    fireEvent.click(await screen.findByRole("button", { name: "Pay for Business" }));
+    expect(await screen.findByText("IBAN TN59 0000")).toBeInTheDocument();
+    expect(screen.getByText("Amount to transfer: $129")).toBeInTheDocument();
+
+    const file = new File(["%PDF-1.4"], "receipt.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/Receipt \(PDF/), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText(/Transfer reference/), { target: { value: "VIR-42" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send my receipt" }));
+    expect(await screen.findByText(/Receipt received for the Business plan/)).toBeInTheDocument();
+    const sent = JSON.parse(String(calls.find((c) => c.init?.method === "POST")?.init?.body));
+    expect(sent).toMatchObject({ plan_id: "business", reference: "VIR-42" });
+    expect(sent.receipt).toMatch(/^data:application\/pdf;base64,/);
+  });
+
+  it("refuses a file that is not a PDF or an image before sending anything", async () => {
+    const calls = serve({
+      "/auth/me": json(PROFILE),
+      "/account/access": json({ tier: "free" }),
+      "/public/plans": json({ plans: PLANS }),
+      "/account/bank-details?locale=en": json({ title: "Bank", body: "x" }),
+      "/account/payment-requests": json({ requests: [] }),
+    });
+    at("/plans", <PlansPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Pay for Starter" }));
+    fireEvent.change(await screen.findByLabelText(/Receipt \(PDF/), { target: { files: [new File(["x"], "a.exe", { type: "application/x-msdownload" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Send my receipt" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/PDF, PNG, JPEG or WebP/);
+    expect(calls.some((c) => c.init?.method === "POST")).toBe(false);
+  });
+
+  it("links the footer only to the pages the administrator wrote", async () => {
+    serve({ "/public/plans": json({ plans: PLANS }), "/public/pages": json({ pages: ["privacy"] }) });
+    at("/", <LandingPage />);
+    const privacy = await screen.findByRole("link", { name: "Privacy Policy" });
+    expect(privacy.getAttribute("href")).toBe("/page/privacy");
+    expect(screen.queryByRole("link", { name: "Terms of Service" })).toBeNull();
+    expect(screen.getByText("Terms of Service")).toBeInTheDocument(); // shown as coming soon, not a link
   });
 });

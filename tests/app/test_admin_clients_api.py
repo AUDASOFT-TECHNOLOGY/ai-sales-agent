@@ -444,11 +444,12 @@ class TestCreateClient:
         assert response.status_code in (400, 422)
         assert not (tmp_path / "acme-corp").exists()
 
-    def test_a_whatsapp_number_is_required(self, fx, tmp_path):
+    def test_a_whatsapp_number_is_optional_but_checked_when_given(self, fx):
         body = new_client()
         del body["whatsapp_number"]
-        assert as_root(fx).post("/admin/v1/clients", json=body).status_code == 422
-        assert not (tmp_path / "acme-corp").exists()
+        assert as_root(fx).post("/admin/v1/clients", json=body).status_code == 201
+        other = {**new_client(), "display_name": "Other Co", "login": "other.admin", "whatsapp_number": "abc"}
+        assert as_root(fx).post("/admin/v1/clients", json=other).status_code == 400
 
     def test_only_an_owner_may_create_a_client(self, fx):
         assert fx.client.post("/admin/v1/clients", json=new_client()).status_code == 401

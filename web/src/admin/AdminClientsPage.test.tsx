@@ -215,7 +215,7 @@ describe("AdminClientsPage", () => {
     });
   });
 
-  it("cannot be submitted without a WhatsApp number", async () => {
+  it("can be submitted without a WhatsApp number or a model: both come later", async () => {
     stubFetch();
     renderApp();
     await screen.findByText("Alpha");
@@ -225,8 +225,7 @@ describe("AdminClientsPage", () => {
     await user.type(within(dialog).getByLabelText("Nom du client"), "Acme Corp");
     await user.type(within(dialog).getByLabelText("Login"), "acme.admin");
     await user.type(within(dialog).getByLabelText("Mot de passe temporaire"), "temp-pass-123");
-    await user.selectOptions(await within(dialog).findByLabelText("Modèle LLM"), "gpt-4o");
-    expect(within(dialog).getByRole("button", { name: "Ajouter un client" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Ajouter un client" })).toBeEnabled();
   });
 
   it("shows the server's refusal and keeps the form open", async () => {

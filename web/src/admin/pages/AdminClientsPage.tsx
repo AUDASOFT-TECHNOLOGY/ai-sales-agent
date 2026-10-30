@@ -228,7 +228,7 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
         // The model is optional: the account opens without it and the agent waits for it.
         ...(provider && model.trim() ? { llm_provider: provider, llm_model: model.trim() } : {}),
         status,
-        whatsapp_number: whatsappNumber.trim(),
+        ...(whatsappNumber.trim() ? { whatsapp_number: whatsappNumber.trim() } : {}),
         ...(planId ? { plan_id: planId } : {}),
       });
       onCreated(created);
@@ -238,7 +238,7 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
     }
   }
 
-  const ready = name.trim() && login.trim() && password && whatsappNumber.trim();
+  const ready = name.trim() && login.trim() && password;
 
   return (
     <Modal
@@ -330,9 +330,8 @@ function AddClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
           onChange={(e) => setWhatsappNumber(e.target.value)}
           placeholder="+216 22 768 307"
           maxLength={40}
-          required
           autoComplete="off"
-          helper="Le numéro que l'agent commercial utilisera avec les prospects."
+          helper="Facultatif. Le numéro que l'agent commercial utilisera avec les prospects."
         />
 
         {plans.length > 0 ? (

@@ -188,7 +188,7 @@ class CreateClientRequest(BaseModel):
     llm_provider: str | None = Field(default=None, min_length=1)
     llm_model: str | None = Field(default=None, min_length=1)
     status: Literal["active", "inactive"]
-    whatsapp_number: str = Field(min_length=1, max_length=40)
+    whatsapp_number: str | None = Field(default=None, min_length=1, max_length=40)
     plan_id: str | None = None  # optional: the plan the client starts on (an active one)
 
 
@@ -1253,8 +1253,10 @@ def create_admin_clients_router(application: Application) -> APIRouter:
             _check_logo(body.logo)
         if body.plan_id is not None:
             _require_assignable_plan(application, body.plan_id)
-        whatsapp_number = _clean_whatsapp_number(body.whatsapp_number)
-        if any(
+        whatsapp_number = (
+            _clean_whatsapp_number(body.whatsapp_number) if body.whatsapp_number else None
+        )
+        if whatsapp_number is not None and any(
             p.whatsapp_number and _digits(p.whatsapp_number) == _digits(whatsapp_number)
             for p in application.client_profiles.list()
         ):

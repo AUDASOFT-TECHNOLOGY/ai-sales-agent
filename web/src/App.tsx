@@ -9,7 +9,9 @@ import { AdminBillingPage } from "./admin/pages/AdminBillingPage";
 import { AdminClientDetailPage } from "./admin/pages/AdminClientDetailPage";
 import { AdminClientsPage } from "./admin/pages/AdminClientsPage";
 import { AdminDashboardPage } from "./admin/pages/AdminDashboardPage";
+import { AdminPaymentsPage } from "./admin/pages/AdminPaymentsPage";
 import { AdminSettingsPage } from "./admin/pages/AdminSettingsPage";
+import { AdminSitePage } from "./admin/pages/AdminSitePage";
 import { ClientApprovalsPage } from "./client/ClientApprovalsPage";
 import { ClientInvoicesPage } from "./client/billing/ClientInvoicesPage";
 import { ClientAuthProvider } from "./client/ClientAuthContext";
@@ -47,6 +49,7 @@ const LivePage = lazy(() => import("./client/live/LivePage").then((m) => ({ defa
 const ProspectsRiver = lazy(() => import("./screens/ProspectsRiver").then((m) => ({ default: m.ProspectsRiver })));
 // The public pages are split off too: a signed-in client never downloads the landing page.
 const RootEntry = lazy(() => import("./landing/LandingPage").then((m) => ({ default: m.RootEntry })));
+const PublicPage = lazy(() => import("./landing/PublicPage").then((m) => ({ default: m.PublicPage })));
 const SignupPage = lazy(() => import("./landing/SignupPage").then((m) => ({ default: m.SignupPage })));
 const Prospects = lazy(() => import("./screens/Prospects").then((m) => ({ default: m.Prospects })));
 
@@ -76,6 +79,8 @@ export function App() {
               <Route path="clients" element={<AdminClientsPage />} />
               <Route path="clients/:clientId" element={<AdminClientDetailPage />} />
               <Route path="billing" element={<AdminBillingPage />} />
+              <Route path="payments" element={<AdminPaymentsPage />} />
+              <Route path="site" element={<AdminSitePage />} />
               <Route path="audit" element={<AdminAuditPage />} />
               <Route path="settings" element={<AdminSettingsPage />} />
               <Route path="*" element={<Navigate to="/admin" replace />} />
@@ -99,6 +104,14 @@ export function App() {
               element={
                 <Suspense fallback={null}>
                   <RootEntry />
+                </Suspense>
+              }
+            />
+            <Route
+              path="page/:key"
+              element={
+                <Suspense fallback={null}>
+                  <PublicPage />
                 </Suspense>
               }
             />

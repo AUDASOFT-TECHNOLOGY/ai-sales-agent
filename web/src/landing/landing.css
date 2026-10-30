@@ -189,6 +189,17 @@
 .plan-card { display: grid; gap: 12px; align-content: start; }
 .plan-card__price { font-size: 1.8rem; font-weight: 800; }
 
+/* text pages written by the administrator, and the bank-transfer form */
+.lp-page__head { display: flex; justify-content: space-between; align-items: center; min-height: 64px; }
+.lp-page__main { padding-block: var(--space-10) var(--space-24); }
+.lp-page__card { padding: clamp(20px, 4vw, 40px); display: grid; gap: var(--space-5); max-width: 820px; }
+.lp-page__text, .pay-text { white-space: pre-line; line-height: 1.7; color: var(--text-2); overflow-wrap: anywhere; }
+.pay-form { display: grid; gap: var(--space-4); max-width: 640px; padding: 22px; }
+.pay-form h4 { margin: var(--space-2) 0 0; }
+.pay-bank { padding: 14px 16px; border-radius: var(--radius-md); background: rgb(4 6 16 / 0.45); border: 1px solid var(--line-2); display: grid; gap: 6px; }
+.pay-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.pay-history { display: grid; gap: 6px; color: var(--text-2); margin: 8px 0 0; padding: 0; list-style: none; }
+
 @keyframes lp-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes lp-pulse { 70% { box-shadow: 0 0 0 10px rgb(95 224 168 / 0); } 100% { box-shadow: 0 0 0 0 rgb(95 224 168 / 0); } }
 @keyframes lp-dot { 0%, 80%, 100% { opacity: 0.3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }

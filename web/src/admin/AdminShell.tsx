@@ -3,7 +3,7 @@
  *  AppShell (mock store, i18n nav) — this is Revansa's own operator console. */
 
 import { Outlet, NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Users, Receipt, Settings, LogOut, ScrollText } from "lucide-react";
+import { LayoutDashboard, Users, Receipt, Settings, LogOut, ScrollText, Landmark, FileText } from "lucide-react";
 import { AdminNotificationBell } from "./AdminNotificationBell";
 import { Glass } from "../ui/Glass";
 import { IconButton } from "../ui/Button";
@@ -15,6 +15,8 @@ const NAV: Array<{ to: string; label: string; subtitle: string; icon: typeof Lay
   { to: "/admin", label: "Dashboard", subtitle: "Overview of your clients and sales agents.", icon: LayoutDashboard, end: true },
   { to: "/admin/clients", label: "Clients", subtitle: "The businesses Revansa sells for.", icon: Users },
   { to: "/admin/billing", label: "Billing", subtitle: "Plans and invoices.", icon: Receipt },
+  { to: "/admin/payments", label: "Payments", subtitle: "Bank-transfer receipts to check before a plan is activated.", icon: Landmark },
+  { to: "/admin/site", label: "Site content", subtitle: "Contact, Privacy Policy, Terms of Service and bank details.", icon: FileText },
   { to: "/admin/audit", label: "Audit", subtitle: "Who changed what, and when.", icon: ScrollText },
   { to: "/admin/settings", label: "Settings", subtitle: "Integrations and credentials used across Revansa.", icon: Settings },
 ];

@@ -5,6 +5,7 @@ itself, on no plan) prepares its agent; every commercial entry point refuses it,
 not change that. A paid plan lifts the wall; clients created before this existed are untouched.
 """
 
+import base64
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -18,11 +19,14 @@ from app_support import (
     write_client,
 )
 from fastapi.testclient import TestClient
+from test_admin_clients_api import PASSWORD as ADMIN_PASSWORD
+from test_admin_clients_api import owner
 
 from sales_app.api import create_app
+from sales_app.billing import InvoiceFilter, InvoiceStatus
 from sales_app.bootstrap import build_application
 from sales_app.free_accounts import FREE_CREDITS
-from sales_app.notifications import ADMIN, NotificationQuery
+from sales_app.notifications import ADMIN, CLIENT, NotificationQuery
 from sales_app.persistence import create_database_engine, upgrade_database
 from sales_app.plans import Plan
 from sales_app.secret_store import generate_master_key
@@ -58,6 +62,7 @@ def world(tmp_path):
         refresh_executor=InlineExecutor(),
     )
     declare_models(application.credentials, "gpt-4o")
+    application.account_stores.admin_users.create(owner())
     for plan_id, name, price, credits, quota, active in (
         ("starter", "Starter", 49, 100_000, 5_000, True),
         ("business", "Business", 129, 350_000, 15_000, True),
@@ -215,21 +220,142 @@ class TestFreeAccountCannotSell:
         assert "reasons" in started.json()["detail"]
 
 
-class TestUpgrade:
-    def test_choosing_a_plan_tells_the_admin_and_assigns_nothing(self, world):
+
+
+def admin_browser(application) -> TestClient:
+    client = browser(application)
+    client.post("/admin/v1/auth/login", json={"username": "root", "password": ADMIN_PASSWORD})
+    return client
+
+
+def receipt(kind="application/pdf", data=b"%PDF-1.4 receipt"):
+    return f"data:{kind};base64,{base64.b64encode(data).decode()}"
+
+
+class TestNoModelYet:
+    def test_a_signed_up_client_works_before_the_admin_assigns_any_model(self, world):
         client, _ = sign_up(world)
-        asked = client.post("/client/v1/account/plan-request", json={"plan_id": "business"})
-        assert asked.status_code == 202
+        for path in ("/profile", "/settings", "/readiness", "/agent", "/usage", "/subscription"):
+            assert client.get(f"/client/v1{path}").status_code == 200, path
+        checks = client.get("/client/v1/readiness").json()["checks"]
+        assert "model_assigned" in {c["id"] for c in checks if not c["ok"]}  # said plainly
+
+    def test_the_admin_can_create_an_account_without_model_or_whatsapp_number(self, world):
+        admin = admin_browser(world)
+        made = admin.post(
+            "/admin/v1/clients",
+            json={
+                "display_name": "Bare Co",
+                "login": "bare.admin",
+                "temporary_password": "temp-pass-123",
+                "status": "active",
+            },
+        )
+        assert made.status_code == 201, made.text
+
+
+class TestPublicPages:
+    def test_the_admin_writes_pages_and_visitors_read_only_what_exists(self, world):
+        admin, visitor = admin_browser(world), browser(world)
+        assert visitor.get("/client/v1/public/pages").json() == {"pages": []}
+        assert visitor.get("/client/v1/public/pages/privacy").status_code == 404
+        saved = admin.put(
+            "/admin/v1/site-pages/privacy/en", json={"title": "Privacy", "body": "We keep little."}
+        )
+        assert saved.status_code == 200
+        admin.put("/admin/v1/site-pages/privacy/fr", json={"title": "Confidentialite", "body": "Peu."})
+        assert visitor.get("/client/v1/public/pages").json() == {"pages": ["privacy"]}
+        french = visitor.get("/client/v1/public/pages/privacy?locale=fr").json()
+        assert french["title"] == "Confidentialite"
+        assert visitor.get("/client/v1/public/pages/privacy?locale=ar").json()["title"] == "Privacy"
+        admin.put("/admin/v1/site-pages/privacy/fr", json={"title": "", "body": ""})  # emptied
+        assert visitor.get("/client/v1/public/pages/privacy?locale=fr").json()["locale"] == "en"
+
+    def test_only_known_pages_are_written_and_the_bank_details_are_not_public(self, world):
+        admin, visitor = admin_browser(world), browser(world)
+        put = admin.put
+        assert put("/admin/v1/site-pages/other/en", json={"title": "x", "body": "y"}).status_code == 404
+        assert put("/admin/v1/site-pages/terms/de", json={"title": "x", "body": "y"}).status_code == 404
+        assert put("/admin/v1/site-pages/terms/en", json={"title": "", "body": "t"}).status_code == 400
+        put("/admin/v1/site-pages/bank/en", json={"title": "Bank", "body": "IBAN TN59 0000"})
+        assert visitor.get("/client/v1/public/pages/bank").status_code == 404
+        assert visitor.get("/client/v1/public/pages").json() == {"pages": []}
+        assert visitor.get("/admin/v1/site-pages").status_code == 401
+
+
+class TestOfflinePayment:
+    def send(self, client, **change):
+        return client.post(
+            "/client/v1/account/payment-requests",
+            json={"plan_id": "business", "reference": "VIR-42", "receipt": receipt(), **change},
+        )
+
+    def test_the_client_sees_the_bank_details_once_the_admin_wrote_them(self, world):
+        client, _ = sign_up(world)
+        assert client.get("/client/v1/account/bank-details").status_code == 404
+        admin_browser(world).put(
+            "/admin/v1/site-pages/bank/en", json={"title": "Bank", "body": "IBAN TN59 0000"}
+        )
+        assert client.get("/client/v1/account/bank-details").json()["body"] == "IBAN TN59 0000"
+        assert browser(world).get("/client/v1/account/bank-details").status_code == 401
+
+    def test_a_receipt_is_checked_and_one_request_waits_at_a_time(self, world):
+        client, _ = sign_up(world)
+        assert self.send(client, receipt="data:image/svg+xml;base64,PHN2Zz4=").status_code == 400
+        assert self.send(client, receipt=receipt("image/png", b"not a png")).status_code == 400
+        assert self.send(client, plan_id="retired").status_code == 400
+        assert self.send(client, plan_id="nope").status_code == 400
+        sent = self.send(client)
+        assert sent.status_code == 201 and sent.json()["status"] == "pending"
+        assert sent.json()["amount"] == "129.00"
+        assert "receipt" not in sent.json()
+        assert self.send(client).status_code == 409
+        listed = client.get("/client/v1/account/payment-requests").json()["requests"]
+        assert [r["status"] for r in listed] == ["pending"]
+        assert client.get("/client/v1/account/access").json()["tier"] == "free"  # nothing activated
+
+    def test_the_admin_approves_and_the_plan_is_active_and_paid(self, world):
+        client, _ = sign_up(world)
+        self.send(client)
         found, _total = world.notifications.search(NotificationQuery(audience=ADMIN))
-        assert [(n.kind, n.client_id) for n in found] == [("plan_request", "acme-corp")]
+        assert [n.kind for n in found] == ["plan_request"]
+        admin = admin_browser(world)
+        waiting = admin.get("/admin/v1/payment-requests?status=pending").json()["requests"]
+        assert [(r["client_name"], r["plan_name"]) for r in waiting] == [("Acme Corp", "Business")]
+        rid = waiting[0]["request_id"]
+        file = admin.get(f"/admin/v1/payment-requests/{rid}/receipt")
+        assert file.content == b"%PDF-1.4 receipt"
+        assert file.headers["content-type"] == "application/pdf"
+        assert client.get(f"/admin/v1/payment-requests/{rid}/receipt").status_code == 401
+
+        done = admin.post(f"/admin/v1/payment-requests/{rid}/approve")
+        assert done.status_code == 200 and done.json()["status"] == "approved"
+        assert world.plans.current_assignment("acme-corp").plan_id == "business"
+        assert client.get("/client/v1/account/access").json()["tier"] == "paid"
+        invoices = world.invoices.list_invoices(InvoiceFilter(client_id="acme-corp"))
+        assert [i.status for i in invoices] == [InvoiceStatus.PAID]
+        query = NotificationQuery(audience=CLIENT, client_id="acme-corp")
+        assert [n.kind for n in world.notifications.search(query)[0]] == ["plan_activated"]
+        assert admin.post(f"/admin/v1/payment-requests/{rid}/approve").status_code == 409
+        assert client.post("/client/v1/agent/start").status_code == 409  # past the wall
+
+    def test_a_rejection_needs_a_reason_the_client_reads_and_it_can_try_again(self, world):
+        client, _ = sign_up(world)
+        rid = self.send(client).json()["request_id"]
+        admin = admin_browser(world)
+        assert admin.post(f"/admin/v1/payment-requests/{rid}/reject", json={"reason": ""}).status_code == 422
+        rejected = admin.post(
+            f"/admin/v1/payment-requests/{rid}/reject", json={"reason": "Amount does not match."}
+        )
+        assert rejected.status_code == 200
+        listed = client.get("/client/v1/account/payment-requests").json()["requests"]
+        assert (listed[0]["status"], listed[0]["reason"]) == ("rejected", "Amount does not match.")
         assert world.plans.current_assignment("acme-corp") is None
         assert client.get("/client/v1/account/access").json()["tier"] == "free"
+        assert self.send(client).status_code == 201  # a new receipt is accepted
 
-    def test_an_unknown_or_retired_plan_is_refused(self, world):
+    def test_the_decisions_are_the_admins(self, world):
         client, _ = sign_up(world)
-        for plan_id in ("nope", "retired"):
-            assert client.post("/client/v1/account/plan-request", json={"plan_id": plan_id}).status_code == 400
-
-    def test_it_needs_a_session(self, world):
-        assert browser(world).post("/client/v1/account/plan-request", json={"plan_id": "business"}).status_code == 401
-        assert browser(world).get("/client/v1/account/access").status_code == 401
+        self.send(client)
+        assert browser(world).get("/admin/v1/payment-requests").status_code == 401
+        assert client.get("/admin/v1/payment-requests").status_code == 401

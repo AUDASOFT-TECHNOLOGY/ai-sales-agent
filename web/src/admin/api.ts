@@ -204,7 +204,7 @@ export interface CreateClientRequest {
   llm_provider?: string;
   llm_model?: string;
   status: "active" | "inactive";
-  whatsapp_number: string;
+  whatsapp_number?: string;
   /** Optional: the (active) plan the client starts on. */
   plan_id?: string | null;
 }

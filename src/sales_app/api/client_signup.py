@@ -6,8 +6,8 @@
   get), is given `FREE_CREDITS` once, and is logged in. A Free account may prepare its agent; every
   commercial entry point refuses it (`require_commercial`).
 - `GET /client/v1/account/access`: whether the caller is on the Free tier and its free credits.
-- `POST /client/v1/account/plan-request`: a Free client picks a paid plan; the Admin is told and
-  assigns it with the existing flow (invoice included). Nothing here charges or assigns a plan.
+- `GET /client/v1/public/pages[/{key}]`: the Contact, Privacy and Terms pages the Admin wrote.
+(Paying for a plan offline is in `client_plan_payment`.)
 """
 
 import logging
@@ -29,7 +29,7 @@ from sales_app.client_profiles import LOGIN_PATTERN, ClientProfile, normalize_lo
 from sales_app.client_records import DEFAULT_ENGINE, ClientRecord
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_app.free_accounts import FREE_CREDITS, UPGRADE_MESSAGE, UPGRADE_REQUIRED, FreeAccount
-from sales_app.notifications import ADMIN, PLAN_REQUEST
+from sales_app.site_content import PUBLIC_PAGES, read_page
 from sales_app.sourcing.errors import StoreUnavailableError
 
 log = logging.getLogger(__name__)
@@ -69,10 +69,15 @@ class AccessResponse(BaseModel):
     credits_remaining: int | None = None
 
 
-class PlanRequestBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class PublicPage(BaseModel):
+    key: str
+    locale: str
+    title: str
+    body: str
 
-    plan_id: str = Field(min_length=1, max_length=64)
+
+class PublicPageList(BaseModel):
+    pages: list[str]
 
 
 def require_commercial(application: Application, client_id: str) -> None:
@@ -207,25 +212,30 @@ def create_client_signup_router(application: Application) -> APIRouter:
             credits_remaining=quota.credits_remaining if quota is not None else None,
         )
 
-    @router.post("/account/plan-request", status_code=202)
-    def plan_request(
-        body: PlanRequestBody, client: ClientProfile = Depends(get_current_client)
-    ) -> dict[str, str]:
-        if application.plans is None:
-            raise HTTPException(503, "plans are unavailable")
+    @router.get("/public/pages", response_model=PublicPageList)
+    def public_pages(response: Response) -> PublicPageList:
+        """Which public pages the Admin has written (so the landing links only to what exists)."""
+        response.headers["Cache-Control"] = "no-store"
+        store = application.site_pages
+        if store is None:
+            return PublicPageList(pages=[])
         try:
-            plan = application.plans.get_plan(body.plan_id)
+            found = store.list_all()
         except StoreUnavailableError:
-            raise HTTPException(503, "plans are unavailable") from None
-        if plan is None or not plan.active:
-            raise HTTPException(400, "this plan is not available")
-        application.notifications.notify(
-            PLAN_REQUEST,
-            ADMIN,
-            client.client_id,
-            message=f"The client asked to subscribe to the {plan.name} plan.",
-            dedupe_key=f"plan_request:{plan.plan_id}",
-        )
-        return {"status": "requested", "plan_id": plan.plan_id}
+            return PublicPageList(pages=[])
+        return PublicPageList(pages=sorted({p.key for p in found if p.key in PUBLIC_PAGES}))
+
+    @router.get("/public/pages/{key}", response_model=PublicPage)
+    def public_page(key: str, response: Response, locale: str = "en") -> PublicPage:
+        response.headers["Cache-Control"] = "no-store"
+        if key not in PUBLIC_PAGES or application.site_pages is None:
+            raise HTTPException(404, "no such page")
+        try:
+            page = read_page(application.site_pages, key, locale)
+        except StoreUnavailableError:
+            raise HTTPException(503, "this page is unavailable") from None
+        if page is None:
+            raise HTTPException(404, "no such page")
+        return PublicPage(key=key, locale=page.locale, title=page.title, body=page.body)
 
     return router
