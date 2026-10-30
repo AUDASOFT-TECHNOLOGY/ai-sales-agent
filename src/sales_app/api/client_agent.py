@@ -38,6 +38,7 @@ from sales_app.api.admin_clients import (
     validate_client_document,
 )
 from sales_app.api.client import make_current_client_dependency
+from sales_app.api.client_signup import require_commercial
 from sales_app.bootstrap import Application
 from sales_app.channel_status import (
     ACTION_REQUIRED,
@@ -637,6 +638,7 @@ def create_client_agent_router(application: Application) -> APIRouter:
 
     @router.post("/agent/start", response_model=AgentResponse)
     def start_agent(client: ClientProfile = Depends(get_current_client)) -> AgentResponse:
+        require_commercial(application, client.client_id)  # a Free account prepares, never starts
         with switch_available():
             return _start(client)
 

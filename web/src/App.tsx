@@ -1,4 +1,4 @@
-import { lazy } from "react";
+import { Suspense, lazy } from "react";
 import { HashRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AdminAuthProvider } from "./admin/AdminAuthContext";
 import { AdminLoginPage } from "./admin/AdminLoginPage";
@@ -18,6 +18,7 @@ import { ClientNotificationsPage } from "./client/notifications/ClientNotificati
 import { ClientHomePage } from "./client/ClientHomePage";
 import { ClientLoginPage } from "./client/ClientLoginPage";
 import { ClientProfilePage } from "./client/ClientProfilePage";
+import { PlansPage } from "./client/PlansPage";
 import { ClientRoute } from "./client/ClientRoute";
 import { ClientTheme } from "./client/ClientTheme";
 import { AccountLayout } from "./client/account/AccountLayout";
@@ -44,6 +45,9 @@ import { AppShell } from "./shell/AppShell";
 const Conversations = lazy(() => import("./screens/Conversations").then((m) => ({ default: m.Conversations })));
 const LivePage = lazy(() => import("./client/live/LivePage").then((m) => ({ default: m.LivePage })));
 const ProspectsRiver = lazy(() => import("./screens/ProspectsRiver").then((m) => ({ default: m.ProspectsRiver })));
+// The public pages are split off too: a signed-in client never downloads the landing page.
+const RootEntry = lazy(() => import("./landing/LandingPage").then((m) => ({ default: m.RootEntry })));
+const SignupPage = lazy(() => import("./landing/SignupPage").then((m) => ({ default: m.SignupPage })));
 const Prospects = lazy(() => import("./screens/Prospects").then((m) => ({ default: m.Prospects })));
 
 export function App() {
@@ -89,6 +93,23 @@ export function App() {
             }
           >
             <Route path="login" element={<ClientLoginPage />} />
+            {/* Public: the landing page (signed-in clients are sent to /home) and the free sign-up. */}
+            <Route
+              index
+              element={
+                <Suspense fallback={null}>
+                  <RootEntry />
+                </Suspense>
+              }
+            />
+            <Route
+              path="signup"
+              element={
+                <Suspense fallback={null}>
+                  <SignupPage />
+                </Suspense>
+              }
+            />
             <Route
               element={
                 <ClientRoute>
@@ -97,8 +118,8 @@ export function App() {
               }
             >
               <Route element={<AppShell />}>
-                <Route index element={<Navigate to="/home" replace />} />
                 <Route path="home" element={<ClientHomePage />} />
+                <Route path="plans" element={<PlansPage />} />
                 <Route path="setup" element={<SetupPage />} />
                 <Route path="prepare" element={<PreparePage />} />
                 <Route path="workflow" element={<WorkflowPage />} />

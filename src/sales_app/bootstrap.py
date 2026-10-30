@@ -38,6 +38,7 @@ from sales_app.email_activation import EmailActivationService
 from sales_app.email_platform import AuthLedger
 from sales_app.errors import ConfigurationError
 from sales_app.finance.service import FinanceService
+from sales_app.free_accounts import CommercialAccess, FreeAccountStore
 from sales_app.gmail_wiring import GmailMailService
 from sales_app.hubspot_wiring import HubSpotAccessService
 from sales_app.hubspot_wiring import install as install_hubspot_access
@@ -55,6 +56,7 @@ from sales_app.payment_confirmation import PAYMENT_WEBHOOK_SECRET
 from sales_app.payment_provider import PaymentProvider, SignedWebhookProvider
 from sales_app.persistence import AccountStores, build_account_stores
 from sales_app.persistence.agent_activity_rows import SqlActivityStore
+from sales_app.persistence.free_account_rows import SqlFreeAccountStore
 from sales_app.persistence.invoice_rows import SqlInvoiceStore
 from sales_app.persistence.learning_rows import SqlLearningStore
 from sales_app.persistence.llm_pricing_rows import SqlLLMPricingStore
@@ -153,6 +155,11 @@ class Application:
     llm_pricing: LLMPricingStore | None = None
     # The commercial plans and each client's plan; None without a database (the Admin API says so).
     plans: PlanStore | None = None
+    # Who may act commercially: a Free account (signed up by itself, on no plan) prepares its agent
+    # and nothing else. See `sales_app.free_accounts`.
+    commercial_access: CommercialAccess = field(
+        default_factory=lambda: CommercialAccess(None, None)
+    )
     # The monthly invoices; None without a database (the Admin API says so).
     invoices: InvoiceStore | None = None
     # Resolves the payment provider that confirms invoice payments, or None when none is configured
@@ -242,7 +249,9 @@ class Application:
     def agent_may_work(self, client_id: str) -> bool:
         """`_may_work`, failing closed: if either switch cannot be read, the answer is no."""
         try:
-            return _may_work(self.agent_state, self._is_active, client_id)
+            return _may_work(self.agent_state, self._is_active, client_id) and not (
+                self.commercial_access.blocked(client_id)
+            )
         except Exception:  # noqa: BLE001 - an unreadable switch must never mean "go"
             return False
 
@@ -414,6 +423,7 @@ def _assemble(
     check_consent_mode(settings, account_stores.engine if account_stores is not None else None)
     credentials = CredentialService(secrets, audit, now=clock.now)
     plans = _plan_store(account_stores)
+    access = CommercialAccess(_free_account_store(account_stores), plans)
     audit_service, notification_service = _audit_and_notifications(account_stores, clock)
     control_hub = ConversationControlHub(
         _control_rows(account_stores), notifications=notification_service, audit=audit_service
@@ -422,7 +432,12 @@ def _assemble(
     quotas = None
     if send_limits is not None:
         quotas = QuotaService(
-            send_limits, notification_service, clock, plans, _llm_usage_stores(account_stores)
+            send_limits,
+            notification_service,
+            clock,
+            plans,
+            _llm_usage_stores(account_stores),
+            access.free,
         )
         send_limits.attach_observer(quotas.observe)  # before any guard is built
     # Resolved at each use from the Admin's credentials: no restart when they change.
@@ -495,6 +510,8 @@ def _assemble(
     if builders.signals is None:
         # Failed sends, unreadable inboxes and model quota/credential errors reach the notifications.
         builders = replace(builders, signals=OperationalSignals(notification_service))
+    if builders.send_allowed is None:
+        builders = replace(builders, send_allowed=lambda client_id: not access.blocked(client_id))
     if builders.send_guards is None and send_limits is not None:
         # Builders given by the caller still obey the deployment's cap (their metered channels).
         builders = replace(builders, send_guards=send_limits.guard)
@@ -574,10 +591,13 @@ def _assemble(
             registry,
             clock,
             executor=executor,
-            may_run=lambda client_id: _may_work(
-                agent_state,
-                lambda cid: is_client_active(settings.client_files_dir, cid, client_records),
-                client_id,
+            may_run=lambda client_id: (
+                _may_work(
+                    agent_state,
+                    lambda cid: is_client_active(settings.client_files_dir, cid, client_records),
+                    client_id,
+                )
+                and not access.blocked(client_id)
             ),
             inbox=builders,
             mail_cursors=_mail_cursor_stores(account_stores),
@@ -601,6 +621,7 @@ def _assemble(
         builders=builders,
         llm_pricing=_llm_pricing_store(account_stores),
         plans=plans,
+        commercial_access=access,
         send_caps=send_caps,
         send_limits=send_limits,
         gmail=gmail,
@@ -739,6 +760,11 @@ def _payment_provider_resolver(secrets: SecretStore) -> Callable[[], PaymentProv
 def _plan_store(account_stores: AccountStores | None) -> PlanStore | None:
     engine = account_stores.engine if account_stores is not None else None
     return SqlPlanStore(engine) if engine is not None else None
+
+
+def _free_account_store(account_stores: AccountStores | None) -> FreeAccountStore | None:
+    engine = account_stores.engine if account_stores is not None else None
+    return SqlFreeAccountStore(engine) if engine is not None else None
 
 
 def _send_limits(

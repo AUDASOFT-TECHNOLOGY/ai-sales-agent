@@ -43,11 +43,13 @@ log = logging.getLogger(__name__)
 CAP_NOT_CONFIGURED = "send_cap_not_configured"
 CAP_REACHED = "send_cap_reached"
 CAP_UNAVAILABLE = "send_cap_unavailable"
+UPGRADE_REQUIRED = "upgrade_required"
 
 _REFUSAL_TEXTS = {
     CAP_NOT_CONFIGURED: "the daily send cap is not configured",
     CAP_REACHED: "the daily send cap is reached",
     CAP_UNAVAILABLE: "the daily send cap cannot be checked",
+    UPGRADE_REQUIRED: "a free account cannot send: upgrade your plan to activate your agent",
 }
 
 
@@ -209,6 +211,40 @@ class SendCapChannel:
         if not result.ok:
             self._guard.release(reserved)
         return result
+
+
+class CommercialGateChannel:
+    """Any `MessagingChannel`, behind the Free-account rule: nothing reaches the inner channel while
+    the client may not act commercially, whichever channel it is. If the rule cannot be read the
+    message is refused too. The refusal is deferred and un-counted, like the cap's."""
+
+    def __init__(self, inner, client_id: str, allowed: Callable[[str], bool]) -> None:
+        self._inner = inner
+        self._client_id = client_id
+        self._allowed = allowed
+
+    def __repr__(self) -> str:
+        return "CommercialGateChannel()"
+
+    @property
+    def channel(self) -> Channel:
+        return self._inner.channel
+
+    def send(self, message: OutboundMessage) -> SendResult:
+        try:
+            allowed = self._allowed(self._client_id)
+        except Exception as error:  # noqa: BLE001 - an unreadable rule never means "send"
+            log.warning("commercial access check failed: %s", type(error).__name__)
+            allowed = False
+        if not allowed:
+            return SendResult(
+                status=SendStatus.FAILED_TRANSIENT,
+                timestamp=datetime.now(UTC),
+                error_code=UPGRADE_REQUIRED,
+                error_message=_REFUSAL_TEXTS[UPGRADE_REQUIRED],
+                metadata={DEFERRED_KEY: DEFERRED_VALUE},
+            )
+        return self._inner.send(message)
 
 
 class FirstContactCapChannel:

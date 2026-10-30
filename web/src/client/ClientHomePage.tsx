@@ -15,12 +15,13 @@ import { Chip } from "../ui/Chip";
 import { Glass, type Tint } from "../ui/Glass";
 import { indicatorText } from "../dashboard/format";
 import type { ClientDashboard } from "../dashboard/types";
-import { ALL_PRODUCTS, clientPauseAgent, clientStartAgent } from "./api";
+import { ALL_PRODUCTS, ClientApiError, clientPauseAgent, clientStartAgent } from "./api";
 import { useClientAuth } from "./ClientAuthContext";
 import { clientDashboard } from "./dashboard/clientDashboardApi";
 import { FailureNote, Loading, Note, PageHead, failureOf, type Failure as FailureShape } from "./kit";
 import { guideSteps, useOverview } from "./overview";
 import { PLATFORM_CHECKS, platformReasons } from "./setupModel";
+import { UpgradeBanner, useClientAccess } from "./UpgradeBanner";
 
 const PLATFORM_KEYS = new Set<string>(PLATFORM_CHECKS);
 function platformKey(id: string): MessageKey {
@@ -53,6 +54,8 @@ export function ClientHomePage() {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<FailureShape | null>(null);
   const [notice, setNotice] = useState<MessageKey | null>(null);
+  const [upgradeAttempt, setUpgradeAttempt] = useState(false);
+  const access = useClientAccess();
 
   const loadDash = useCallback(() => clientDashboard().then(setDash, () => setDash("failed")), []);
   useEffect(() => {
@@ -74,6 +77,11 @@ export function ClientHomePage() {
       await (action === "start" ? clientStartAgent() : clientPauseAgent());
       setNotice(action === "start" ? "rv.home.started" : "rv.home.paused");
     } catch (err) {
+      if (err instanceof ClientApiError && err.code === "upgrade_required") {
+        setUpgradeAttempt(true); // the server refused: a Free account prepares, it does not sell
+        setBusy(false);
+        return;
+      }
       const problem = failureOf(err);
       setFailure(problem.key === "rv.err.conflict" ? { key: "rv.err.generic" } : problem);
       if (problem.signedOut) void logout();
@@ -108,7 +116,8 @@ export function ClientHomePage() {
   else hero = { key: agent.ready ? "ready" : "notReady", pulse: "not_live" };
   const heroTint: Tint = hero.key === "active" ? "success" : hero.key === "error" ? "danger" : hero.key === "paused" || hero.key === "waiting" ? "attention" : "agent";
   const running = agent?.state === "running";
-  const startBlocked = agent && !agent.ready ? t("rv.home.start.blocked") : undefined;
+  // A Free account can press Start: the server answers with the upgrade invitation, not a missing check.
+  const startBlocked = agent && !agent.ready && access?.tier !== "free" ? t("rv.home.start.blocked") : undefined;
 
   // What needs the owner, most urgent first. Each line only appears when the server says there is something.
   const humans = dashboard ? (dashboard.activity.needs_human.value ?? dashboard.human_requests.value ?? 0) : 0;
@@ -152,6 +161,8 @@ export function ClientHomePage() {
 
       {failure ? <FailureNote failure={failure} /> : null}
       {notice ? <Note tone="success">{t(notice)}</Note> : null}
+
+      <UpgradeBanner access={access} attempted={upgradeAttempt} />
 
       {setupOpen ? (
         <Glass level={2} tint="agent" className="rv-card rv-setupbar" data-testid="home-setup">

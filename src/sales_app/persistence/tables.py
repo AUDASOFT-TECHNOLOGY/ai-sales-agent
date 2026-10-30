@@ -926,3 +926,13 @@ conversation_control = Table(
     CheckConstraint("mode IN ('agent', 'human')", name="ck_conversation_control_mode"),
     Index("ix_conversation_control_mode", "client_id", "mode"),
 )
+
+# A client who signed up by itself and holds the one-time free credits (`sales_app.free_accounts`).
+# The record is never rewritten: the Free tier is "this record and no current plan assignment".
+client_free_accounts = Table(
+    "client_free_accounts",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("credits", Integer, nullable=False),
+    Column("created_at", UtcDateTime, nullable=False),
+)

@@ -4,6 +4,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { demoProfile, resetDemo } from "../demo/demoApi";
 import { isDemo, isDemoCredentials, isDemoLogin, setDemo } from "../demo/demoMode";
+import { clientSignup } from "./accessApi";
 import {
   ClientApiError,
   clientChangePassword,
@@ -24,6 +25,8 @@ interface ClientAuthState {
 
 interface ClientAuthContextValue extends ClientAuthState {
   login: (login: string, password: string) => Promise<void>;
+  /** Creates a free account; the server signs the new client in, and the profile is read back. */
+  signup: (name: string, email: string, password: string, website?: string) => Promise<void>;
   logout: () => Promise<void>;
   changePassword: (current: string, next: string, confirm: string) => Promise<void>;
   updateProfile: (changes: ProfileChanges) => Promise<void>;
@@ -61,6 +64,12 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
     setState({ status: "authenticated", profile });
   }, []);
 
+  const signup = useCallback(async (name: string, email: string, password: string, website?: string) => {
+    await clientSignup({ name, email, password, website }); // throws ClientApiError on failure
+    const profile = await clientMe();
+    setState({ status: "authenticated", profile });
+  }, []);
+
   const logout = useCallback(async () => {
     if (isDemo()) {
       setDemo(false);
@@ -87,8 +96,8 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<ClientAuthContextValue>(
-    () => ({ ...state, login, logout, changePassword, updateProfile }),
-    [state, login, logout, changePassword, updateProfile],
+    () => ({ ...state, login, signup, logout, changePassword, updateProfile }),
+    [state, login, signup, logout, changePassword, updateProfile],
   );
   return <ClientAuthContext.Provider value={value}>{children}</ClientAuthContext.Provider>;
 }

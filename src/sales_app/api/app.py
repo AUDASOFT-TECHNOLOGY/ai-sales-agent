@@ -57,6 +57,7 @@ from sales_app.api.client_prospects import create_client_prospects_router
 from sales_app.api.client_reporting import create_client_reporting_router
 from sales_app.api.client_resources import create_client_resources_router
 from sales_app.api.client_sheets_oauth import create_client_sheets_oauth_router
+from sales_app.api.client_signup import create_client_signup_router
 from sales_app.api.client_source import (
     SheetsProbeFactory,
     create_client_source_router,
@@ -162,6 +163,7 @@ def create_app(
         app.include_router(admin_whatsapp_router)
     app.include_router(create_admin_email_activation_router(application, mail_login_probe))
     app.include_router(create_client_router(application))
+    app.include_router(create_client_signup_router(application))
     app.include_router(create_client_agent_router(application))
     app.include_router(create_client_approvals_router(application))
     app.include_router(create_client_payments_router(application))

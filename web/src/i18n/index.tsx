@@ -3,12 +3,14 @@ import { en, type MessageKey } from "./en";
 import { ar } from "./ar";
 import { frClient } from "./client.fr";
 import { frLegacy } from "./client.legacy.fr";
+import { frLanding } from "./landing.fr";
+import { arLanding } from "./landing.ar";
 
 export type Locale = "en" | "fr" | "ar";
 export type Direction = "ltr" | "rtl";
 export type { MessageKey };
 
-const catalogs: Record<Locale, Partial<Record<MessageKey, string>>> = { en, fr: { ...frLegacy, ...frClient }, ar };
+const catalogs: Record<Locale, Partial<Record<MessageKey, string>>> = { en, fr: { ...frLegacy, ...frClient, ...frLanding }, ar: { ...ar, ...arLanding } };
 const DIRECTION: Record<Locale, Direction> = { en: "ltr", fr: "ltr", ar: "rtl" };
 const INTL: Record<Locale, string> = { en: "en", fr: "fr", ar: "ar-TN-u-nu-latn" };
 

@@ -1105,6 +1105,7 @@ on("GET", "/subscription", () => {
     last_payment: paid ? { invoice_number: paid.number, period: paid.period, status: paid.status, collected: true, settled_at: paid.issued_on } : null,
   });
 });
+on("GET", "/account/access", () => ok({ tier: "paid" }));
 on("GET", "/dashboard", () => ok(dashboard()));
 on("GET", "/usage", () => {
   const today = new Date();

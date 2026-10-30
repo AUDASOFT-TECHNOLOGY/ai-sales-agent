@@ -25,6 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 
+from sales_app.free_accounts import FreeAccountStore
 from sales_app.llm_usage import LLMUsageStore
 from sales_app.notifications import ADMIN, CLIENT, INFO, QUOTA_REACHED, WARNING, NotificationService
 from sales_app.plans import PlanStore
@@ -137,7 +138,9 @@ class QuotaService:
         clock: Clock,
         plans: PlanStore | None = None,
         llm_usage: Callable[[str], LLMUsageStore] | None = None,
+        free_accounts: FreeAccountStore | None = None,
     ) -> None:
+        self._free = free_accounts
         self._llm_usage = llm_usage
         self._limits = limits
         self._notifications = notifications
@@ -172,6 +175,9 @@ class QuotaService:
                 assignment = self._plans.current_assignment(client_id)
                 if assignment is not None:
                     plan_name, credits = assignment.plan_name, assignment.included_credits
+            if credits is None and self._free is not None:
+                free = self._free.get(client_id)  # the free credits: for preparing the agent
+                credits = free.credits if free is not None else None
             figures = self._limits.cap_of(client_id)
             by_day = self._limits.usage_between(client_id, month_start, month_end)
         except Exception as error:  # noqa: BLE001 - say "cannot be read", never the store's text

@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sales_app.api.client import make_current_client_dependency
 from sales_app.api.client_agent import evaluate_readiness
 from sales_app.api.client_followup import resume_after
+from sales_app.api.client_signup import require_commercial
 from sales_app.audit_log import OUTCOME_ERROR, OUTCOME_REJECTED, OUTCOME_SUCCESS
 from sales_app.bootstrap import Application
 from sales_app.client_profiles import ClientProfile
@@ -201,6 +202,8 @@ def create_client_conversation_control_router(application: Application) -> APIRo
         response: Response,
         client: ClientProfile = Depends(get_current_client),
     ) -> ReleaseResponse:
+        # Releasing hands the conversation back to the agent, which sells: not for a Free account.
+        require_commercial(application, client.client_id)
         wait = resume_after(application, client.client_id)
         try:
             outcome, control = run(
@@ -242,6 +245,7 @@ def create_client_conversation_control_router(application: Application) -> APIRo
         client: ClientProfile = Depends(get_current_client),
     ) -> SentMessageResponse:
         response.headers["Cache-Control"] = "no-store"
+        require_commercial(application, client.client_id)  # a Free account sends nothing
         actor = f"client:{client.client_id}"
         problem = channel_problem(application, client)
         if problem is not None:

@@ -24,7 +24,7 @@ from sales_app.exchange_rates import today_rates
 from sales_app.learning_service import StoreNotes, StoreTraceSink
 from sales_app.llm_usage import RecordingLLMProvider
 from sales_app.operational_signals import NotifyingChannel, NotifyingLLMProvider
-from sales_app.send_cap import RefusingChannel, SendCapChannel
+from sales_app.send_cap import CommercialGateChannel, RefusingChannel, SendCapChannel
 from sales_app.sourcing.composite import CompositeRepository
 from sales_app.wiring.brains import load_brain
 from sales_app.wiring.integrations import IntegrationBuilders
@@ -478,6 +478,8 @@ def _metered(
             channel = SendCapChannel(
                 channel, builders.send_guards(config.client_id, provider.kind.value)
             )
+    if builders.send_allowed is not None:  # a Free account sends nothing, on any channel
+        channel = CommercialGateChannel(channel, config.client_id, builders.send_allowed)
     if getattr(builders, "signals", None) is not None:  # failed sends open a notification, a good one closes it
         channel = NotifyingChannel(channel, config.client_id, builders.signals)
     return channel

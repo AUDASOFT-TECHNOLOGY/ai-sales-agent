@@ -1311,8 +1311,9 @@ export const enBase = {
 } as const;
 
 import { enClient } from "./client.en";
+import { enLanding } from "./landing.en";
 
-/** The base catalog plus the Client space copy (`client.en.ts`). */
-export const en = { ...enBase, ...enClient } as const;
+/** The base catalog plus the Client space copy (`client.en.ts`) and the public landing (`landing.en.ts`). */
+export const en = { ...enBase, ...enClient, ...enLanding } as const;
 
 export type MessageKey = keyof typeof en;

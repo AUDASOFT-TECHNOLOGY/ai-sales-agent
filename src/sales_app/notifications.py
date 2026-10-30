@@ -39,6 +39,7 @@ EMAIL_MAILBOX_REQUEST = "email_mailbox_request"
 BILLING_ERROR = "billing_error"
 HUMAN_INTERVENTION = "human_intervention"
 REPORT_FAILURE = "report_failure"
+PLAN_REQUEST = "plan_request"
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +116,12 @@ KINDS: dict[str, KindInfo] = {
         "The daily report could not be delivered",
         "The report was not sent.",
         "Check the report channel and recipient.",
+    ),
+    PLAN_REQUEST: KindInfo(
+        INFO,
+        "A client asked to subscribe to a plan",
+        "A client on a free account chose a paid plan.",
+        "Assign the plan to the client from its page.",
     ),
 }
 

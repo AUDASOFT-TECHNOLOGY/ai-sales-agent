@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 from sales_app.api.client import make_current_client_dependency
+from sales_app.api.client_signup import require_commercial
 from sales_app.bootstrap import Application
 from sales_app.client_profiles import ClientProfile
 from sales_app.errors import ClientNotReadyError
@@ -88,6 +89,8 @@ def create_client_approvals_router(application: Application) -> APIRouter:
         )
 
     def decide(client: ClientProfile, response: Response, action_id: str, *, approve: bool):
+        if approve:  # an approval sends the message: not for a Free account
+            require_commercial(application, client.client_id)
         actor = f"client:{client.client_id}"
         decision = "approved" if approve else "rejected"
 
