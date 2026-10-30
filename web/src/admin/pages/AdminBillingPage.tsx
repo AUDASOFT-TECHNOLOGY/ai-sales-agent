@@ -160,6 +160,13 @@ function PlansPanel() {
   );
 }
 
+/** Accepts "100,000" / "100 000" style input; returns null when not a whole number. */
+function toInteger(raw: string): number | null {
+  const cleaned = raw.replace(/[\s,_ ]/g, "");
+  if (!/^\d+$/.test(cleaned)) return null;
+  return Number(cleaned);
+}
+
 function PlanModal({ plan, onClose, onSaved }: { plan: Plan | null; onClose: () => void; onSaved: (plan: Plan) => void }) {
   const formId = useId();
   const [name, setName] = useState(plan?.name ?? "");
@@ -179,8 +186,8 @@ function PlanModal({ plan, onClose, onSaved }: { plan: Plan | null; onClose: () 
       name: name.trim(),
       monthly_price: price.trim(),
       currency: currency.trim().toUpperCase(),
-      included_credits: Number(credits),
-      daily_quota: Number(quota),
+      included_credits: creditsValue ?? 0,
+      daily_quota: quotaValue ?? 0,
       active,
     };
     try {
@@ -191,14 +198,9 @@ function PlanModal({ plan, onClose, onSaved }: { plan: Plan | null; onClose: () 
     }
   }
 
-  const ready =
-    name.trim() &&
-    price.trim() &&
-    currency.trim().length === 3 &&
-    credits.trim() !== "" &&
-    Number.isInteger(Number(credits)) &&
-    quota.trim() !== "" &&
-    Number.isInteger(Number(quota));
+  const creditsValue = toInteger(credits);
+  const quotaValue = toInteger(quota);
+  const ready = Boolean(name.trim() && price.trim() && currency.trim().length === 3 && creditsValue !== null && quotaValue !== null);
 
   return (
     <Modal
