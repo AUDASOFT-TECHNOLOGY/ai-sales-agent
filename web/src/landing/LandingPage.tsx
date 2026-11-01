@@ -3,30 +3,32 @@
  *  Prices, credits and quotas come from the plans the administrator configured (no figure is typed here).
  *  Visuals are CSS and inline SVG: no image to load, nothing heavy. */
 
-import { useCallback, useEffect, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ComponentType, type ReactNode } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
   ArrowRight,
   BarChart3,
-  Boxes,
+  BellRing,
   Check,
   CreditCard,
-  EyeOff,
-  HandHelping,
+  FileText,
+  Flame,
+  Globe,
   History,
   Mail,
   MessageCircle,
   MessagesSquare,
-  Plug,
-  RefreshCw,
+  Mic,
+  MoonStar,
+  Package,
+  PenLine,
+  Radar,
   Send,
+  ShieldCheck,
   Sparkles,
-  Users,
-  Bot,
-  Clock,
-  UserX,
-  Layers,
-  type LucideIcon,
+  ShoppingBag,
+  RefreshCw,
+  UserPlus,
 } from "lucide-react";
 import { useClientAuth } from "../client/ClientAuthContext";
 import { publicPageKeys, publicPlans, type PublicPlan } from "../client/accessApi";
@@ -36,6 +38,7 @@ import { useI18n, type Locale, type MessageKey } from "../i18n";
 import { BrandMark } from "../ui/Brand";
 import { LinkButton } from "../ui/Button";
 import { cx } from "../ui/cx";
+import { Avatar, Board,CardsArt, ClockArt, CloudArt, ControlArt, DayRing, Orbit, ReportArt, SlidersArt, TalkArt } from "./LandingArt";
 import "./landing.css";
 
 /** Signed-in visitors go to their space; everyone else sees the landing. */
@@ -73,6 +76,36 @@ function useDocumentMeta(title: string, description: string) {
       document.title = previous;
     };
   }, [title, description]);
+}
+
+/** Fades sections in as they scroll into view. Without IntersectionObserver (or with reduced motion) everything is shown at once. */
+function useReveal(root: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const host = root.current;
+    if (!host) return;
+    const items = Array.from(host.querySelectorAll<HTMLElement>(".lp-reveal"));
+    if (reducedMotion() || typeof IntersectionObserver === "undefined") {
+      items.forEach((el) => el.classList.add("is-in"));
+      return;
+    }
+    host.classList.add("lp--ready");
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add("is-in");
+            io.unobserve(e.target);
+          }
+        }
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -6% 0px" },
+    );
+    items.forEach((el) => io.observe(el));
+    return () => {
+      io.disconnect();
+      host.classList.remove("lp--ready");
+    };
+  }, [root]);
 }
 
 const LOCALES: Array<{ id: Locale; label: string; name: string }> = [
@@ -132,58 +165,95 @@ function Header() {
 
 /* ── Hero ─────────────────────────────────────────────────────── */
 
-function HeroVisual() {
+/** One looping scene: a prospect writes at night and the agent closes the sale, while the day's actions tick
+ *  off and the CEO report builds up around the conversation. All of it is a labelled, fictional example. */
+function ChatDemo() {
   const { t } = useI18n();
-  const rows: Array<{ Icon: LucideIcon; channel: string; who: MessageKey; what: MessageKey }> = [
-    { Icon: Mail, channel: "email", who: "lp.demo.p1", what: "lp.demo.row.email" },
-    { Icon: Send, channel: "telegram", who: "lp.demo.p2", what: "lp.demo.row.telegram" },
-    { Icon: MessageCircle, channel: "whatsapp", who: "lp.demo.p3", what: "lp.demo.row.whatsapp" },
+  const queue: Array<{ Icon: ComponentType<{ size?: number }>; n: number; key: MessageKey }> = [
+    { Icon: UserPlus, n: 3, key: "lp.hero.q.new" },
+    { Icon: RefreshCw, n: 2, key: "lp.hero.q.follow" },
+    { Icon: BellRing, n: 1, key: "lp.hero.q.remind" },
   ];
-  const stages: MessageKey[] = ["lp.demo.stage.contacted", "lp.demo.stage.replied", "lp.demo.stage.quote", "lp.demo.stage.followup", "lp.demo.stage.won"];
+  const context: Array<{ Icon: ComponentType<{ size?: number }>; key: MessageKey }> = [
+    { Icon: History, key: "lp.hero.ctx.history" },
+    { Icon: Globe, key: "lp.hero.ctx.country" },
+    { Icon: Flame, key: "lp.hero.ctx.interest" },
+  ];
   return (
     <div className="lp-console" role="img" aria-label={`${t("lp.demo.agent")}: ${t("lp.demo.badge")}`}>
       <div className="lp-console__glow" aria-hidden />
-      <div className="lp-glass lp-console__panel" aria-hidden>
-        <div className="lp-console__top">
-          <span className="lp-orb" />
-          <strong>{t("lp.demo.agent")}</strong>
-          <span className="lp-chip lp-chip--ok">{t("lp.demo.active")}</span>
-        </div>
-        <p className="lp-console__label">{t("lp.demo.channels")}</p>
-        <ul className="lp-console__rows">
-          {rows.map(({ Icon, channel, who, what }, i) => (
-            <li key={channel} className="lp-convo" style={{ ["--i" as string]: i }}>
-              <span className={`lp-ch lp-ch--${channel}`}>
-                <Icon size={16} />
+      <div className="lp-glass lp-queue lp-node" style={{ ["--s" as string]: 0 }} aria-hidden>
+        <em className="lp-node__n">1</em>
+        <b className="lp-queue__title">{t("lp.hero.q.title")}</b>
+        <ul>
+          {queue.map(({ Icon, n, key }, i) => (
+            <li key={key} style={{ ["--i" as string]: i }}>
+              <Icon size={15} />
+              <span>
+                <b dir="ltr">{n}</b> {t(key)}
               </span>
-              <span className="lp-convo__text">
-                <b>{t(who)}</b>
-                <span>{t(what)}</span>
-              </span>
-              <span className="lp-typing">
-                <i />
-                <i />
-                <i />
-              </span>
+              <Check size={14} className="lp-queue__ok" />
             </li>
           ))}
         </ul>
-        <p className="lp-console__label">{t("lp.demo.pipeline")}</p>
-        <ol className="lp-stages">
-          {stages.map((s, i) => (
-            <li key={s} className={i < 4 ? "is-done" : "is-next"}>
-              <span className="lp-stages__dot" />
-              <span>{t(s)}</span>
+      </div>
+      <div className="lp-glass lp-chat lp-node" style={{ ["--s" as string]: 1 }} aria-hidden>
+        <em className="lp-node__n">2</em>
+        <div className="lp-chat__top">
+          <Avatar name={t("lp.board.p1")} hue={265} />
+          <span className="lp-chat__who">
+            <strong>{t("lp.board.p1")}</strong>
+            <small>
+              <span className="lp-orb" /> {t("lp.demo.active")}
+            </small>
+          </span>
+          <span className="lp-ch lp-ch--whatsapp lp-chat__ch">
+            <MessageCircle size={14} />
+          </span>
+          <span className="lp-chat__time">
+            <MoonStar size={14} /> <span dir="ltr">{t("lp.demo.time")}</span>
+          </span>
+        </div>
+        <ul className="lp-ctx">
+          {context.map(({ Icon, key }) => (
+            <li key={key}>
+              <Icon size={12} /> {t(key)}
             </li>
           ))}
-        </ol>
+        </ul>
+        <p className="lp-msg lp-msg--them" style={{ ["--n" as string]: 1 }}>
+          {t("lp.demo.q")}
+        </p>
+        <p className="lp-msg lp-msg--agent" style={{ ["--n" as string]: 2 }}>
+          {t("lp.demo.a")}
+        </p>
+        <p className="lp-msg lp-msg--them" style={{ ["--n" as string]: 3 }}>
+          {t("lp.demo.ok")}
+        </p>
+        <p className="lp-msg lp-msg--agent" style={{ ["--n" as string]: 4 }}>
+          {t("lp.demo.sent")}
+        </p>
+        <p className="lp-msg lp-won" style={{ ["--n" as string]: 5 }}>
+          <Check size={16} /> {t("lp.demo.won")}
+        </p>
       </div>
-      <span className="lp-float lp-float--a" aria-hidden>
-        <RefreshCw size={14} /> {t("lp.omni.whatsapp.followup")}
-      </span>
-      <span className="lp-float lp-float--b" aria-hidden>
-        <HandHelping size={14} /> {t("lp.omni.whatsapp.human")}
-      </span>
+      <div className="lp-glass lp-kpi lp-node" style={{ ["--s" as string]: 2 }} aria-hidden>
+        <em className="lp-node__n">3</em>
+        <b className="lp-kpi__title">
+          <BarChart3 size={14} /> {t("lp.hero.kpi.title")}
+        </b>
+        <span className="lp-kpi__bars">
+          {[0, 1, 2, 3, 4].map((k) => (
+            <i key={k} style={{ ["--k" as string]: k }} />
+          ))}
+        </span>
+        <span className="lp-kpi__row">
+          <b dir="ltr">+2</b> {t("lp.hero.kpi.sales")}
+        </span>
+        <span className="lp-kpi__sent">
+          <Mail size={12} /> {t("lp.hero.kpi.sent")}
+        </span>
+      </div>
       <p className="lp-demo-badge">{t("lp.demo.badge")}</p>
     </div>
   );
@@ -194,7 +264,9 @@ function Hero() {
   return (
     <section className="lp-hero lp-wrap" aria-labelledby="lp-hero-title">
       <div className="lp-hero__copy">
-        <p className="lp-eyebrow">{t("lp.hero.eyebrow")}</p>
+        <p className="lp-pill">
+          <Sparkles size={14} aria-hidden /> {t("lp.hero.eyebrow")}
+        </p>
         <h1 id="lp-hero-title" className="lp-h1">
           {t("lp.hero.title")}
         </h1>
@@ -207,9 +279,15 @@ function Hero() {
             <span className="btn__label">{t("lp.cta.see")}</span>
           </button>
         </div>
-        <p className="lp-note">{t("lp.hero.note")}</p>
+        <ul className="lp-trust">
+          {(["lp.trust.card", "lp.trust.credits", "lp.trust.control"] as MessageKey[]).map((k) => (
+            <li key={k}>
+              <Check size={14} aria-hidden /> {t(k)}
+            </li>
+          ))}
+        </ul>
       </div>
-      <HeroVisual />
+      <ChatDemo />
     </section>
   );
 }
@@ -232,42 +310,148 @@ function Section({ id, eyebrow, title, sub, children, className }: { id?: string
   );
 }
 
-function Problem() {
+/** Two big pictures side by side: the channels around one agent, and the 24 hours it covers. */
+function Showcase() {
   const { t } = useI18n();
-  const pains: Array<{ Icon: LucideIcon; key: string }> = [
-    { Icon: UserX, key: "forgotten" },
-    { Icon: Clock, key: "manual" },
-    { Icon: Layers, key: "scattered" },
-    { Icon: MessagesSquare, key: "lost" },
-    { Icon: EyeOff, key: "blind" },
-  ];
-  const wins: MessageKey[] = ["lp.solution.a", "lp.solution.b", "lp.solution.c", "lp.solution.d"];
   return (
-    <Section eyebrow={t("lp.problem.eyebrow")} title={t("lp.problem.title")} sub={t("lp.problem.sub")}>
-      <ul className="lp-grid lp-grid--5">
-        {pains.map(({ Icon, key }) => (
-          <li key={key} className="lp-glass lp-pain">
-            <span className="lp-icon lp-icon--warn" aria-hidden>
-              <Icon size={18} />
-            </span>
-            <h3>{t(`lp.problem.${key}.title` as MessageKey)}</h3>
-            <p>{t(`lp.problem.${key}.text` as MessageKey)}</p>
+    <section className="lp-wrap lp-showcase lp-reveal" aria-label={t("lp.orbit.title")}>
+      <figure className="lp-glass lp-showcase__panel">
+        <Orbit />
+        <figcaption className="lp-h3">{t("lp.orbit.title")}</figcaption>
+      </figure>
+      <figure className="lp-glass lp-showcase__panel">
+        <DayRing />
+        <figcaption className="lp-h3">{t("lp.clock.title")}</figcaption>
+      </figure>
+    </section>
+  );
+}
+
+/** Four benefits, each with its own small animated scene, a three-word title and one short line. */
+function Values() {
+  const { t } = useI18n();
+  const items: Array<{ Art: ComponentType; n: number }> = [
+    { Art: SlidersArt, n: 1 },
+    { Art: CardsArt, n: 2 },
+    { Art: ClockArt, n: 3 },
+    { Art: CloudArt, n: 4 },
+  ];
+  return (
+    <Section id="features" eyebrow={t("lp.values.eyebrow")} title={t("lp.values.title")} className="lp-reveal">
+      <ul className="lp-grid lp-grid--values">
+        {items.map(({ Art, n }) => (
+          <li key={n} className="lp-glass lp-value">
+            <Art />
+            <h3>{t(`lp.values.${n}.title` as MessageKey)}</h3>
+            <p>{t(`lp.values.${n}.text` as MessageKey)}</p>
           </li>
         ))}
       </ul>
-      <div className="lp-glass lp-solution">
-        <span className="lp-icon" aria-hidden>
-          <Sparkles size={20} />
-        </span>
-        <div>
-          <p className="lp-eyebrow">{t("lp.solution.eyebrow")}</p>
-          <h3 className="lp-h3">{t("lp.solution.title")}</h3>
-          <p className="lp-muted">{t("lp.solution.text")}</p>
-        </div>
-        <ul className="lp-checks">
-          {wins.map((k) => (
-            <li key={k}>
-              <Check size={16} aria-hidden /> {t(k)}
+    </Section>
+  );
+}
+
+function Pipeline() {
+  const { t } = useI18n();
+  return (
+    <Section title={t("lp.board.title")} className="lp-reveal">
+      <Board />
+      <p className="lp-demo-badge lp-demo-badge--left">{t("lp.demo.badge")}</p>
+    </Section>
+  );
+}
+
+/** Three big nodes, one arrow between each, one highlighted at a time: train, sell, get paid. */
+type HowItem = { id: string; Icon: ComponentType<{ size?: number }> };
+
+function How() {
+  const { t } = useI18n();
+  const steps: Array<{ n: number; Art: ComponentType; items: HowItem[] }> = [
+    {
+      n: 1,
+      Art: SlidersArt,
+      items: [
+        { id: "a", Icon: Package },
+        { id: "b", Icon: Mic },
+        { id: "c", Icon: ShieldCheck },
+      ],
+    },
+    {
+      n: 2,
+      Art: TalkArt,
+      items: [
+        { id: "a", Icon: Radar },
+        { id: "b", Icon: PenLine },
+        { id: "c", Icon: MessagesSquare },
+      ],
+    },
+    {
+      n: 3,
+      Art: ReportArt,
+      items: [
+        { id: "a", Icon: BarChart3 },
+        { id: "b", Icon: FileText },
+      ],
+    },
+  ];
+  return (
+    <Section id="how" eyebrow={t("lp.how.eyebrow")} title={t("lp.how.title")} className="lp-reveal">
+      <ol className="lp-path" aria-label={t("lp.how.label")}>
+        {steps.map(({ n, Art, items }) => (
+          <li key={n} className="lp-path__step" style={{ ["--n" as string]: n }}>
+            <span className="lp-path__badge" aria-hidden>
+              <Art />
+              <em>{n}</em>
+            </span>
+            <h3>{t(`lp.how.${n}.title` as MessageKey)}</h3>
+            <ul className="lp-path__list">
+              {items.map(({ id, Icon }, i) => (
+                <li key={id} style={{ ["--i" as string]: i }}>
+                  <span className="lp-path__ico" aria-hidden>
+                    <Icon size={18} />
+                  </span>
+                  <span>
+                    <b>{t(`lp.how.${n}.${id}.t` as MessageKey)}</b>
+                    <small>{t(`lp.how.${n}.${id}.d` as MessageKey)}</small>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {n === 2 ? (
+              <span className="lp-path__loop" aria-hidden>
+                <RefreshCw size={14} /> {t("lp.how.2.loop")}
+              </span>
+            ) : null}
+            {n === 2 ? (
+              <span className="lp-path__chs" aria-hidden>
+                <span className="lp-ch lp-ch--email">
+                  <Mail size={15} />
+                </span>
+                <span className="lp-ch lp-ch--telegram">
+                  <Send size={15} />
+                </span>
+                <span className="lp-ch lp-ch--whatsapp">
+                  <MessageCircle size={15} />
+                </span>
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </Section>
+  );
+}
+
+function Control() {
+  const { t } = useI18n();
+  return (
+    <Section title={t("lp.control.title")} className="lp-reveal">
+      <div className="lp-control">
+        <ControlArt />
+        <ul className="lp-control__list">
+          {[1, 2, 3].map((n) => (
+            <li key={n}>
+              <Check size={18} aria-hidden /> {t(`lp.control.${n}` as MessageKey)}
             </li>
           ))}
         </ul>
@@ -276,107 +460,23 @@ function Problem() {
   );
 }
 
-function How() {
+function FreeCard() {
   const { t } = useI18n();
   return (
-    <Section id="how" eyebrow={t("lp.how.eyebrow")} title={t("lp.how.title")}>
-      <ol className="lp-steps">
-        {[1, 2, 3, 4].map((n) => (
-          <li key={n} className="lp-glass lp-step">
-            <span className="lp-step__n" aria-hidden>
-              {n}
-            </span>
-            <h3>{t(`lp.how.${n}.title` as MessageKey)}</h3>
-            <p>{t(`lp.how.${n}.text` as MessageKey)}</p>
-          </li>
-        ))}
-      </ol>
-    </Section>
-  );
-}
-
-function Features() {
-  const { t } = useI18n();
-  // Each of these exists in the product today. The one thing still to come says so.
-  const items: Array<{ Icon: LucideIcon; key: string }> = [
-    { Icon: Bot, key: "agent" },
-    { Icon: MessagesSquare, key: "channels" },
-    { Icon: Boxes, key: "products" },
-    { Icon: Users, key: "prospects" },
-    { Icon: RefreshCw, key: "followups" },
-    { Icon: HandHelping, key: "human" },
-    { Icon: CreditCard, key: "payment" },
-    { Icon: History, key: "history" },
-    { Icon: BarChart3, key: "reporting" },
-    { Icon: Plug, key: "crm" },
-  ];
-  return (
-    <Section id="features" eyebrow={t("lp.features.eyebrow")} title={t("lp.features.title")}>
-      <ul className="lp-grid lp-grid--features">
-        {items.map(({ Icon, key }) => (
-          <li key={key} className="lp-glass lp-feature">
-            <span className="lp-icon" aria-hidden>
-              <Icon size={18} />
-            </span>
-            <h3>{t(`lp.features.${key}.title` as MessageKey)}</h3>
-            <p>{t(`lp.features.${key}.text` as MessageKey)}</p>
-            <span className="lp-chip lp-chip--ok">{t("lp.features.available")}</span>
-            {key === "crm" ? <span className="lp-chip lp-chip--soon">{t("lp.features.crm.soon")}</span> : null}
-          </li>
+    <li className="lp-glass lp-plan lp-plan--free" data-testid="landing-plan-free">
+      <h3>{t("lp.pricing.free.name")}</h3>
+      <p className="lp-plan__price">
+        <span>{t("lp.pricing.free.price")}</span>
+      </p>
+      <ul className="plan-facts">
+        {(["lp.pricing.free.f1", "lp.pricing.free.f2", "lp.pricing.free.f3"] as MessageKey[]).map((k) => (
+          <li key={k}>{t(k)}</li>
         ))}
       </ul>
-    </Section>
-  );
-}
-
-function Bubble({ from, children }: { from: "agent" | "prospect"; children: ReactNode }) {
-  return <p className={cx("lp-bubble", from === "agent" ? "lp-bubble--agent" : "lp-bubble--them")}>{children}</p>;
-}
-
-function Omni() {
-  const { t } = useI18n();
-  return (
-    <Section id="demo" eyebrow={t("lp.omni.eyebrow")} title={t("lp.omni.title")} sub={t("lp.omni.sub")}>
-      <p className="lp-demo-note">{t("lp.omni.demo")}</p>
-      <div className="lp-grid lp-grid--3">
-        <article className="lp-glass lp-thread">
-          <header>
-            <span className="lp-ch lp-ch--email"><Mail size={16} aria-hidden /></span>
-            <b>{t("lp.omni.email.name")}</b>
-            <span className="lp-muted">{t("lp.omni.email.tag")}</span>
-          </header>
-          <Bubble from="agent">{t("lp.omni.email.agent")}</Bubble>
-          <Bubble from="prospect">{t("lp.omni.email.prospect")}</Bubble>
-          <span className="lp-chip lp-chip--info">{t("lp.omni.email.quote")}</span>
-        </article>
-        <article className="lp-glass lp-thread">
-          <header>
-            <span className="lp-ch lp-ch--telegram"><Send size={16} aria-hidden /></span>
-            <b>{t("lp.omni.telegram.name")}</b>
-            <span className="lp-muted">{t("lp.omni.telegram.tag")}</span>
-          </header>
-          <Bubble from="prospect">{t("lp.omni.telegram.prospect")}</Bubble>
-          <Bubble from="agent">{t("lp.omni.telegram.agent")}</Bubble>
-          <span className="lp-chip lp-chip--warn">{t("lp.omni.telegram.objection")}</span>
-        </article>
-        <article className="lp-glass lp-thread">
-          <header>
-            <span className="lp-ch lp-ch--whatsapp"><MessageCircle size={16} aria-hidden /></span>
-            <b>{t("lp.omni.whatsapp.name")}</b>
-            <span className="lp-muted">{t("lp.omni.whatsapp.tag")}</span>
-          </header>
-          <Bubble from="agent">{t("lp.omni.whatsapp.agent")}</Bubble>
-          <Bubble from="prospect">{t("lp.omni.whatsapp.prospect")}</Bubble>
-          <div className="lp-chips">
-            <span className="lp-chip lp-chip--ok">{t("lp.omni.whatsapp.followup")}</span>
-            <span className="lp-chip lp-chip--human">{t("lp.omni.whatsapp.human")}</span>
-          </div>
-          <p className="lp-handoff">
-            <HandHelping size={14} aria-hidden /> {t("lp.omni.handoff")}
-          </p>
-        </article>
-      </div>
-    </Section>
+      <LinkButton to="/signup" variant="secondary">
+        {t("lp.cta.start")}
+      </LinkButton>
+    </li>
   );
 }
 
@@ -390,6 +490,11 @@ function PlanCard({ plan, featured }: { plan: PublicPlan; featured: boolean }) {
         <span>{planPrice(plan, n)}</span> <small>{plan.billing_period === "annual" ? t("lp.pricing.year") : t("lp.pricing.month")}</small>
       </p>
       <PlanFacts plan={plan} />
+      <ul className="plan-facts">
+        {(["lp.pricing.paid.f1", "lp.pricing.paid.f2", "lp.pricing.paid.f3"] as MessageKey[]).map((k) => (
+          <li key={k}>{t(k)}</li>
+        ))}
+      </ul>
       <LinkButton to={`/signup?plan=${encodeURIComponent(plan.plan_id)}`} variant={featured ? "primary" : "secondary"}>
         {t("lp.pricing.cta", { name: plan.name })}
       </LinkButton>
@@ -419,11 +524,15 @@ function Pricing() {
         </div>
       ) : (
         <ul className="lp-grid lp-grid--plans">
+          <FreeCard />
           {list.map((p) => (
             <PlanCard key={p.plan_id} plan={p} featured={p.plan_id === featuredId} />
           ))}
         </ul>
       )}
+      <p className="lp-pay">
+        <CreditCard size={16} aria-hidden /> {t("lp.pricing.pay")}
+      </p>
       <p className="lp-fineprint">{t("lp.pricing.meta")}</p>
     </Section>
   );
@@ -432,9 +541,9 @@ function Pricing() {
 function Faq() {
   const { t } = useI18n();
   return (
-    <Section id="faq" eyebrow={t("lp.faq.eyebrow")} title={t("lp.faq.title")} className="lp-faq">
+    <Section id="faq" eyebrow={t("lp.faq.eyebrow")} title={t("lp.faq.title")} className="lp-faq lp-reveal">
       <div className="lp-faq__list">
-        {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+        {[1, 2, 3].map((n) => (
           <details key={n} className="lp-glass lp-qa">
             <summary>{t(`lp.faq.${n}.q` as MessageKey)}</summary>
             <p>{t(`lp.faq.${n}.a` as MessageKey)}</p>
@@ -448,15 +557,53 @@ function Faq() {
 function FinalCta() {
   const { t } = useI18n();
   return (
-    <section className="lp-wrap lp-final" aria-labelledby="lp-final-title">
+    <section className="lp-wrap lp-final lp-reveal" aria-labelledby="lp-final-title">
       <div className="lp-glass lp-final__card">
-        <h2 id="lp-final-title" className="lp-h2">
-          {t("lp.final.title")}
-        </h2>
-        <p className="lp-lead">{t("lp.final.text")}</p>
-        <LinkButton to="/signup" variant="primary" size="lg" trailing={<ArrowRight size={16} className="mirror" aria-hidden />}>
-          {t("lp.cta.start")}
-        </LinkButton>
+        <div className="lp-final__copy">
+          <h2 id="lp-final-title" className="lp-h2">
+            {t("lp.final.title")}
+          </h2>
+          <p className="lp-lead">{t("lp.final.text")}</p>
+          <LinkButton to="/signup" variant="primary" size="lg" trailing={<ArrowRight size={16} className="mirror" aria-hidden />}>
+            {t("lp.cta.start")}
+          </LinkButton>
+          <p className="lp-note">
+            {t("lp.trust.card")} · {t("lp.trust.credits")}
+          </p>
+        </div>
+        <div className="lp-morning" role="img" aria-label={`${t("lp.final.rep.title")}: ${t("lp.demo.badge")}`}>
+          <div className="lp-sky" aria-hidden>
+            <i className="lp-sky__star lp-sky__star--1" />
+            <i className="lp-sky__star lp-sky__star--2" />
+            <i className="lp-sky__star lp-sky__star--3" />
+            <span className="lp-sky__moon">
+              <MoonStar size={22} />
+            </span>
+            <span className="lp-sky__sun" />
+          </div>
+          <div className="lp-morning__body" aria-hidden>
+            <b className="lp-morning__title">{t("lp.final.rep.title")}</b>
+            <ul className="lp-morning__tiles">
+              {(
+                [
+                  { Icon: MessagesSquare, n: 12, key: "lp.final.rep.conv" },
+                  { Icon: ShoppingBag, n: 3, key: "lp.final.rep.sales" },
+                  { Icon: RefreshCw, n: 5, key: "lp.final.rep.follow" },
+                ] as Array<{ Icon: ComponentType<{ size?: number }>; n: number; key: MessageKey }>
+              ).map(({ Icon, n, key }) => (
+                <li key={key}>
+                  <Icon size={16} />
+                  <span className="lp-count" dir="ltr" style={{ ["--to" as string]: n }} />
+                  <small>{t(key)}</small>
+                </li>
+              ))}
+            </ul>
+            <span className="lp-morning__sent">
+              <Check size={14} /> {t("lp.final.rep.sent")}
+            </span>
+          </div>
+          <p className="lp-demo-badge lp-demo-badge--left">{t("lp.demo.badge")}</p>
+        </div>
       </div>
     </section>
   );
@@ -517,18 +664,22 @@ function Footer() {
 export function LandingPage() {
   const { t } = useI18n();
   useDocumentMeta(t("lp.meta.title"), t("lp.meta.description"));
+  const root = useRef<HTMLDivElement>(null);
+  useReveal(root);
   return (
-    <div className="lp">
+    <div className="lp" ref={root}>
+      <div className="lp-aurora" aria-hidden />
       <button type="button" className="lp-skip" onClick={() => goTo("lp-main")}>
         {t("lp.skip")}
       </button>
       <Header />
       <main id="lp-main" tabIndex={-1}>
         <Hero />
-        <Problem />
+        <Showcase />
+        <Values />
+        <Pipeline />
         <How />
-        <Features />
-        <Omni />
+        <Control />
         <Pricing />
         <Faq />
         <FinalCta />

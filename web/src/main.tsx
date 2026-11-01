@@ -20,6 +20,9 @@ import "./styles/client.css";
 import "./styles/client-theme.css";
 import "./styles/conversation-control.css";
 import { App } from "./App";
+import { redirectAdminPath } from "./adminEntry";
+
+redirectAdminPath();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

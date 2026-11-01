@@ -58,6 +58,15 @@ describe("Landing page", () => {
     expect(link.getAttribute("href")).toBe("/signup?plan=business");
   });
 
+  it("offers the free account next to the paid plans, and says how a plan is paid", async () => {
+    serve({ "/public/plans": json({ plans: PLANS }) });
+    at("/", <LandingPage />);
+    const free = await screen.findByTestId("landing-plan-free");
+    expect(free.querySelector("a")!.getAttribute("href")).toBe("/signup");
+    expect(screen.getAllByTestId(/^landing-plan-/)).toHaveLength(4);
+    expect(screen.getByText(/Pay by bank transfer/)).toBeInTheDocument();
+  });
+
   it("changes a price when the plan changes: nothing is typed in the page", async () => {
     serve({ "/public/plans": json({ plans: [{ ...PLANS[0]!, monthly_price: "59.00", included_credits: 123 }] }) });
     at("/", <LandingPage />);
@@ -74,13 +83,13 @@ describe("Landing page", () => {
     expect(screen.queryByText(/\$49/)).toBeNull();
   });
 
-  it("states the hero, the Meta billing caveat and the demo data are fictional", async () => {
+  it("states the hero, the Meta billing caveat and that the example is fictional", async () => {
     serve({ "/public/plans": json({ plans: PLANS }) });
     at("/", <LandingPage />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your AI Sales Agent. Always Selling.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("It prospects, follows up and closes. Without ever stopping.");
     expect(screen.getAllByText("Start for Free").length).toBeGreaterThan(0);
     expect(await screen.findByText(/billed separately/)).toBeInTheDocument();
-    expect(screen.getByText(/Demo data\. No real conversation/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Example · fictional data/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Coming soon/).length).toBeGreaterThan(0); // legal pages: no invented links
   });
 });
