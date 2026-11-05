@@ -47,6 +47,11 @@ export interface ClientWhatsAppStatus {
   state: WhatsAppState;
   number: string | null;
   verified_name: string | null;
+  /** The Business Portfolio Meta says owns the account (the client's own, never Revansa's). */
+  business_name?: string | null;
+  ownership?: "verified" | "legacy_unverified" | null;
+  /** What Revansa can know of the payment method at Meta: `confirmed` only on real evidence from Meta. */
+  billing?: "confirmed" | "to_configure" | "unverifiable";
   status: "ready" | "waiting_platform" | "action_required";
   message: string | null;
   can_start_conversations: boolean;
@@ -83,6 +88,10 @@ export interface AdminWhatsAppAccount {
   state: WhatsAppState;
   waba_id: string | null;
   phone_number_id: string | null;
+  business_id?: string | null;
+  business_name?: string | null;
+  ownership?: "verified" | "legacy_unverified" | null;
+  billing?: "confirmed" | "to_configure" | "unverifiable";
   display_number: string | null;
   verified_name: string | null;
   quality: string | null;
@@ -108,6 +117,7 @@ export interface AdminWhatsAppTemplate {
 export interface AdminWhatsAppPlatform {
   ready: boolean;
   missing: string[];
+  platform_business_id_set?: boolean;
   webhook_url: string | null;
   deauthorize_url: string | null;
   data_deletion_url: string | null;

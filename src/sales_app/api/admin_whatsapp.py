@@ -42,6 +42,7 @@ Name = Annotated[str, StringConstraints(min_length=1, max_length=512)]
 class PlatformResponse(BaseModel):
     ready: bool
     missing: list[str]
+    platform_business_id_set: bool
     webhook_url: str | None
     deauthorize_url: str | None
     data_deletion_url: str | None
@@ -72,6 +73,10 @@ class AccountResponse(BaseModel):
     state: str
     waba_id: str | None
     phone_number_id: str | None
+    business_id: str | None
+    business_name: str | None
+    ownership: str | None  # verified | legacy_unverified | None
+    billing: str  # confirmed | to_configure | unverifiable (see whatsapp_state)
     display_number: str | None
     verified_name: str | None
     quality: str | None
@@ -149,6 +154,10 @@ def create_admin_whatsapp_router(application: Application) -> APIRouter | None:
             state=held.state,
             waba_id=held.waba_id,
             phone_number_id=held.phone_number_id,
+            business_id=held.business_id,
+            business_name=held.business_name,
+            ownership=held.ownership,
+            billing=held.billing_state,
             display_number=held.display_number,
             verified_name=held.verified_name,
             quality=held.quality,
@@ -199,6 +208,7 @@ def create_admin_whatsapp_router(application: Application) -> APIRouter | None:
         return PlatformResponse(
             ready=service.configured(),
             missing=service.missing(),
+            platform_business_id_set="Revansa's Business Portfolio id" not in service.missing(),
             webhook_url=hook,
             deauthorize_url=f"{base}/webhooks/whatsapp/deauthorize" if base else None,
             data_deletion_url=f"{base}/webhooks/whatsapp/data-deletion" if base else None,

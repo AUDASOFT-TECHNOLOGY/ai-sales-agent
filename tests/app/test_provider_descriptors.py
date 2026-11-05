@@ -23,6 +23,7 @@ from sales_app.config.secrets import (
     WHATSAPP_APP_ID,
     WHATSAPP_APP_SECRET,
     WHATSAPP_CONFIG_ID,
+    WHATSAPP_PLATFORM_BUSINESS_ID,
     WHATSAPP_PHONE_NUMBER_ID,
     WHATSAPP_VERIFY_TOKEN,
     WHATSAPP_WABA_ID,
@@ -182,6 +183,7 @@ class TestWhatsApp:
             WHATSAPP_PHONE_NUMBER_ID,
             WHATSAPP_APP_ID,
             WHATSAPP_CONFIG_ID,
+            WHATSAPP_PLATFORM_BUSINESS_ID,
             WHATSAPP_WABA_ID,
         }
 

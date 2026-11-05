@@ -21,7 +21,14 @@ from pydantic import BaseModel, ConfigDict
 from sales_app.admin_auth import AdminRole, AdminUser
 from sales_app.api.admin import ensure_client_access, make_current_admin_dependency, require_role
 from sales_app.bootstrap import Application
-from sales_app.config.secrets import EMAIL_PASSWORD, EMAIL_PLATFORM_MAILBOX, OPENAI_MODELS
+from sales_app.config.secrets import (
+    EMAIL_PASSWORD,
+    EMAIL_PLATFORM_MAILBOX,
+    OPENAI_MODELS,
+    WHATSAPP_ACCESS_TOKEN,
+    WHATSAPP_PHONE_NUMBER_ID,
+    WHATSAPP_WABA_ID,
+)
 from sales_app.config_store.models import CLIENT_ID_PATTERN
 from sales_app.connection_tests import (
     INFERENCE_MAX_TOKENS,
@@ -100,6 +107,11 @@ _BODY_SCHEMA: dict[str, Any] = {
     }
 }
 
+
+# Written only by the client's own Embedded Signup connection (and by its disconnection).
+EMBEDDED_SIGNUP_KEYS = frozenset(
+    {WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_WABA_ID}
+)
 
 class CredentialResponse(BaseModel):
     key: str
@@ -781,6 +793,7 @@ def create_admin_integrations_router(
         client_id: str, key: str, request: Request, admin: AdminUser = Depends(require_owner)
     ) -> CredentialResponse:
         scope = client_scope_for(admin, client_id)
+        refuse_embedded_signup_key(key)
         value = await _read_value(request)
         if key in (EMAIL_PASSWORD, EMAIL_PLATFORM_MAILBOX):
             from sales_app.api.admin_clients import client_wiring_and_document
@@ -793,6 +806,16 @@ def create_admin_integrations_router(
                 raise HTTPException(409, conflict)
         return await run_in_threadpool(save, scope, ScopeKind.CLIENT, key, value, admin)
 
+    def refuse_embedded_signup_key(key: str) -> None:
+        """A client's WhatsApp token and ids are written only by its own Embedded Signup
+        connection (verified owner, unique associations): never typed by the Admin."""
+        if key in EMBEDDED_SIGNUP_KEYS:
+            raise HTTPException(
+                409,
+                "a client's WhatsApp account is connected by the client itself with Embedded "
+                "Signup; it cannot be entered here",
+            )
+
     @router.delete("/clients/{client_id}/integrations/{key}", response_model=CredentialResponse)
     def delete_client(
         client_id: str,
@@ -801,6 +824,7 @@ def create_admin_integrations_router(
         admin: AdminUser = Depends(require_owner),
     ) -> CredentialResponse:
         scope = client_scope_for(admin, client_id)
+        refuse_embedded_signup_key(key)
         require_confirmation(confirm)
         return remove(scope, ScopeKind.CLIENT, key, admin)
 

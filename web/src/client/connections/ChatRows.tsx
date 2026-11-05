@@ -29,7 +29,19 @@ import type { ConnectionView } from "./connectionModel";
 
 /* ── WhatsApp ─────────────────────────────────────────────────────────────────────────────── */
 
-const CAUSES = ["invalid", "denied", "number_mismatch", "number_unclear", "in_use", "unavailable"] as const;
+const CAUSES = [
+  "invalid",
+  "denied",
+  "number_mismatch",
+  "number_unclear",
+  "in_use",
+  "waba_in_use",
+  "business_in_use",
+  "platform_owned",
+  "ownership_unverifiable",
+  "unavailable",
+] as const;
+const META_BUSINESS_URL = "https://business.facebook.com/";
 
 function whatsappErrorKey(err: unknown): WhatsAppKey {
   if (err instanceof Error && err.message === "sdk") return "client.error.sdk";
@@ -97,14 +109,43 @@ export function WhatsAppRow({ view, status, onChanged, signup }: { view: Connect
         ) : null
       }
     >
+      {!connected ? (
+        <Note title={w("guide.title")}>
+          <ol>
+            {(["guide.step1", "guide.step2", "guide.step3", "guide.step4", "guide.step5"] as const).map((key) => (
+              <li key={key}>{w(key)}</li>
+            ))}
+          </ol>
+          <p>{w("guide.billingSeparate")}</p>
+        </Note>
+      ) : null}
       {!connected && view.field ? (
         <ConnectForm id="whatsapp" field={view.field} brand="whatsapp" value={view.value} reconnect={view.reconnect} pending={view.pending} required onChanged={onChanged} onConnect={connect} />
       ) : null}
       {notice ? <Note tone={notice === "client.done" ? "success" : "info"}>{w(notice)}</Note> : null}
+      {connected && status?.business_name ? <Note>{w("client.owner").replace("{name}", status.business_name)}</Note> : null}
+      {connected && status?.ownership === "legacy_unverified" ? <Note tone="warn">{w("client.ownerLegacy")}</Note> : null}
+      {connected && status ? <BillingNote state={status.billing ?? "unverifiable"} w={w} /> : null}
       {connected && status && !status.can_start_conversations ? <Note>{w("client.cannotStart")}</Note> : null}
       {s.confirming ? <DisconnectConfirm busy={s.busy} onNo={() => s.setConfirming(false)} onYes={() => void disconnect()} /> : null}
       {problem ? <Note tone="danger">{w(problem)}</Note> : null}
     </ConnectionRow>
+  );
+}
+
+/** The payment method is the client's own, at Meta. "Confirmed" is shown only when Revansa holds real
+ *  evidence from Meta; otherwise the client is told Revansa cannot check it and where to do it. */
+function BillingNote({ state, w }: { state: "confirmed" | "to_configure" | "unverifiable"; w: (key: WhatsAppKey) => string }) {
+  const tone = state === "confirmed" ? "success" : state === "to_configure" ? "warn" : "info";
+  return (
+    <Note tone={tone} title={w(`billing.${state}` as WhatsAppKey)}>
+      {state === "confirmed" ? null : <p>{w(`billing.${state}.help` as WhatsAppKey)}</p>}
+      <p>
+        <a href={META_BUSINESS_URL} target="_blank" rel="noreferrer noopener">
+          {w("billing.link")}
+        </a>
+      </p>
+    </Note>
   );
 }
 

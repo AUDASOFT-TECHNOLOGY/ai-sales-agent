@@ -24,6 +24,8 @@ WHATSAPP_VERIFY_TOKEN = "whatsapp.verify_token"  # global; read when the parsers
 # configuration id are public identifiers (the browser needs them); the app secret is the existing key.
 WHATSAPP_APP_ID = "whatsapp.app_id"
 WHATSAPP_CONFIG_ID = "whatsapp.config_id"
+# Revansa's own Meta Business Portfolio id (global, public): an account it owns is never a client's.
+WHATSAPP_PLATFORM_BUSINESS_ID = "whatsapp.platform_business_id"
 # One client's WhatsApp Business Account (client scope, not secret): written by the Embedded Signup
 # completion or by the Admin; needed to manage message templates and the webhook subscription.
 WHATSAPP_WABA_ID = "whatsapp.waba_id"

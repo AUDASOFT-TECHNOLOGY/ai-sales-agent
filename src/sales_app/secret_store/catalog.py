@@ -154,6 +154,14 @@ CATALOG: tuple[CredentialSpec, ...] = (
         rule="must be the numeric id of the Login for Business configuration (digits only)",
     ),
     CredentialSpec(
+        "whatsapp.platform_business_id",
+        ScopeKind.GLOBAL,
+        "Revansa's Meta Business Portfolio id",
+        sensitive=False,
+        pattern=re.compile(r"^\d{5,32}$"),
+        rule="must be the numeric id of Revansa's own Business Portfolio (digits only)",
+    ),
+    CredentialSpec(
         "whatsapp.api_version",
         ScopeKind.GLOBAL,
         "WhatsApp API version",

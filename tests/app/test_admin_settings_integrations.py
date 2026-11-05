@@ -137,8 +137,12 @@ class TestWhatsAppTest:
         with_remote(fx, remote)
         client = fx.login("root")
         assert put(client, f"{G}/whatsapp.api_version", "v22.0").status_code == 200
-        assert put(client, f"{A}/whatsapp.access_token", TOKEN).status_code == 200
-        assert put(client, f"{A}/whatsapp.phone_number_id", "1234567890").status_code == 200
+        # A client's token and ids are written by its own Embedded Signup connection, never by the
+        # Admin API (see TestNoManualEntry in test_whatsapp_accounts): seeded here as that would.
+        assert put(client, f"{A}/whatsapp.access_token", TOKEN).status_code == 409
+        credentials = fx.application.credentials
+        credentials.save("client:alpha", "whatsapp.access_token", TOKEN, actor="signup")
+        credentials.save("client:alpha", "whatsapp.phone_number_id", "1234567890", actor="signup")
         response = client.post(f"{A}/whatsapp/test")
         assert response.json()["ok"] is True
         assert response.json()["details"]["verified_name"] == "Acme"
@@ -162,7 +166,7 @@ class TestWhatsAppTest:
         remote = Remote(openai_ok)
         with_remote(fx, remote)
         client = fx.login("root")
-        assert put(client, f"{A}/whatsapp.access_token", TOKEN).status_code == 200
+        fx.application.credentials.save("client:alpha", "whatsapp.access_token", TOKEN, actor="signup")
         assert client.post(f"{A}/whatsapp/test").json()["ok"] is False
         assert remote.requests == []
 

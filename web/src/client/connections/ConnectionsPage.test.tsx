@@ -103,6 +103,29 @@ describe("ConnectionsPage", () => {
     expect(within(screen.getByTestId("connection-telegram")).getByRole("button", { name: "Connect my Telegram" })).toBeInTheDocument();
   });
 
+  it("guides the client through its own Portfolio, account, number, authorisation and Meta payment", async () => {
+    stub();
+    renderPage();
+    const row = await screen.findByTestId("connection-whatsapp");
+    expect(row).toHaveTextContent(/Your own Meta Business Portfolio/);
+    expect(row).toHaveTextContent(/Your own WhatsApp Business account/);
+    expect(row).toHaveTextContent(/Your payment method, set up directly with Meta/);
+    expect(row).toHaveTextContent(/separate from your Revansa subscription/);
+  });
+
+  it.each([
+    ["unverifiable", /Revansa cannot check it/],
+    ["to_configure", /to set up/],
+  ])("shows the Meta payment as %s and never as confirmed", async (billing, text) => {
+    stub({ "/channel/whatsapp": { ...WHATSAPP, state: "connected", status: "ready", verified_name: "Naga SARL", business_name: "Naga Holding", ownership: "verified", billing } });
+    renderPage();
+    const row = await screen.findByTestId("connection-whatsapp");
+    await within(row).findByText(/^Payment method:/);
+    expect(row).toHaveTextContent(text);
+    expect(row).not.toHaveTextContent(/Payment method: confirmed/);
+    expect(row).toHaveTextContent(/Business Portfolio: Naga Holding/);
+  });
+
   it("counts what is connected and names the next step", async () => {
     stub();
     renderPage();

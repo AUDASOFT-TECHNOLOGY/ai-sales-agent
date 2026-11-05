@@ -581,6 +581,11 @@ def _assemble(
         client_ids=lambda: [c.client_id for c in registry.configs()],
         changed=lambda client_id: _refresh_quietly(manager, client_id),
     )
+    # Accounts connected before the WhatsApp account register existed are written to it (no secret
+    # is touched, nothing is asked of Meta): see `WhatsAppService.adopt_legacy`.
+    whatsapp.adopt_legacy(
+        (c.client_id, c.phone_number_id) for c in registry.configs() if c.phone_number_id
+    )
     channel_policy = ChannelPolicyService(secrets, audit, now=clock.now)
     channel_policy.set_on_change(manager.notify_change)
 
@@ -849,7 +854,7 @@ def _whatsapp_state(account_stores: AccountStores | None) -> WhatsAppState:
     """The WhatsApp windows, delivery statuses and templates in the deployment's database. Without
     one they live in memory: lost on restart, which is safe (an unknown window is a closed one, and
     the templates are read again from Meta)."""
-    if account_stores is None:
+    if account_stores is None or account_stores.engine is None:
         return InMemoryWhatsAppState()
     from sales_app.persistence.whatsapp_rows import SqlWhatsAppState
 

@@ -828,6 +828,32 @@ wa_templates = Table(
 )
 
 
+# A client's WhatsApp account: which Business Portfolio owns it, its WABA and its number (migration
+# 0032). The database itself guarantees the associations: one Portfolio, one WABA and one number
+# belong to one client, whatever the number of simultaneous connections. NULL (several allowed) only
+# for an account adopted from the older, hand-made connection, whose owner is not proven. The token
+# is NOT here: it stays in the encrypted secret store.
+wa_accounts = Table(
+    "wa_accounts",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("business_id", String(32), nullable=True),
+    Column("waba_id", String(32), nullable=True),
+    Column("phone_id", String(32), nullable=True),
+    Column("status", String(24), nullable=False),
+    Column("ownership", String(24), nullable=False),
+    Column("business_name", String(200), nullable=False),
+    Column("verified_name", String(200), nullable=False),
+    Column("display_number", String(40), nullable=False),
+    Column("billing_state", String(16), nullable=False),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("updated_at", UtcDateTime, nullable=False),
+    UniqueConstraint("business_id", name="uq_wa_accounts_business"),
+    UniqueConstraint("waba_id", name="uq_wa_accounts_waba"),
+    UniqueConstraint("phone_id", name="uq_wa_accounts_phone"),
+)
+
+
 # ---- multi-process resilience (migration 0020) ---------------------------------------------------
 # Consents under way (OAuth / Embedded Signup), kept in the database instead of one process's memory,
 # so the callback can land on another process than the one that started the consent. Single use (the

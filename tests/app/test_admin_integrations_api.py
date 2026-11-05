@@ -25,6 +25,7 @@ from sales_app.errors import ConfigurationError
 from sales_app.secret_store import (
     AUDIT_FILENAME,
     SECRETS_FILENAME,
+    DuplicateSecretError,
     UnavailableSecretStore,
     generate_master_key,
 )
@@ -154,6 +155,11 @@ class TestGlobalCredentials:
     def test_status_before_anything_is_saved(self, fx):
         body = fx.login("root").get(BASE).json()
         assert {c["key"] for c in body} == {
+            "whatsapp.app_id",
+            "whatsapp.config_id",
+            "whatsapp.platform_business_id",
+            "telegram.api_id",
+            "telegram.api_hash",
             "openai.api_key",
             "openai.organization",
             "openai.project",
@@ -259,11 +265,7 @@ class TestBodyHandling:
 
     def test_a_refused_value_is_not_echoed(self, fx):
         client = fx.login("root")
-        response = put(
-            client,
-            "/admin/v1/clients/alpha/integrations/whatsapp.phone_number_id",
-            "SECRET-ish-abc",
-        )
+        response = put(client, "/admin/v1/settings/integrations/whatsapp.app_id", "SECRET-ish-abc")
         assert response.status_code == 422
         assert "SECRET-ish-abc" not in response.text
 
@@ -274,6 +276,7 @@ class TestClientCredentials:
         assert {c["key"] for c in body} == {
             "whatsapp.access_token",
             "whatsapp.phone_number_id",
+            "whatsapp.waba_id",
             "hubspot.access_token",
             "email.password",
             "email.platform_mailbox",
@@ -282,48 +285,40 @@ class TestClientCredentials:
         }
         assert all(c["scope"] == "client" for c in body)
 
-    def test_save_token_and_phone_number_id(self, fx):
+    def test_a_clients_whatsapp_token_and_ids_cannot_be_typed_by_the_admin(self, fx):
         client = fx.login("root")
         base = "/admin/v1/clients/alpha/integrations"
-        token = put(client, f"{base}/whatsapp.access_token", TOKEN)
-        phone = put(client, f"{base}/whatsapp.phone_number_id", "123456789012345")
-        assert token.json()["value"] is None and TOKEN not in token.text
-        assert phone.json()["value"] == "123456789012345"
+        for key in ("whatsapp.access_token", "whatsapp.phone_number_id", "whatsapp.waba_id"):
+            response = put(client, f"{base}/{key}", TOKEN)
+            assert response.status_code == 409 and TOKEN not in response.text
+        assert not any(c["configured"] for c in client.get(base).json())
 
     def test_credentials_are_kept_per_client(self, fx):
         client = fx.login("root")
-        put(client, "/admin/v1/clients/alpha/integrations/whatsapp.access_token", TOKEN)
+        fx.application.credentials.save("client:alpha", "whatsapp.access_token", TOKEN, actor="t")
         beta = client.get("/admin/v1/clients/beta/integrations").json()
         assert not any(c["configured"] for c in beta)
 
     def test_a_phone_number_id_cannot_be_given_to_two_clients(self, fx):
-        client = fx.login("root")
+        credentials = fx.application.credentials
         key = "whatsapp.phone_number_id"
-        assert (
-            put(client, f"/admin/v1/clients/alpha/integrations/{key}", "123456789").status_code
-            == 200
-        )
-        response = put(client, f"/admin/v1/clients/beta/integrations/{key}", "123456789")
-        assert response.status_code == 409
-        assert "alpha" in response.json()["detail"]
-        beta = client.get("/admin/v1/clients/beta/integrations").json()
-        assert not any(c["configured"] for c in beta)
+        credentials.save("client:alpha", key, "123456789", actor="t")
+        with pytest.raises(DuplicateSecretError):
+            credentials.save("client:beta", key, "123456789", actor="t")
+        assert credentials.status("client:beta", key).configured is False
 
     def test_the_same_client_may_save_its_own_phone_number_id_again(self, fx):
-        client = fx.login("root")
-        url = "/admin/v1/clients/alpha/integrations/whatsapp.phone_number_id"
-        assert put(client, url, "123456789").status_code == 200
-        assert put(client, url, "123456789").status_code == 200
+        credentials = fx.application.credentials
+        key = "whatsapp.phone_number_id"
+        credentials.save("client:alpha", key, "123456789", actor="t")
+        credentials.save("client:alpha", key, "123456789", actor="t")
 
     def test_a_freed_phone_number_id_can_be_reused(self, fx):
-        client = fx.login("root")
+        credentials = fx.application.credentials
         key = "whatsapp.phone_number_id"
-        put(client, f"/admin/v1/clients/alpha/integrations/{key}", "123456789")
-        client.delete(f"/admin/v1/clients/alpha/integrations/{key}?confirm=true")
-        assert (
-            put(client, f"/admin/v1/clients/beta/integrations/{key}", "123456789").status_code
-            == 200
-        )
+        credentials.save("client:alpha", key, "123456789", actor="t")
+        credentials.remove("client:alpha", key, actor="t")
+        credentials.save("client:beta", key, "123456789", actor="t")
 
     def test_an_unknown_client_is_404(self, fx):
         client = fx.login("root")
@@ -338,7 +333,7 @@ class TestClientCredentials:
 
     def test_removal_needs_confirmation(self, fx):
         client = fx.login("root")
-        url = "/admin/v1/clients/alpha/integrations/whatsapp.access_token"
+        url = "/admin/v1/clients/alpha/integrations/hubspot.access_token"
         put(client, url, TOKEN)
         assert client.delete(url).status_code == 400
         assert client.delete(f"{url}?confirm=true").json()["configured"] is False

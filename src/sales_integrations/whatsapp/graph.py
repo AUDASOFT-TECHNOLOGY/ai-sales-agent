@@ -19,6 +19,8 @@ DEFAULT_TIMEOUT_SECONDS = 20.0
 
 # Meta codes that mean the token (or the permission behind it) is no longer accepted.
 AUTH_CODES = frozenset({"0", "3", "10", "190", "200"})
+# What Embedded Signup must grant for Revansa to read the account and write from its number.
+REQUIRED_SCOPES = ("whatsapp_business_management", "whatsapp_business_messaging")
 
 
 class GraphError(Exception):
@@ -86,12 +88,34 @@ class WhatsAppGraph:
         info = self.token_info(app_id=app_id, app_secret=app_secret, token=token)
         found: list[str] = []
         for scope in info.get("granular_scopes") or []:
-            if isinstance(scope, dict) and scope.get("scope") in (
-                "whatsapp_business_management",
-                "whatsapp_business_messaging",
-            ):
+            if isinstance(scope, dict) and scope.get("scope") in REQUIRED_SCOPES:
                 found += [str(t) for t in scope.get("target_ids") or []]
         return list(dict.fromkeys(found))
+
+    def missing_scopes(self, *, app_id: str, app_secret: str, token: str) -> list[str]:
+        """The permissions Revansa needs that the token does not carry. Judged on what Meta says
+        about the token (`debug_token`: `scopes`, else the `granular_scopes` names); when Meta says
+        neither, every scope is reported missing, never assumed present."""
+        info = self.token_info(app_id=app_id, app_secret=app_secret, token=token)
+        granted = {str(s) for s in info.get("scopes") or []}
+        granted |= {
+            str(g.get("scope"))
+            for g in info.get("granular_scopes") or []
+            if isinstance(g, dict) and g.get("target_ids")
+        }
+        return [scope for scope in REQUIRED_SCOPES if scope not in granted]
+
+    def waba_owner(self, token: str, waba_id: str) -> dict[str, str] | None:
+        """The Business Portfolio that owns the WhatsApp Business Account, as Meta names it (the
+        `owner_business_info` field of the account: `id`, `name`). None when Meta does not name one
+        for this token: the owner is then unknown, and the caller must not treat it as verified."""
+        data = self._call(
+            "GET", f"/{waba_id}", token=token, params={"fields": "owner_business_info"}
+        )
+        info = data.get("owner_business_info")
+        if not isinstance(info, dict) or not str(info.get("id", "")).isdigit():
+            return None
+        return {"id": str(info["id"]), "name": str(info.get("name") or "")[:200]}
 
     def phone_numbers(self, token: str, waba_id: str) -> list[dict[str, Any]]:
         data = self._call(

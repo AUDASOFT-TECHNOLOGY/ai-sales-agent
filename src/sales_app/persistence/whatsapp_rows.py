@@ -10,14 +10,22 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import Engine, and_, delete, func, select, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from sales_app.persistence.clients import ensure_client
+from sales_app.persistence.tables import wa_accounts as accounts
 from sales_app.persistence.tables import wa_contact_windows as windows
 from sales_app.persistence.tables import wa_deliveries as deliveries
 from sales_app.persistence.tables import wa_templates as templates
 from sales_app.sourcing.errors import StoreUnavailableError
-from sales_app.whatsapp_state import FAILED, DeliveryRecord, TemplateRecord, moves_forward
+from sales_app.whatsapp_state import (
+    FAILED,
+    AccountConflict,
+    AccountRecord,
+    DeliveryRecord,
+    TemplateRecord,
+    moves_forward,
+)
 
 _UNAVAILABLE = "the WhatsApp register is unavailable"
 
@@ -76,12 +84,133 @@ def _template_values(record: TemplateRecord) -> dict:
     }
 
 
+def _account(row) -> AccountRecord:
+    return AccountRecord(
+        client_id=row.client_id,
+        business_id=row.business_id,
+        waba_id=row.waba_id,
+        phone_number_id=row.phone_id,
+        status=row.status,
+        ownership=row.ownership,
+        business_name=row.business_name,
+        verified_name=row.verified_name,
+        display_number=row.display_number,
+        billing_state=row.billing_state,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
 class SqlWhatsAppState:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
 
     def __repr__(self) -> str:
         return "SqlWhatsAppState()"
+
+    # ---- the account: the unique constraints are the guard ------------------------------------
+
+    def claim_account(self, record: AccountRecord) -> None:
+        now = record.updated_at or datetime.now(UTC)
+        values = {
+            "business_id": record.business_id,
+            "waba_id": record.waba_id,
+            "phone_id": record.phone_number_id,
+            "status": record.status,
+            "ownership": record.ownership,
+            "business_name": record.business_name[:200],
+            "verified_name": record.verified_name[:200],
+            "display_number": record.display_number[:40],
+            "billing_state": record.billing_state,
+            "updated_at": now,
+        }
+        try:
+            with self._engine.begin() as connection:
+                ensure_client(connection, record.client_id, created_at=now, created_by=None)
+                exists = connection.execute(
+                    select(accounts.c.client_id).where(accounts.c.client_id == record.client_id)
+                ).first()
+                if exists:
+                    connection.execute(
+                        update(accounts)
+                        .where(accounts.c.client_id == record.client_id)
+                        .values(**values)
+                    )
+                else:
+                    connection.execute(
+                        accounts.insert().values(
+                            client_id=record.client_id,
+                            created_at=record.created_at or now,
+                            **values,
+                        )
+                    )
+        except IntegrityError:
+            raise AccountConflict(self._conflict(record)) from None
+        except SQLAlchemyError:
+            raise StoreUnavailableError(_UNAVAILABLE) from None
+
+    def _conflict(self, record: AccountRecord) -> str:
+        """Which of the three another client holds (the constraint refused the write)."""
+        try:
+            with self._engine.connect() as connection:
+                for field, column, value in (
+                    ("business", accounts.c.business_id, record.business_id),
+                    ("waba", accounts.c.waba_id, record.waba_id),
+                    ("phone", accounts.c.phone_id, record.phone_number_id),
+                ):
+                    if (
+                        value
+                        and connection.execute(
+                            select(accounts.c.client_id).where(
+                                column == value, accounts.c.client_id != record.client_id
+                            )
+                        ).first()
+                    ):
+                        return field
+        except SQLAlchemyError:
+            pass
+        return "phone"
+
+    def _one(self, *where) -> AccountRecord | None:
+        try:
+            with self._engine.connect() as connection:
+                row = connection.execute(select(accounts).where(*where)).first()
+        except SQLAlchemyError:
+            raise StoreUnavailableError(_UNAVAILABLE) from None
+        return _account(row) if row is not None else None
+
+    def account(self, client_id: str) -> AccountRecord | None:
+        return self._one(accounts.c.client_id == client_id)
+
+    def account_for_phone(self, phone_number_id: str) -> AccountRecord | None:
+        return self._one(accounts.c.phone_id == phone_number_id)
+
+    def account_for_waba(self, waba_id: str) -> AccountRecord | None:
+        return self._one(accounts.c.waba_id == waba_id)
+
+    def _update(self, client_id: str, **values) -> None:
+        try:
+            with self._engine.begin() as connection:
+                connection.execute(
+                    update(accounts)
+                    .where(accounts.c.client_id == client_id)
+                    .values(updated_at=datetime.now(UTC), **values)
+                )
+        except SQLAlchemyError:
+            raise StoreUnavailableError(_UNAVAILABLE) from None
+
+    def set_account_status(self, client_id: str, status: str) -> None:
+        self._update(client_id, status=status)
+
+    def set_billing(self, client_id: str, billing_state: str) -> None:
+        self._update(client_id, billing_state=billing_state)
+
+    def drop_account(self, client_id: str) -> None:
+        try:
+            with self._engine.begin() as connection:
+                connection.execute(delete(accounts).where(accounts.c.client_id == client_id))
+        except SQLAlchemyError:
+            raise StoreUnavailableError(_UNAVAILABLE) from None
 
     # ---- windows ---------------------------------------------------------------------------
 

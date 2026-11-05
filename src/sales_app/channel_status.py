@@ -113,8 +113,8 @@ def channel_status(
     The connection of a channel (servers, mailbox, bot, webhook) is the platform's work: whatever is
     missing there is `WAITING_PLATFORM`, and the client has nothing to type. `ACTION_REQUIRED` is
     only for what the client itself decides (the channel it chose, how its messages are written).
-    WhatsApp is connected by the Admin and has nothing for the client to do here: it is ready only
-    once every Meta credential is stored."""
+    WhatsApp is connected by the client itself (Embedded Signup): it is ready only once every Meta
+    credential is stored."""
     if provider not in allowed_channels(application, client_id):
         return (
             ACTION_REQUIRED,

@@ -5,9 +5,11 @@ connect an account by hand. The public base URL below is `SALES_AGENT_PUBLIC_BAS
 
 ## 0. Before anything
 
-- The database schema is at revision `0018` (`sales-agent db upgrade`; no migration was run by this change): it adds `wa_contact_windows`,
-  `wa_deliveries`, `wa_templates`. Without a database those registers live in memory (lost at restart).
-- The server runs **one worker** (the Embedded Signup `state` is kept in memory, as Gmail's).
+- The database schema is at revision `0032` (`sales-agent db upgrade`, run once before starting): it
+  adds `wa_contact_windows`, `wa_deliveries`, `wa_templates` and `wa_accounts`. Without a database
+  those registers live in memory (lost at restart, and the associations are then not persistent).
+- The server runs **one worker** (the Engine's single-writer guarantee). The Embedded Signup `state`
+  is kept in the database when there is one.
 - `SALES_AGENT_PUBLIC_BASE_URL` is the public https address; the Admin screen shows the three URLs
   below built from it (`GET /admin/v1/whatsapp/platform`).
 
@@ -30,10 +32,11 @@ connect an account by hand. The public base URL below is `SALES_AGENT_PUBLIC_BAS
    `message_template_status_update`, `template_category_update`, `message_template_quality_update`,
    `phone_number_quality_update`, `account_update`, `account_review_update`. (Revansa subscribes each
    client's account to the app itself, during connection.)
-8. **Billing — the client pays nothing to Meta through Revansa's flow only if you arrange it**: in
-   Business Manager set up a payment method and share your **credit line** with each client's WhatsApp
-   account (or have the client add its own payment method in WhatsApp Manager). Not automated by
-   Revansa. Without billing, sends fail with 131042 and wait.
+8. **Billing: each client pays Meta directly.** Do NOT share Revansa's credit line with a client's
+   WhatsApp account. The client sets its own payment method in WhatsApp Manager (the Embedded Signup
+   configuration should include the payment step: confirm with Meta, see
+   [whatsapp-channel.md](whatsapp-channel.md) "Needs a real Meta account"). Revansa cannot verify the
+   payment method; it shows the client "to set up" only after Meta refuses a send (131042).
 
 ## 2. In Revansa (Admin → Settings → Integrations, owner)
 
@@ -41,11 +44,12 @@ connect an account by hand. The public base URL below is `SALES_AGENT_PUBLIC_BAS
 | --- | --- |
 | `whatsapp.app_id` | Meta app id (public) |
 | `whatsapp.config_id` | Embedded Signup configuration id (public) |
+| `whatsapp.platform_business_id` | Revansa's own Meta Business Portfolio id (public): an account it owns is never accepted as a client's |
 | `whatsapp.app_secret` | Meta app secret (secret; also signs every webhook) |
 | `whatsapp.verify_token` | any long random string, the same as in step 1.7 |
 | `whatsapp.api_version` | optional, e.g. `v21.0` |
 
-When all four are stored, `GET /admin/v1/whatsapp/platform` says `ready: true` and clients on WhatsApp
+When all five are stored, `GET /admin/v1/whatsapp/platform` says `ready: true` and clients on WhatsApp
 see **Connect WhatsApp**. Check that Meta's webhook handshake succeeds (Meta calls
 `GET <public>/webhooks/whatsapp`).
 
@@ -61,11 +65,13 @@ page, **WhatsApp Business**:
    **Use to open conversations**. Until then the agent only answers people who write first.
 3. Keep an eye on *Recent delivery failures* and the number's quality.
 
-## 4. Connecting an account by hand (without Embedded Signup)
+## 4. No manual connection
 
-Store for the client `whatsapp.access_token` (a permanent System User token), `whatsapp.phone_number_id`
-and `whatsapp.waba_id`, subscribe the account to the app yourself, and register the number. This path
-exists but gives no automatic reconnection or revocation.
+A client's token and ids can no longer be typed by the Admin (the credentials API answers 409): each
+client connects its own account with Embedded Signup. Clients connected before keep working as
+`legacy_unverified` (see "Existing accounts" in [whatsapp-channel.md](whatsapp-channel.md)); ask each to
+reconnect, one at a time, and check that its page shows "verified by Meta" before removing any old
+variable or secret.
 
 ## 5. Check list after hosting (a real account is required)
 

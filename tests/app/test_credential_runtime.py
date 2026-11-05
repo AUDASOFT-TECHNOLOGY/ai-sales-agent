@@ -654,16 +654,11 @@ class TestAdminApi:
         client = w.login()
         client.put("/admin/v1/settings/integrations/openai.api_key", json={"value": "sk-1"})
         client.put("/admin/v1/settings/integrations/whatsapp.app_secret", json={"value": "app-1"})
-        client.put(
-            "/admin/v1/clients/alpha/integrations/whatsapp.access_token", json={"value": "t-1"}
-        )
+        w.save("client:alpha", "whatsapp.access_token", "t-1")  # as its Embedded Signup would
         status = client.get("/admin/v1/clients/alpha/runtime-status").json()
         assert status["readiness"] == "not_ready"
         assert status["missing_credentials"] == ["WhatsApp phone number id is not configured"]
-        client.put(
-            "/admin/v1/clients/alpha/integrations/whatsapp.phone_number_id",
-            json={"value": "1000000001"},
-        )
+        w.save("client:alpha", "whatsapp.phone_number_id", "1000000001")
         status = client.get("/admin/v1/clients/alpha/runtime-status").json()
         assert status["readiness"] == "ready" and status["apply_state"] == "applied"
         assert status["missing_credentials"] == [] and status["apply_errors"] == []
@@ -673,10 +668,7 @@ class TestAdminApi:
         w.make_ready()
         w.flags.fail_channel = True
         client = w.login()
-        client.put(
-            "/admin/v1/clients/alpha/integrations/whatsapp.access_token",
-            json={"value": "token-BAD-0123456789"},
-        )
+        w.save("client:alpha", "whatsapp.access_token", "token-BAD-0123456789")
         response = client.get("/admin/v1/clients/alpha/runtime-status")
         assert response.json()["apply_state"] == "failed"
         assert "token-BAD-0123456789" not in response.text

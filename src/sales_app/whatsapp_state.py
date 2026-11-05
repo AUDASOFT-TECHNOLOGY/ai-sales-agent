@@ -18,7 +18,7 @@ closed one, so a template is used rather than free text).
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol
 
 APPROVED = "APPROVED"
@@ -63,8 +63,69 @@ class DeliveryRecord:
     error_title: str = ""
 
 
+# How an account's owner is known.
+VERIFIED = (
+    "verified"  # Meta named the Business Portfolio that owns the WABA, and it is not Revansa's
+)
+LEGACY_UNVERIFIED = "legacy_unverified"  # connected by hand before: the owner was never checked
+
+# What Revansa can say about the payment method of the account at Meta. Only `to_configure` and
+# `unverifiable` are ever set by Revansa: it has no Meta call that proves a payment method, so
+# `confirmed` exists for the day Meta exposes one, and nothing sets it today.
+BILLING_CONFIRMED = "confirmed"
+BILLING_TO_CONFIGURE = "to_configure"  # Meta refused a send for lack of a payment method (131042)
+BILLING_UNVERIFIABLE = "unverifiable"  # the default: only the client can see it at Meta
+
+CONNECTED_STATUS = "connected"
+REAUTH_STATUS = "reauth_required"
+
+
+class AccountConflict(Exception):
+    """A Portfolio, a WABA or a number is already attributed to another client. `field` is
+    `business`, `waba` or `phone`."""
+
+    def __init__(self, field: str) -> None:
+        super().__init__(field)
+        self.field = field
+
+
+@dataclass(frozen=True, slots=True)
+class AccountRecord:
+    client_id: str
+    business_id: str | None = None
+    waba_id: str | None = None
+    phone_number_id: str | None = None
+    status: str = CONNECTED_STATUS
+    ownership: str = VERIFIED
+    business_name: str = ""
+    verified_name: str = ""
+    display_number: str = ""
+    billing_state: str = BILLING_UNVERIFIABLE
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class WhatsAppState(Protocol):
     """Implementations are safe to share between threads."""
+
+    # ---- the account: Portfolio, WABA, number (one client each) --------------------------------
+
+    def claim_account(self, record: AccountRecord) -> None:
+        """Attribute these ids to the client, atomically: raises `AccountConflict` if another
+        client already holds the Portfolio, the WABA or the number. Replaces the client's own."""
+        ...
+
+    def account(self, client_id: str) -> AccountRecord | None: ...
+
+    def account_for_phone(self, phone_number_id: str) -> AccountRecord | None: ...
+
+    def account_for_waba(self, waba_id: str) -> AccountRecord | None: ...
+
+    def set_account_status(self, client_id: str, status: str) -> None: ...
+
+    def set_billing(self, client_id: str, billing_state: str) -> None: ...
+
+    def drop_account(self, client_id: str) -> None: ...
 
     def record_inbound(self, client_id: str, wa_id: str, at: datetime) -> None:
         """Only moves forward: an older message never shortens a window."""
@@ -138,9 +199,57 @@ class InMemoryWhatsAppState:
         self._windows: dict[tuple[str, str], datetime] = {}
         self._deliveries: dict[tuple[str, str], DeliveryRecord] = {}
         self._templates: dict[tuple[str, str, str], TemplateRecord] = {}
+        self._accounts: dict[str, AccountRecord] = {}
 
     def __repr__(self) -> str:
         return "InMemoryWhatsAppState()"
+
+    def claim_account(self, record: AccountRecord) -> None:
+        with self._lock:
+            for other in self._accounts.values():
+                if other.client_id == record.client_id:
+                    continue
+                for field, mine, theirs in (
+                    ("business", record.business_id, other.business_id),
+                    ("waba", record.waba_id, other.waba_id),
+                    ("phone", record.phone_number_id, other.phone_number_id),
+                ):
+                    if mine and mine == theirs:
+                        raise AccountConflict(field)
+            now = record.updated_at or datetime.now(UTC)
+            earlier = self._accounts.get(record.client_id)
+            created = earlier.created_at if earlier is not None else record.created_at or now
+            self._accounts[record.client_id] = replace(record, created_at=created, updated_at=now)
+
+    def account(self, client_id: str) -> AccountRecord | None:
+        with self._lock:
+            return self._accounts.get(client_id)
+
+    def account_for_phone(self, phone_number_id: str) -> AccountRecord | None:
+        with self._lock:
+            return next(
+                (a for a in self._accounts.values() if a.phone_number_id == phone_number_id), None
+            )
+
+    def account_for_waba(self, waba_id: str) -> AccountRecord | None:
+        with self._lock:
+            return next((a for a in self._accounts.values() if a.waba_id == waba_id), None)
+
+    def set_account_status(self, client_id: str, status: str) -> None:
+        with self._lock:
+            if client_id in self._accounts:
+                self._accounts[client_id] = replace(self._accounts[client_id], status=status)
+
+    def set_billing(self, client_id: str, billing_state: str) -> None:
+        with self._lock:
+            if client_id in self._accounts:
+                self._accounts[client_id] = replace(
+                    self._accounts[client_id], billing_state=billing_state
+                )
+
+    def drop_account(self, client_id: str) -> None:
+        with self._lock:
+            self._accounts.pop(client_id, None)
 
     def record_inbound(self, client_id: str, wa_id: str, at: datetime) -> None:
         with self._lock:

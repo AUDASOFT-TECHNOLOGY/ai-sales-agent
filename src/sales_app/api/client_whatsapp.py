@@ -38,13 +38,17 @@ from sales_app.channel_status import (
 )
 from sales_app.client_profiles import ClientProfile
 from sales_app.whatsapp_service import (
+    BUSINESS_IN_USE,
     DENIED,
     ERROR,
     IN_USE,
     INVALID,
     NUMBER_MISMATCH,
     NUMBER_UNCLEAR,
+    OWNER_UNVERIFIABLE,
+    PLATFORM_OWNED,
     UNAVAILABLE_CAUSE,
+    WABA_IN_USE,
     WhatsAppConnectionError,
 )
 
@@ -54,6 +58,10 @@ _CAUSE_STATUS = {
     NUMBER_MISMATCH: 409,
     NUMBER_UNCLEAR: 409,
     IN_USE: 409,
+    WABA_IN_USE: 409,
+    BUSINESS_IN_USE: 409,
+    PLATFORM_OWNED: 409,
+    OWNER_UNVERIFIABLE: 502,
     UNAVAILABLE_CAUSE: 503,
     ERROR: 502,
 }
@@ -64,6 +72,12 @@ class WhatsAppStatusResponse(BaseModel):
     state: Literal["not_connected", "connected", "reauth_required", "unavailable"]
     number: str | None = None  # the client's own WhatsApp number
     verified_name: str | None = None  # the business name Meta verified for it
+    business_name: str | None = None  # the Business Portfolio Meta says owns the account
+    ownership: Literal["verified", "legacy_unverified"] | None = None
+    # What Revansa can know of the payment method at Meta: `confirmed` only on real evidence from
+    # Meta (none is available today), `to_configure` after Meta refused a send for lack of one,
+    # `unverifiable` otherwise. Meta bills the client directly; Revansa's subscription is separate.
+    billing: Literal["confirmed", "to_configure", "unverifiable"] = "unverifiable"
     status: Literal["ready", "waiting_platform", "action_required"]
     message: str | None = None
     can_start_conversations: bool = False  # Revansa can write first (an approved opening message)
@@ -114,6 +128,9 @@ def create_client_whatsapp_router(application: Application) -> APIRouter | None:
             state=held.state,  # type: ignore[arg-type]
             number=client.whatsapp_number,
             verified_name=held.verified_name if connected else None,
+            business_name=held.business_name if connected else None,
+            ownership=held.ownership if connected else None,  # type: ignore[arg-type]
+            billing=held.billing_state if connected else "unverifiable",  # type: ignore[arg-type]
             status=status,  # type: ignore[arg-type]
             message=message,
             can_start_conversations=connected and opening,

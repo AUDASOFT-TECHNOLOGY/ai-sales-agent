@@ -1,9 +1,10 @@
 # The WhatsApp channel
 
 WhatsApp Business Cloud API, one account per client, connected by the client itself with Meta's
-**Embedded Signup** (no token, no identifier, no webhook is typed by the client), or by the Admin by
-hand (the older way, kept). What the Admin must do on Meta after hosting: see
-[whatsapp-admin-setup.md](whatsapp-admin-setup.md).
+**Embedded Signup** (no token, no identifier, no webhook is typed by the client or by the Admin).
+Each client has its **own** Meta Business Portfolio, WhatsApp Business account (WABA), number and
+payment method; Revansa provides the Meta app, the Embedded Signup and the webhook, nothing else.
+What the Admin must do on Meta after hosting: see [whatsapp-admin-setup.md](whatsapp-admin-setup.md).
 
 > **What is proven and what is not.** Everything below is implemented and covered by tests that
 > replace Meta with a fake. That proves what Revansa asks of Meta and what it keeps; it does **not**
@@ -22,15 +23,48 @@ hand (the older way, kept). What the Admin must do on Meta after hosting: see
 4. `POST /client/v1/channel/whatsapp/complete {state, code, waba_id?, phone_number_id?}`. The server:
    checks the `state`; exchanges the code with the app secret (the token never reaches the browser);
    asks Meta which accounts the token **really** grants (`debug_token`) — the ids sent by the browser
-   are hints Meta confirms, never trusted; reads the account's numbers; refuses (`number_mismatch`) a
-   number that is not the one in the client's profile; subscribes the app to the account's webhooks;
+   are hints Meta confirms, never trusted; refuses (`denied`) a token that lacks
+   `whatsapp_business_management` or `whatsapp_business_messaging`; reads the account's numbers;
+   refuses (`number_mismatch`) a number that is not the one in the client's profile; **asks Meta which
+   Business Portfolio owns the account** (see "Ownership"); claims the Portfolio, the account and the
+   number for the client in `wa_accounts` (atomic: see "Ownership, associations and routing");
+   subscribes the app to the account's webhooks;
    registers the number on the Cloud API (6-digit PIN generated and kept) unless Meta shows it
    connected; stores the token, the account id and the phone number id under the client's own scope in
    the encrypted secret store (`whatsapp.phone_number_id` is unique across clients); refreshes the
    client's runtime. Nothing is stored unless every step worked; on failure the token is revoked and
    the subscription undone.
 5. Causes returned to the browser (fixed words, never Meta's text): `invalid`, `denied`,
-   `number_mismatch`, `number_unclear`, `in_use`, `unavailable`, `error`.
+   `number_mismatch`, `number_unclear`, `in_use` (number), `waba_in_use`, `business_in_use`,
+   `platform_owned`, `ownership_unverifiable`, `unavailable`, `error`.
+
+## Ownership, associations and routing
+
+- **Reaching a WABA with a token is not ownership.** Revansa reads the WABA's `owner_business_info`
+  (WhatsApp Business Account field of the Graph API) with the client's token. No owner named by Meta:
+  refused (`ownership_unverifiable`). The owner is Revansa's own Portfolio
+  (`whatsapp.platform_business_id`, set by the Admin): refused (`platform_owned`). Without
+  `platform_business_id` nobody can connect (the Admin sees it in the platform's missing list).
+- **Associations** live in `wa_accounts` (migration 0032): `client_id`, `business_id`, `waba_id`,
+  `phone_id`, status, ownership (`verified` or `legacy_unverified`), the names Meta gave, the billing
+  state, dates. Unique constraints on Portfolio, WABA and number: one of each per client, enforced by
+  the database, so simultaneous connections cannot share them. Claimed before anything changes at
+  Meta, undone if a later step fails. The token and the PIN stay in the encrypted secret store.
+- **Routing.** Messages: by `phone_number_id` (registry). Statuses and account events: from
+  `wa_accounts`, no secret is read. An event bound to a number follows the number and is refused if
+  its WABA is not that client's; an event about a WABA alone follows the WABA. Unknown or
+  contradictory events belong to nobody and change nothing. A Meta deauthorisation that matches
+  several clients (one Meta user connected several) changes nothing.
+
+## Billing (Meta bills the client; Revansa cannot see it)
+
+- Meta's WhatsApp fees are the client's own, at Meta. Revansa's subscription does not include them,
+  and Revansa's credit line is **not** to be shared with a client's WABA.
+- Revansa knows no Meta call that proves a payment method. The states shown to the client and to the
+  Admin: `unverifiable` (default: "Revansa cannot check it", with the instruction to check WhatsApp
+  Manager > Payment methods), `to_configure` (Meta refused a send with error 131042), `confirmed`
+  (reserved: nothing sets it today, and the interface never shows it without that evidence). A
+  delivered message lifts `to_configure` back to `unverifiable`, never to `confirmed`.
 
 The client sees: its own number, the business name Meta verified, a state (`not_connected`,
 `connected`, `reauth_required`, `unavailable`), a status (`ready` / `waiting_platform` /
@@ -104,9 +138,20 @@ credential catalog.
 `GET /admin/v1/whatsapp/platform` (what is missing, the three URLs to give Meta);
 `GET /admin/v1/clients/{id}/whatsapp` (state, ids, quality, templates by status, 7-day deliveries,
 recent failures); owner only: `POST .../refresh`, `POST .../templates/sync`, `POST|DELETE
-.../templates`, `PUT .../templates/opening`, `POST .../disconnect {release_number}`. The manual
-credentials routes (`PUT .../integrations/whatsapp.access_token` etc.) remain for an account connected
-by hand; `whatsapp.waba_id` is then needed for templates.
+.../templates`, `PUT .../templates/opening`, `POST .../disconnect {release_number}`. The Admin sees
+the Portfolio, account, number, ownership, connection and billing state of each client. The credentials
+routes **refuse** `whatsapp.access_token`, `whatsapp.phone_number_id` and `whatsapp.waba_id`
+(409): only the client's Embedded Signup writes them.
+
+## Existing accounts (migration)
+
+At start, the accounts already connected (token and number resolved for a client) are written to
+`wa_accounts` as `legacy_unverified`, with no Portfolio. No secret is changed and nothing is asked of
+Meta, so they keep sending and receiving. The Admin and the client see "not verified": the client
+reconnects with Embedded Signup, which verifies the owner and replaces the token. Old secrets are
+overwritten only after the new connection fully succeeded; a failed reconnection restores the previous
+row. A client configured by environment variables in `client.yaml` (`token_env`...) keeps working the
+same way until it reconnects; remove those variables only after its page shows "verified by Meta".
 
 ## Needs a real Meta account (not provable by tests)
 
@@ -118,7 +163,12 @@ by hand; `whatsapp.waba_id` is then needed for templates.
 - That a number registered by Embedded Signup is already `CONNECTED` (then the PIN step is skipped) and that
   registration with the generated PIN works for a number without a previous two-step PIN.
 - Template review times and categories; that the opening template is accepted with one variable.
-- Billing: the account needs a payment method or a credit line shared by Revansa (Meta Business Manager;
-  not automated here). Without it sends fail with 131042 and wait.
+- **Ownership:** that `owner_business_info` is returned for a WABA created or chosen in the Embedded
+  Signup, with the permissions the configuration grants. If Meta does not return it, every connection
+  is refused (`ownership_unverifiable`), by design: ownership is never confirmed on a guess.
+- **Billing:** how a Tech Provider's clients are billed (the payment step inside the Embedded Signup
+  configuration, the solution and partner settings) and whether Meta exposes any readable payment
+  status. Until Meta confirms that the client pays Meta directly for its own WABA, "confirmed" is
+  never shown. Without a payment method, sends fail with 131042 and wait.
 - Real delivery of webhooks (statuses, templates, deauthorisation) to the hosted URL.
 - The quality / messaging limit tier of the number and Meta's per-recipient marketing limits (131049).

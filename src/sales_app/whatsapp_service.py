@@ -10,9 +10,12 @@ What this module does, and every step is a real call to Meta:
 
 - `start`: a signed, single-use, short-lived `state` bound to one client, with the public
   identifiers the browser needs (app id, configuration id);
-- `complete`: exchange the code, ask Meta which account the token really grants (what the browser
-  says about the account is only a hint that Meta confirms), check the number is the one the client
-  declared, subscribe the app to the account's webhooks, register the number, then store;
+- `complete`: exchange the code, check the permissions, ask Meta which account the token really
+  grants (what the browser says about the account is only a hint that Meta confirms), check the
+  number is the one the client declared, ask Meta which Business Portfolio OWNS the account (reaching
+  it is not owning it; Revansa's own Portfolio is refused), claim Portfolio / account / number for the
+  client in the account register (unique, atomic), subscribe the app to the account's webhooks,
+  register the number, then store;
 - `disconnect`: unsubscribe the webhooks, withdraw the token's permissions, forget everything;
 - templates: list / create / delete the account's message templates and choose the one that opens
   a conversation outside the 24-hour window;
@@ -20,7 +23,8 @@ What this module does, and every step is a real call to Meta:
 - `channel_for`: the sending channel of a client, bound to its windows and templates.
 
 What is NOT proven here: that Meta accepts the app (App Review, Business Verification, Live mode),
-that the account has a payment method, that the number can send. Those are Meta's, checked only by
+that the account has a payment method (Meta bills the client directly; Revansa can only see a refusal
+for lack of one), that the number can send. Those are Meta's, checked only by
 a real account (see docs/whatsapp-channel.md).
 """
 
@@ -43,18 +47,28 @@ from sales_app.config.secrets import (
     WHATSAPP_APP_SECRET,
     WHATSAPP_CONFIG_ID,
     WHATSAPP_PHONE_NUMBER_ID,
+    WHATSAPP_PLATFORM_BUSINESS_ID,
     WHATSAPP_REAUTH_REQUIRED,
     WHATSAPP_VERIFY_TOKEN,
     WHATSAPP_WABA_ID,
 )
+from sales_app.notifications import tell as _tell
 from sales_app.secret_store import GLOBAL_SCOPE, SecretStore, SecretStoreError, client_scope
 from sales_app.secret_store.errors import DuplicateSecretError
 from sales_app.whatsapp_state import (
     APPROVED,
+    BILLING_TO_CONFIGURE,
+    BILLING_UNVERIFIABLE,
+    CONNECTED_STATUS,
     DISABLED,
     FAILED,
+    LEGACY_UNVERIFIED,
     PAUSED,
     PENDING,
+    REAUTH_STATUS,
+    VERIFIED,
+    AccountConflict,
+    AccountRecord,
     DeliveryRecord,
     InMemoryWhatsAppState,
     TemplateRecord,
@@ -75,8 +89,6 @@ from sales_integrations.whatsapp import (
     WhatsAppNotification,
 )
 from sales_integrations.whatsapp.channel import DEFAULT_API_VERSION
-
-from sales_app.notifications import tell as _tell
 
 log = logging.getLogger(__name__)
 
@@ -130,7 +142,14 @@ DENIED = "denied"  # Meta did not grant what is needed
 NUMBER_MISMATCH = "number_mismatch"  # the account's number is not the one the client declared
 NUMBER_UNCLEAR = "number_unclear"  # several numbers, none of them chosen
 IN_USE = "in_use"  # this number already belongs to another client
+WABA_IN_USE = "waba_in_use"  # this WhatsApp Business account already belongs to another client
+BUSINESS_IN_USE = "business_in_use"  # this Business Portfolio already belongs to another client
+OWNER_UNVERIFIABLE = "ownership_unverifiable"  # Meta does not tell who owns the account
+PLATFORM_OWNED = "platform_owned"  # the account belongs to Revansa's own Business Portfolio
 ERROR = "error"
+
+_CONFLICT_CAUSE = {"phone": IN_USE, "waba": WABA_IN_USE, "business": BUSINESS_IN_USE}
+BILLING_FAILURE_CODE = "131042"  # Meta: the account has no usable payment method
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +169,10 @@ class WhatsAppStatus:
     waba_id: str | None = None
     phone_number_id: str | None = None
     connected_at: str | None = None
+    business_id: str | None = None
+    business_name: str | None = None
+    ownership: str | None = None  # verified | legacy_unverified | None (nothing connected)
+    billing_state: str = BILLING_UNVERIFIABLE  # confirmed | to_configure | unverifiable
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +262,40 @@ class WhatsAppService:
         self._client_ids = client_ids
         self._changed = changed
 
+    def adopt_legacy(self, held: Iterable[tuple[str, str]]) -> int:
+        """Once, at start: the accounts connected before the relation existed are written to it
+        (`(client_id, phone_number_id)` pairs, as the clients' configurations resolve them), marked
+        `legacy_unverified` and with no Portfolio. Nothing is read from Meta and no secret changes,
+        so what worked keeps working; a new Embedded Signup connection verifies the owner. A number
+        claimed by two clients is left out of the register for both (routing never guesses).
+        Returns how many were adopted."""
+        adopted = 0
+        for client_id, phone_id in held:
+            try:
+                if not phone_id or self.state.account(client_id) is not None:
+                    continue
+                waba = self._client_value(client_id, WHATSAPP_WABA_ID)
+                snapshot = self._snapshot(client_id)
+                now = self._clock.now()
+                self.state.claim_account(
+                    AccountRecord(
+                        client_id=client_id,
+                        waba_id=waba if waba and waba.isdigit() else None,
+                        phone_number_id=phone_id,
+                        ownership=LEGACY_UNVERIFIED,
+                        verified_name=snapshot.get("verified_name", ""),
+                        display_number=snapshot.get("display_number", ""),
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                adopted += 1
+            except AccountConflict:
+                log.warning("%s: a WhatsApp number or account is claimed twice", client_id)
+            except Exception:  # noqa: BLE001 - routing then simply has no row for this client
+                log.warning("%s: could not adopt the WhatsApp account", client_id)
+        return adopted
+
     # ---- the platform's Meta app -------------------------------------------------------------------
 
     def _global(self, key: str) -> str | None:
@@ -262,6 +319,7 @@ class WhatsAppService:
     def missing(self) -> list[str]:
         """What the Admin still has to set for the clients to connect. Names only."""
         labels = (
+            (WHATSAPP_PLATFORM_BUSINESS_ID, "Revansa's Business Portfolio id"),
             (WHATSAPP_APP_ID, "Meta app id"),
             (WHATSAPP_CONFIG_ID, "Embedded Signup configuration id"),
             (WHATSAPP_APP_SECRET, "Meta app secret"),
@@ -289,6 +347,8 @@ class WhatsAppService:
         app_id, config_id = self._global(WHATSAPP_APP_ID), self._global(WHATSAPP_CONFIG_ID)
         if key is None or not app_id or not config_id or not self._global(WHATSAPP_VERIFY_TOKEN):
             raise WhatsAppConnectionError(UNAVAILABLE_CAUSE)
+        if not self._global(WHATSAPP_PLATFORM_BUSINESS_ID):
+            raise WhatsAppConnectionError(UNAVAILABLE_CAUSE)  # ownership could not be judged
         now = self._clock.now()
         nonce = token_secrets.token_urlsafe(18)
         expires = now + timedelta(seconds=STATE_TTL_SECONDS)
@@ -347,8 +407,12 @@ class WhatsAppService:
         graph = self.graph()
         token: str | None = None
         subscribed: str | None = None
+        earlier_account: AccountRecord | None = None
+        claimed = False
         try:
             token = graph.exchange_code(app_id=app_id, app_secret=app_secret, code=code)
+            if graph.missing_scopes(app_id=app_id, app_secret=app_secret, token=token):
+                raise WhatsAppConnectionError(DENIED)
             waba_id, phone = self._account_of(
                 graph, token, app_id, app_secret, waba_hint, phone_hint
             )
@@ -356,7 +420,13 @@ class WhatsAppService:
             if expected_number and display != _digits(expected_number):
                 raise WhatsAppConnectionError(NUMBER_MISMATCH)
             phone_id = str(phone["id"])
+            business = self._owner_of(graph, token, waba_id)
             self._require_free_number(client_id, phone_id)
+            earlier_account = self._account_row(client_id)
+            # The database decides who holds the Portfolio, the account and the number, atomically:
+            # claimed before anything changes at Meta, and undone if a later step fails.
+            self._claim(client_id, business, waba_id, phone_id, phone)
+            claimed = True
             graph.subscribe(token, waba_id)
             subscribed = waba_id
             pin = self._register(graph, token, client_id, phone_id, phone)
@@ -366,9 +436,11 @@ class WhatsAppService:
             self._release_earlier(graph, earlier, waba_id)
         except WhatsAppConnectionError:
             self._withdraw(graph, token, subscribed)
+            self._unclaim(client_id, earlier_account, claimed)
             raise
         except GraphError as error:
             self._withdraw(graph, token, subscribed)
+            self._unclaim(client_id, earlier_account, claimed)
             log.warning("%s: WhatsApp connection refused by Meta (code %s)", client_id, error.code)
             raise WhatsAppConnectionError(
                 UNAVAILABLE_CAUSE if error.transient else (DENIED if error.auth else ERROR)
@@ -410,9 +482,79 @@ class WhatsAppService:
             raise WhatsAppConnectionError(NUMBER_UNCLEAR)
         return found[0]
 
+    def _owner_of(self, graph: WhatsAppGraph, token: str, waba_id: str) -> dict[str, str]:
+        """The Business Portfolio that owns the account, as Meta names it. Reaching the account
+        with the token proves nothing about who owns it: without a Portfolio named by Meta, or if
+        it is Revansa's own, the connection is refused."""
+        platform = self._global(WHATSAPP_PLATFORM_BUSINESS_ID)
+        if not platform:
+            raise WhatsAppConnectionError(UNAVAILABLE_CAUSE)
+        owner = graph.waba_owner(token, waba_id)
+        if owner is None:
+            raise WhatsAppConnectionError(OWNER_UNVERIFIABLE)
+        if owner["id"] == platform:
+            raise WhatsAppConnectionError(PLATFORM_OWNED)
+        return owner
+
+    def _claim(
+        self,
+        client_id: str,
+        business: dict[str, str],
+        waba_id: str,
+        phone_id: str,
+        phone: dict[str, Any],
+    ) -> None:
+        now = self._clock.now()
+        try:
+            self.state.claim_account(
+                AccountRecord(
+                    client_id=client_id,
+                    business_id=business["id"],
+                    waba_id=waba_id,
+                    phone_number_id=phone_id,
+                    status=CONNECTED_STATUS,
+                    ownership=VERIFIED,
+                    business_name=business["name"],
+                    verified_name=str(phone.get("verified_name", "")),
+                    display_number=str(phone.get("display_phone_number", "")),
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        except AccountConflict as conflict:
+            raise WhatsAppConnectionError(_CONFLICT_CAUSE.get(conflict.field, IN_USE)) from None
+        except Exception:  # noqa: BLE001 - a register that cannot answer proves nothing
+            log.warning("%s: could not record the WhatsApp account", client_id)
+            raise WhatsAppConnectionError(ERROR) from None
+
+    def _unclaim(self, client_id: str, earlier: AccountRecord | None, claimed: bool) -> None:
+        """A connection that did not finish gives the client its previous account back."""
+        if not claimed:
+            return
+        try:
+            if earlier is None:
+                self.state.drop_account(client_id)
+            else:
+                self.state.claim_account(earlier)
+        except Exception:  # noqa: BLE001
+            log.error("%s: could not undo the WhatsApp account claim", client_id)
+
+    def _account_row(self, client_id: str) -> AccountRecord | None:
+        try:
+            return self.state.account(client_id)
+        except Exception:  # noqa: BLE001 - an unreadable register is an absent row
+            return None
+
     def _require_free_number(self, client_id: str, phone_id: str) -> None:
-        """Before anything is done at Meta: a number belongs to one client. (The store's unique
-        constraint is the atomic guard at the moment of saving.)"""
+        """Before anything is done at Meta: a number belongs to one client. The account register
+        says it (and its unique constraint settles simultaneous attempts); the credential store is
+        read too, for a number connected before the register existed and not adopted."""
+        try:
+            held = self.state.account_for_phone(phone_id)
+        except Exception:  # noqa: BLE001
+            held = None
+        if held is not None and held.client_id != client_id:
+            raise WhatsAppConnectionError(IN_USE)
         for other in self._client_ids():
             if (
                 other != client_id
@@ -477,6 +619,7 @@ class WhatsAppService:
             }
             self._secrets.set(scope, WHATSAPP_CONNECTION, json.dumps(snapshot), by=_ACTOR)
             self._secrets.delete(scope, WHATSAPP_REAUTH_REQUIRED)
+            self.state.set_account_status(client_id, CONNECTED_STATUS)
             _tell(self.on_connected, client_id)
         except SecretStoreError:
             if previous:
@@ -524,8 +667,13 @@ class WhatsAppService:
             return WhatsAppStatus(NOT_CONNECTED if self.configured() else UNAVAILABLE)
         snapshot = self._snapshot(client_id)
         reauth = self._client_value(client_id, WHATSAPP_REAUTH_REQUIRED) == "1"
+        account = self._account_row(client_id)
         return WhatsAppStatus(
             REAUTH_REQUIRED if reauth else CONNECTED,
+            business_id=account.business_id if account else None,
+            business_name=(account.business_name or None) if account else None,
+            ownership=account.ownership if account else None,
+            billing_state=account.billing_state if account else BILLING_UNVERIFIABLE,
             display_number=snapshot.get("display_number") or None,
             verified_name=snapshot.get("verified_name") or None,
             quality=snapshot.get("quality") or None,
@@ -585,6 +733,10 @@ class WhatsAppService:
         except SecretStoreError:
             log.warning("could not record that a WhatsApp authorisation must be renewed")
             return
+        try:
+            self.state.set_account_status(client_id, REAUTH_STATUS)
+        except Exception:  # noqa: BLE001 - the secret store holds the flag that counts
+            pass
         _tell(self.on_reauth, client_id)
 
     # ---- disconnection -----------------------------------------------------------------------------
@@ -642,6 +794,10 @@ class WhatsAppService:
             self.state.forget_client(client_id)
         except Exception:  # noqa: BLE001 - the secrets are what matters; stale rows are harmless
             log.warning("%s: could not clear the WhatsApp registers", client_id)
+        try:
+            self.state.drop_account(client_id)  # frees the Portfolio, the account and the number
+        except Exception:  # noqa: BLE001
+            log.error("%s: could not release the WhatsApp account row", client_id)
         self._changed(client_id)
 
     # ---- Meta's deauthorisation and data-deletion calls -------------------------------------------
@@ -668,22 +824,36 @@ class WhatsAppService:
             return None, False
         if not user:
             return None, True
-        for client_id in self._client_ids():
-            if self._client_value(client_id, WHATSAPP_FB_USER_ID) == user:
-                return client_id, True
-        return None, True
+        matches = [
+            client_id
+            for client_id in self._client_ids()
+            if self._client_value(client_id, WHATSAPP_FB_USER_ID) == user
+        ]
+        if len(matches) > 1:  # one Meta user connected several clients: acting would be a guess
+            log.warning("a Meta deauthorisation matches %d clients: nothing changed", len(matches))
+            return None, True
+        return (matches[0] if matches else None), True
 
     # ---- the client of a notification --------------------------------------------------------------
 
     def client_for_account(self, waba_id: str | None, phone_number_id: str | None) -> str | None:
-        for client_id in self._client_ids():
-            if (
-                phone_number_id
-                and self._client_value(client_id, WHATSAPP_PHONE_NUMBER_ID) == phone_number_id
-            ):
-                return client_id
-            if waba_id and self._client_value(client_id, WHATSAPP_WABA_ID) == waba_id:
-                return client_id
+        """The one client Meta's notification is about, from the account register (persisted, with
+        a unique number and a unique account): no secret is read. An event about a number follows
+        the number, and is refused if the account it names is not that client's; an event about an
+        account alone follows the account. Anything unknown or contradictory belongs to nobody."""
+        try:
+            if phone_number_id:
+                row = self.state.account_for_phone(phone_number_id)
+                if row is None:
+                    return None
+                if waba_id and row.waba_id and row.waba_id != waba_id:
+                    return None
+                return row.client_id
+            if waba_id:
+                row = self.state.account_for_waba(waba_id)
+                return row.client_id if row is not None else None
+        except Exception:  # noqa: BLE001 - a register that cannot answer proves nothing
+            log.warning("could not look up a WhatsApp account")
         return None
 
     # ---- what comes in -----------------------------------------------------------------------------
@@ -727,12 +897,34 @@ class WhatsAppService:
             error_title=data.get("error_title", ""),
         )
         self.state.record_delivery(record)
+        self._billing_signal(client_id, record)
         if record.status == FAILED:
             log.warning(
                 "%s: WhatsApp reported a message as failed (code %s)", client_id, record.error_code
             )
             if record.error_code in ("0", "190", "10", "3", "200"):
                 self.mark_reauth_required(client_id)
+
+    def _billing_signal(self, client_id: str, record: DeliveryRecord) -> None:
+        """What a delivery says about the payment method. A refusal for lack of one (131042) is the
+        only evidence Revansa gets: it shows `to_configure`. A message Meta delivers afterwards lifts
+        that mark back to `unverifiable`, never to `confirmed`: a delivery does not prove a payment
+        method (free conversations exist)."""
+        try:
+            account = self.state.account(client_id)
+            if account is None:
+                return
+            if record.status == FAILED and record.error_code == BILLING_FAILURE_CODE:
+                self.state.set_billing(client_id, BILLING_TO_CONFIGURE)
+            elif (
+                account.billing_state == BILLING_TO_CONFIGURE
+                and record.status in ("delivered", "read")
+                and account.updated_at is not None
+                and record.at > account.updated_at
+            ):
+                self.state.set_billing(client_id, BILLING_UNVERIFIABLE)
+        except Exception:  # noqa: BLE001 - statistics never break the webhook
+            log.warning("%s: could not record the billing signal", client_id)
 
     def _template_event(self, client_id: str, data: dict[str, str] | Any) -> None:
         name, language = data.get("name", ""), data.get("language", "")

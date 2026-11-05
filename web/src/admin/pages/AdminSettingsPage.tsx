@@ -99,6 +99,7 @@ const META_GLOBAL_FIELDS: FieldDef[] = [
   { key: "whatsapp.verify_token", label: "Verify Token", help: "Revansa-wide. The token you give Meta when registering the webhook." },
   { key: "whatsapp.api_version", label: "API Version", help: "Revansa-wide Graph API version.", placeholder: "v21.0" },
   { key: "whatsapp.app_id", label: "Meta App ID", help: "Revansa-wide. The id of the Meta app clients connect through (public).", placeholder: "123456789012345" },
+  { key: "whatsapp.platform_business_id", label: "Revansa Business Portfolio ID", help: "Revansa-wide. Revansa's own Meta Business Portfolio (public). An account it owns is never accepted as a client's.", placeholder: "123456789012345" },
   { key: "whatsapp.config_id", label: "Embedded Signup configuration ID", help: "Revansa-wide. The Login for Business configuration of the app (public).", placeholder: "123456789012345" },
 ];
 
@@ -362,7 +363,9 @@ function MetaSection({ canEdit }: { canEdit: boolean }) {
       </p>
       <p className="c-3 t-body-sm">
         A client&apos;s own Meta credentials are not entered here: the client connects its account with Meta&apos;s own
-        window once the four values above are stored (see the WhatsApp section of its page for the rest).
+        window once the values above are stored (see the WhatsApp section of its page for the rest). It can never be typed
+        here: each client owns its Business Portfolio, its WhatsApp Business account, its number and its Meta payment
+        method.
       </p>
     </Glass>
   );

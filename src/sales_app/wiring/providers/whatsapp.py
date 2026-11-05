@@ -18,6 +18,7 @@ from sales_app.config.secrets import (
     WHATSAPP_APP_SECRET,
     WHATSAPP_CONFIG_ID,
     WHATSAPP_PHONE_NUMBER_ID,
+    WHATSAPP_PLATFORM_BUSINESS_ID,
     WHATSAPP_VERIFY_TOKEN,
     WHATSAPP_WABA_ID,
 )
@@ -106,6 +107,14 @@ DESCRIPTOR = ProviderDescriptor(
             rule="must be the numeric id of the Login for Business configuration (digits only)",
         ),
         CredentialDeclaration(
+            key=WHATSAPP_PLATFORM_BUSINESS_ID,
+            label="Revansa's Meta Business Portfolio id",
+            scope=ScopeKind.GLOBAL,
+            sensitive=False,
+            pattern=re.compile(r"^\d{5,32}$"),
+            rule="must be the numeric id of Revansa's own Business Portfolio (digits only)",
+        ),
+        CredentialDeclaration(
             key=WHATSAPP_API_VERSION,
             label="WhatsApp API version",
             scope=ScopeKind.GLOBAL,
@@ -130,8 +139,8 @@ DESCRIPTOR = ProviderDescriptor(
             pattern=re.compile(r"^\d{5,32}$"),
             rule="must be the numeric id Meta gives the phone number (digits only)",
         ),
-        # The client's WhatsApp Business Account: written when the client connects, or by the Admin.
-        # Needed for the message templates and the webhook subscription.
+        # The client's WhatsApp Business Account: written when the client connects (Embedded Signup);
+        # the Admin API refuses to write it. Needed for the templates and the webhook subscription.
         CredentialDeclaration(
             key=WHATSAPP_WABA_ID,
             label="WhatsApp Business Account id",

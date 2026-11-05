@@ -30,6 +30,8 @@ APP_SECRET = "app-secret-marker"
 TOKEN = "EAAG-business-token-marker"
 WABA = "111111111111"
 PHONE = "555555555555"
+PLATFORM_BUSINESS = "700000000001"  # Revansa's own Business Portfolio
+OWNER = "800000000001"  # the client's Business Portfolio
 
 
 class FakeGraph:
@@ -38,6 +40,8 @@ class FakeGraph:
         self.display = display
         self.fail = {}
         self.templates = []
+        self.owner = {"id": OWNER, "name": "Alpha Holding"}
+        self.missing = []
 
     def _do(self, name, *args):
         self.calls.append((name, *args))
@@ -55,6 +59,14 @@ class FakeGraph:
     def granted_accounts(self, *, app_id, app_secret, token):
         self._do("granted")
         return [WABA]
+
+    def missing_scopes(self, *, app_id, app_secret, token):
+        self._do("missing_scopes")
+        return self.missing
+
+    def waba_owner(self, token, waba):
+        self._do("waba_owner", waba)
+        return self.owner
 
     def phone_numbers(self, token, waba):
         self._do("phone_numbers", waba)
@@ -125,6 +137,7 @@ def configure_platform(world):
     for key, value in (
         ("whatsapp.app_id", "999000111222"),
         ("whatsapp.config_id", "888000111222"),
+        ("whatsapp.platform_business_id", PLATFORM_BUSINESS),
         ("whatsapp.app_secret", APP_SECRET),
         ("whatsapp.verify_token", "verify-marker"),
     ):

@@ -125,6 +125,9 @@ export function AdminClientWhatsAppCard({ clientId, canEdit }: Props) {
       {row("admin.number", account.display_number)}
       {row("admin.verified", account.verified_name)}
       {row("admin.quality", account.quality)}
+      {row("admin.business", account.business_name ? `${account.business_name}${account.business_id ? ` (${account.business_id})` : ""}` : account.business_id)}
+      {row("admin.ownership", account.ownership ? w(`admin.ownership.${account.ownership}` as WhatsAppKey) : null)}
+      {row("admin.billing", connected ? w(`billing.${account.billing ?? "unverifiable"}` as WhatsAppKey) : null)}
       {row("admin.waba", account.waba_id)}
       {row("admin.phoneId", account.phone_number_id)}
       {row("admin.connectedAt", account.connected_at)}
