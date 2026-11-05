@@ -239,11 +239,19 @@ function Stage({ answer, primary, serverNow }: { answer: LiveAnswer; primary: Li
 function Window({ prospectId, name, working, auto, onAuto }: { prospectId: string; name: string | null; working: LiveStep | null; auto: boolean; onAuto: () => void }) {
   const { t, d } = useI18n();
   const { messages, ready, failed } = useFollowedConversation(prospectId);
-  const end = useRef<HTMLLIElement>(null);
+  const list = useRef<HTMLOListElement>(null);
+  const stuck = useRef(true);
   const last = messages[messages.length - 1]?.id;
+  // Follow new messages inside the thread only, and only while the reader is already at its bottom:
+  // the page itself is never scrolled, so what is being read at the top of the screen stays put.
   useEffect(() => {
-    end.current?.scrollIntoView?.({ block: "nearest" });
-  }, [last, working?.id]);
+    const el = list.current;
+    if (el && stuck.current) el.scrollTop = el.scrollHeight;
+  }, [last, working?.id, ready]);
+  const onScroll = () => {
+    const el = list.current;
+    if (el) stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
   const who = name ?? t("rv.live.someone");
   return (
     <div className="lv-window" data-testid="live-thread">
@@ -271,7 +279,7 @@ function Window({ prospectId, name, working, auto, onAuto }: { prospectId: strin
       ) : messages.length === 0 && !working ? (
         <p className="c-3">{t("rv.live.thread.empty")}</p>
       ) : (
-        <ol className="msgs lv-msgs" aria-label={t("convo.messagesLabel")} aria-live="polite">
+        <ol ref={list} onScroll={onScroll} className="msgs lv-msgs" aria-label={t("convo.messagesLabel")}>
           {messages.map((m) => {
             const mine = m.direction === "outbound";
             const author = m.author === "human" ? "human" : mine ? "agent" : "prospect";
@@ -304,7 +312,6 @@ function Window({ prospectId, name, working, auto, onAuto }: { prospectId: strin
               </div>
             </li>
           ) : null}
-          <li ref={end} aria-hidden />
         </ol>
       )}
     </div>
@@ -330,11 +337,6 @@ export function Screen({ answer, serverNow, primary, followed, name, auto, onAut
   return (
     <section className="lv-screen" aria-label={t("rv.live.screen")} data-on={working || undefined}>
       <header className="lv-bar">
-        <span className="lv-bar__dots" aria-hidden>
-          <i />
-          <i />
-          <i />
-        </span>
         <span className="lv-bar__title">{t("rv.live.screen")}</span>
         <span className="lv-onair" data-on={working || undefined}>
           <span className="lv-onair__dot" aria-hidden />
