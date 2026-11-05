@@ -9,9 +9,9 @@ import { LandingPage } from "./LandingPage";
 import { SignupPage } from "./SignupPage";
 
 const PLANS = [
-  { plan_id: "starter", name: "Starter", monthly_price: "49.00", currency: "USD", billing_period: "monthly", included_credits: 100000, daily_quota: 5000 },
-  { plan_id: "business", name: "Business", monthly_price: "129.00", currency: "USD", billing_period: "monthly", included_credits: 350000, daily_quota: 15000 },
-  { plan_id: "enterprise", name: "Enterprise", monthly_price: "299.00", currency: "USD", billing_period: "monthly", included_credits: 1000000, daily_quota: 40000 },
+  { plan_id: "starter", name: "Starter", monthly_price: "59.00", currency: "USD", billing_period: "monthly", included_credits: 25000, daily_credits: 800, daily_quota: 10 },
+  { plan_id: "business", name: "Business", monthly_price: "149.00", currency: "USD", billing_period: "monthly", included_credits: 75000, daily_credits: 2500, daily_quota: 30 },
+  { plan_id: "enterprise", name: "Enterprise", monthly_price: "399.00", currency: "USD", billing_period: "monthly", included_credits: 200000, daily_credits: 6600, daily_quota: 100 },
 ];
 const PROFILE = { name: "Acme", login: "o@acme.test", whatsapp_number: null, status: "active", must_change_password: false, whatsapp_reconnect_required: false };
 
@@ -51,9 +51,10 @@ describe("Landing page", () => {
     const business = await screen.findByTestId("landing-plan-business");
     expect(business.className).toContain("is-featured");
     expect(screen.getByTestId("landing-plan-starter").className).not.toContain("is-featured");
-    expect(business.textContent).toContain("$129");
-    expect(business.textContent).toContain("350,000 credits included");
-    expect(business.textContent).toContain("15,000 actions per day");
+    expect(business.textContent).toContain("$149");
+    expect(business.textContent).toContain("75,000 credits per month");
+    expect(business.textContent).toContain("2,500 credits per day");
+    expect(business.textContent).toContain("30 new prospect contacts per day");
     const link = business.querySelector("a")!;
     expect(link.getAttribute("href")).toBe("/signup?plan=business");
   });
@@ -68,11 +69,11 @@ describe("Landing page", () => {
   });
 
   it("changes a price when the plan changes: nothing is typed in the page", async () => {
-    serve({ "/public/plans": json({ plans: [{ ...PLANS[0]!, monthly_price: "59.00", included_credits: 123 }] }) });
+    serve({ "/public/plans": json({ plans: [{ ...PLANS[0]!, monthly_price: "69.00", included_credits: 123 }] }) });
     at("/", <LandingPage />);
     const starter = await screen.findByTestId("landing-plan-starter");
-    expect(starter.textContent).toContain("$59");
-    expect(starter.textContent).toContain("123 credits included");
+    expect(starter.textContent).toContain("$69");
+    expect(starter.textContent).toContain("123 credits per month");
     expect(starter.className).not.toContain("is-featured"); // one plan: none is singled out
   });
 
@@ -80,7 +81,7 @@ describe("Landing page", () => {
     serve({ "/public/plans": json({ detail: "plans are unavailable" }, 503) });
     at("/", <LandingPage />);
     expect(await screen.findByText(/Plans are not available right now/)).toBeInTheDocument();
-    expect(screen.queryByText(/\$49/)).toBeNull();
+    expect(screen.queryByText(/\$59/)).toBeNull();
   });
 
   it("states the hero, the Meta billing caveat and that the example is fictional", async () => {
@@ -178,12 +179,12 @@ describe("Upgrade prompt", () => {
       "/account/payment-requests": (init) =>
         init?.method === "POST"
           ? (requests.push(1), new Response(JSON.stringify({ request_id: 1, status: "pending" }), { status: 201 }))
-          : new Response(JSON.stringify({ requests: requests.length ? [{ request_id: 1, plan_id: "business", plan_name: "Business", amount: "129.00", currency: "USD", reference: "", status: "pending", created_at: "2026-10-30T10:00:00Z", decided_at: null, reason: null }] : [] })),
+          : new Response(JSON.stringify({ requests: requests.length ? [{ request_id: 1, plan_id: "business", plan_name: "Business", amount: "149.00", currency: "USD", reference: "", status: "pending", created_at: "2026-10-30T10:00:00Z", decided_at: null, reason: null }] : [] })),
     });
     at("/plans?plan=business", <PlansPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Pay for Business" }));
     expect(await screen.findByText("IBAN TN59 0000")).toBeInTheDocument();
-    expect(screen.getByText("Amount to transfer: $129")).toBeInTheDocument();
+    expect(screen.getByText("Amount to transfer: $149")).toBeInTheDocument();
 
     const file = new File(["%PDF-1.4"], "receipt.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText(/Receipt \(PDF/), { target: { files: [file] } });

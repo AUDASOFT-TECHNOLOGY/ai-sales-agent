@@ -11,6 +11,7 @@ export interface PublicPlan {
   currency: string;
   billing_period: string;
   included_credits: number;
+  daily_credits: number;
   daily_quota: number;
 }
 

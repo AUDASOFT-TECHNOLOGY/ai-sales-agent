@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from sales_app.llm_usage import LLMUsageRecord
 from sales_app.persistence.clients import ensure_client
+from sales_app.persistence.credit_rows import record_of
 from sales_app.persistence.tables import op_llm_usage as usage
 from sales_app.sourcing.errors import StoreUnavailableError
 
@@ -45,6 +46,10 @@ class SqlLLMUsageStore:
                         input_tokens=record.input_tokens,
                         output_tokens=record.output_tokens,
                         status=record.status,
+                        call_id=record.call_id,
+                        operation=record.operation,
+                        cost_pico_usd=record.cost_pico_usd,
+                        credits_nano=record.credits_nano,
                     )
                 )
         except SQLAlchemyError:
@@ -54,17 +59,6 @@ class SqlLLMUsageStore:
         query = select(usage).where(usage.c.client_id == self._client_id).order_by(usage.c.seq)
         try:
             with self._engine.connect() as connection:
-                return [
-                    LLMUsageRecord(
-                        client_id=r.client_id,
-                        occurred_at=r.occurred_at,
-                        provider=r.provider,
-                        model=r.model,
-                        status=r.status,
-                        input_tokens=r.input_tokens,
-                        output_tokens=r.output_tokens,
-                    )
-                    for r in connection.execute(query)
-                ]
+                return [record_of(r) for r in connection.execute(query)]
         except SQLAlchemyError:
             raise StoreUnavailableError(_UNAVAILABLE) from None

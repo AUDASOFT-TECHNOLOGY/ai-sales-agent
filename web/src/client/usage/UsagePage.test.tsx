@@ -20,6 +20,12 @@ const usage = {
   credits_today: 300,
   credits_remaining: 3000,
   credits_percent: 40,
+  daily_credits: 800,
+  daily_credits_remaining: 500,
+  daily_credits_percent: 38,
+  commercial_quota: 10,
+  commercial_done: 9,
+  commercial_remaining: 1,
   credits_basis: "measured",
   calls: 40,
   calls_without_figures: 2,
@@ -46,15 +52,20 @@ function show(body: unknown, status = 200) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("UsagePage", () => {
-  it("leads with the credits left, the pace of the month, then both quotas", async () => {
+  it("leads with the monthly credits left and the pace, then the daily credits and the daily commercial actions", async () => {
     show(usage);
     const credits = await screen.findByTestId("usage-credits");
     expect(within(credits).getByText("3,000")).toBeTruthy();
     expect(credits.textContent).toContain("2,000");
     expect(screen.getByTestId("usage-pace").getAttribute("data-run-out")).toBe("true"); // 200 a day, 31 days
-    expect(within(screen.getByTestId("usage-daily")).getByText("17")).toBeTruthy();
-    expect(screen.getByTestId("usage-daily").getAttribute("data-level")).toBe("warning");
-    expect(within(screen.getByTestId("usage-month")).getByText(/620/)).toBeTruthy();
+    const daily = screen.getByTestId("usage-daily-credits");
+    expect(within(daily).getByText("300")).toBeTruthy();
+    expect(daily.textContent).toContain("800");
+    expect(daily.getAttribute("data-level")).toBe("ok");
+    const commercial = screen.getByTestId("usage-commercial");
+    expect(within(commercial).getByText("9")).toBeTruthy(); // done
+    expect(commercial.textContent).toContain("10"); // the plan's quota
+    expect(commercial.getAttribute("data-level")).toBe("warning"); // 90%
   });
 
   it("offers a way out of an alert", async () => {

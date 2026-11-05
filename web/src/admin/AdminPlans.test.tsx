@@ -21,6 +21,7 @@ function plan(over: Record<string, unknown> = {}) {
     monthly_price: "49.90",
     currency: "USD",
     included_credits: 1000,
+    daily_credits: 40,
     daily_quota: 200,
     active: true,
     created_at: "2026-01-05T09:00:00Z",
@@ -38,6 +39,7 @@ function assignment(over: Record<string, unknown> = {}) {
     monthly_price: "49.90",
     currency: "USD",
     included_credits: 1000,
+    daily_credits: 40,
     daily_quota: 200,
     started_at: "2026-01-05T09:00:00Z",
     ended_at: null,
@@ -172,19 +174,22 @@ describe("Billing: plans", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("button", { name: "Create plan" })).toBeDisabled();
     await user.type(within(dialog).getByLabelText("Plan name"), "Starter");
-    await user.type(within(dialog).getByLabelText("Monthly price"), "19.5");
-    await user.clear(within(dialog).getByLabelText("Currency"));
-    await user.type(within(dialog).getByLabelText("Currency"), "eur");
-    await user.type(within(dialog).getByLabelText("Included credits"), "500");
-    await user.type(within(dialog).getByLabelText("Maximum daily quota"), "50");
+    await user.type(within(dialog).getByLabelText("Monthly price (USD)"), "19.5");
+    await user.type(within(dialog).getByLabelText("Monthly credits"), "500");
+    await user.type(within(dialog).getByLabelText("Daily credits"), "600");
+    expect(within(dialog).getByRole("button", { name: "Create plan" })).toBeDisabled(); // above the monthly credits
+    await user.clear(within(dialog).getByLabelText("Daily credits"));
+    await user.type(within(dialog).getByLabelText("Daily credits"), "20");
+    await user.type(within(dialog).getByLabelText("Daily commercial action quota"), "50");
     await user.click(within(dialog).getByRole("button", { name: "Create plan" }));
     expect(await screen.findByRole("rowheader", { name: "Starter" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(sentBody(fetchMock, "POST", "/plans")).toEqual({
       name: "Starter",
       monthly_price: "19.5",
-      currency: "EUR",
+      currency: "USD",
       included_credits: 500,
+      daily_credits: 20,
       daily_quota: 50,
       active: true,
     });
@@ -196,9 +201,9 @@ describe("Billing: plans", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Edit Pro" }));
     const dialog = await screen.findByRole("dialog");
-    await user.clear(within(dialog).getByLabelText("Monthly price"));
-    await user.type(within(dialog).getByLabelText("Monthly price"), "59");
-    await user.click(within(dialog).getByRole("switch", { name: "Active" }));
+    await user.clear(within(dialog).getByLabelText("Monthly price (USD)"));
+    await user.type(within(dialog).getByLabelText("Monthly price (USD)"), "59");
+    await user.click(within(dialog).getByRole("switch", { name: "Plan status" }));
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(sentBody(fetchMock, "PUT", "/plans/pro")).toMatchObject({ monthly_price: "59", active: false });
@@ -213,9 +218,10 @@ describe("Billing: plans", () => {
     await user.click(await screen.findByRole("button", { name: "+ New plan" }));
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("Plan name"), "Pro");
-    await user.type(within(dialog).getByLabelText("Monthly price"), "1");
-    await user.type(within(dialog).getByLabelText("Included credits"), "1");
-    await user.type(within(dialog).getByLabelText("Maximum daily quota"), "1");
+    await user.type(within(dialog).getByLabelText("Monthly price (USD)"), "1");
+    await user.type(within(dialog).getByLabelText("Monthly credits"), "1");
+    await user.type(within(dialog).getByLabelText("Daily credits"), "1");
+    await user.type(within(dialog).getByLabelText("Daily commercial action quota"), "1");
     await user.click(within(dialog).getByRole("button", { name: "Create plan" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("a plan with this name already exists");
   });

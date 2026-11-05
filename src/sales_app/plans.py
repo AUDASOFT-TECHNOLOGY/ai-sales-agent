@@ -1,13 +1,16 @@
 """Commercial plans and which plan each client is on.
 
-A plan has a name, a monthly price in one currency, the credits it includes and a maximum number of
-actions per day. Plans are Revansa's own (global); a client is on at most one plan at a time.
+A plan has a name, a monthly price in one currency, the AI credits it grants per month and per day
+(`included_credits`, `daily_credits`: see `sales_app.credits`) and a daily quota of new commercial
+contacts (`daily_quota`, independent of the credits). Plans are Revansa's own (global); a client is on
+at most one plan at a time.
 
 **Prepared for billing, not billing.** Every assignment is a row that is never rewritten: it keeps a
 snapshot of the plan's terms as they were when the client was put on it (price, currency, credits,
 quota) and the instant it started and ended. Editing a plan afterwards does not change what an
 earlier assignment recorded, so a future invoice can say which terms applied, and when. The client's
-*current* assignment is the one with no end. Nothing here charges, invoices or enforces a quota.
+*current* assignment is the one with no end. Nothing here charges or invoices; the credits and the
+quota are enforced elsewhere, from the plan's present terms (`current_daily_quota`, `current_credits`).
 
 A plan is deactivated, never deleted: clients and past assignments refer to it. An inactive plan
 cannot be given to a client, and clients already on it stay on it until the Admin moves them.
@@ -25,6 +28,7 @@ BILLING_PERIODS = ("monthly", "annual")
 MAX_PRICE = Decimal(1_000_000)
 MAX_CREDITS = 1_000_000_000
 MAX_DAILY_QUOTA = 100_000
+DEFAULT_CURRENCY = "USD"
 _PLACES = Decimal("0.01")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
 _SLUG = re.compile(r"[^a-z0-9]+")
@@ -48,8 +52,9 @@ class Plan:
     name: str
     monthly_price: Decimal
     currency: str
-    included_credits: int
-    daily_quota: int
+    included_credits: int  # monthly AI credits
+    daily_credits: int  # AI credits per day, never above the monthly ones
+    daily_quota: int  # new commercial contacts per day (follow-ups, reminders, replies excluded)
     active: bool
     created_at: datetime
     updated_at: datetime
@@ -70,6 +75,7 @@ class PlanAssignment:
     monthly_price: Decimal
     currency: str
     included_credits: int
+    daily_credits: int
     daily_quota: int
     started_at: datetime
     assigned_by: str
@@ -81,8 +87,13 @@ def slugify(name: str) -> str:
 
 
 def clean_terms(
-    name: str, monthly_price: object, currency: str, included_credits: int, daily_quota: int
-) -> tuple[str, Decimal, str, int, int]:
+    name: str,
+    monthly_price: object,
+    currency: str,
+    included_credits: int,
+    daily_credits: int,
+    daily_quota: int,
+) -> tuple[str, Decimal, str, int, int, int]:
     """The terms of a plan, checked and normalised, or `InvalidPlanError`."""
     cleaned = " ".join(name.split())
     if not cleaned or len(cleaned) > NAME_MAX:
@@ -102,9 +113,13 @@ def clean_terms(
         raise InvalidPlanError(f"the monthly price must be between 0 and {MAX_PRICE}")
     if not 0 <= included_credits <= MAX_CREDITS:
         raise InvalidPlanError(f"the included credits must be between 0 and {MAX_CREDITS}")
+    if not 0 <= daily_credits <= included_credits:
+        raise InvalidPlanError("the daily credits must be between 0 and the monthly credits")
     if not 1 <= daily_quota <= MAX_DAILY_QUOTA:
-        raise InvalidPlanError(f"the daily quota must be between 1 and {MAX_DAILY_QUOTA}")
-    return cleaned, price.quantize(_PLACES), code, included_credits, daily_quota
+        raise InvalidPlanError(
+            f"the daily commercial action quota must be between 1 and {MAX_DAILY_QUOTA}"
+        )
+    return cleaned, price.quantize(_PLACES), code, included_credits, daily_credits, daily_quota
 
 
 def snapshot(plan: Plan, client_id: str, *, at: datetime, by: str) -> PlanAssignment:
@@ -115,6 +130,7 @@ def snapshot(plan: Plan, client_id: str, *, at: datetime, by: str) -> PlanAssign
         monthly_price=plan.monthly_price,
         currency=plan.currency,
         included_credits=plan.included_credits,
+        daily_credits=plan.daily_credits,
         daily_quota=plan.daily_quota,
         started_at=at,
         assigned_by=by,
@@ -256,16 +272,21 @@ class InMemoryPlanStore:
         return sorted(found, key=lambda a: (a.client_id, a.started_at))
 
 
-def current_daily_quota(store: PlanStore, client_id: str) -> int | None:
-    """The daily quota the client's current plan allows today (the plan's present terms, not the
-    snapshot taken when the client was put on it), or None when the client is on no plan.
-
-    This is what bounds the client's e-mails (`sales_app.send_cap.SendLimits`). A plan that cannot
-    be found raises `PlanNotFoundError`: the caller refuses rather than guesses."""
+def current_plan(store: PlanStore, client_id: str) -> Plan | None:
+    """The plan the client is on now, with its present terms (not the snapshot taken when the client
+    was put on it), or None when the client is on no plan. A plan that cannot be found raises
+    `PlanNotFoundError`: the caller refuses rather than guesses."""
     assignment = store.current_assignment(client_id)
     if assignment is None:
         return None
     plan = store.get_plan(assignment.plan_id)
     if plan is None:
         raise PlanNotFoundError(assignment.plan_id)
-    return plan.daily_quota
+    return plan
+
+
+def current_daily_quota(store: PlanStore, client_id: str) -> int | None:
+    """The daily quota of new commercial contacts the client's current plan allows today, or None
+    when the client is on no plan (`sales_app.send_cap.SendLimits.commercial_quota`)."""
+    plan = current_plan(store, client_id)
+    return None if plan is None else plan.daily_quota

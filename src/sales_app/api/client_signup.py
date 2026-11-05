@@ -46,6 +46,7 @@ class PublicPlan(BaseModel):
     currency: str
     billing_period: str
     included_credits: int
+    daily_credits: int
     daily_quota: int
 
 
@@ -66,7 +67,7 @@ class SignupRequest(BaseModel):
 class AccessResponse(BaseModel):
     tier: Literal["free", "paid"]
     free_credits: int | None = None
-    credits_remaining: int | None = None
+    credits_remaining: float | None = None
 
 
 class PublicPage(BaseModel):
@@ -115,6 +116,7 @@ def create_client_signup_router(application: Application) -> APIRouter:
                     currency=p.currency,
                     billing_period=p.billing_period,
                     included_credits=p.included_credits,
+                    daily_credits=p.daily_credits,
                     daily_quota=p.daily_quota,
                 )
                 for p in sorted(found, key=lambda p: p.monthly_price)

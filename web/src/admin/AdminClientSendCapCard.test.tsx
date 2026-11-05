@@ -63,15 +63,15 @@ describe("AdminClientSendCapCard", () => {
     expect(screen.queryByRole("button", { name: "Remove limit" })).not.toBeInTheDocument();
   });
 
-  it("shows the limit, the plan quota that holds it, and today's use", async () => {
+  it("shows the limit, the plan's quota of new contacts apart from it, and today's use", async () => {
     stub({
-      current: cap({ daily_cap: 50, plan_daily_quota: 3, effective_cap: 3, used_today: 3, remaining_today: 0, status: "limit_reached" }),
+      current: cap({ daily_cap: 50, plan_daily_quota: 3, effective_cap: 50, used_today: 50, remaining_today: 0, status: "limit_reached" }),
     });
     renderCard();
     expect(await screen.findByTestId("send-cap-status")).toHaveTextContent("limit is reached");
-    expect(screen.getByText("Effective limit").nextSibling).toHaveTextContent("3");
+    expect(screen.getByText("Effective limit").nextSibling).toHaveTextContent("50");
     expect(screen.getByText("Limit set by the admin").nextSibling).toHaveTextContent("50");
-    expect(screen.getByText(/the quota applies/)).toBeInTheDocument();
+    expect(screen.getByText(/Daily commercial action quota of the plan/).nextSibling).toHaveTextContent("3");
     expect(screen.getByLabelText("Daily limit (emails per day)")).toHaveValue("50");
   });
 

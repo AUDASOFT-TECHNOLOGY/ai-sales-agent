@@ -349,7 +349,12 @@ def _record_usage(
         log.warning("%s: LLM usage not recorded: %s", client_id, error.__class__.__name__)
         return llm
     return RecordingLLMProvider(
-        llm, store, client_id=client_id, provider=section.provider, model=section.model
+        llm,
+        store,
+        client_id=client_id,
+        provider=section.provider,
+        model=section.model,
+        credits=builders.credits,
     )
 
 
@@ -478,6 +483,8 @@ def _metered(
             channel = SendCapChannel(
                 channel, builders.send_guards(config.client_id, provider.kind.value)
             )
+    if builders.quota_channel is not None:  # new contacts count against the plan's daily quota
+        channel = builders.quota_channel(channel, config.client_id)
     if builders.send_allowed is not None:  # a Free account sends nothing, on any channel
         channel = CommercialGateChannel(channel, config.client_id, builders.send_allowed)
     if getattr(builders, "signals", None) is not None:  # failed sends open a notification, a good one closes it

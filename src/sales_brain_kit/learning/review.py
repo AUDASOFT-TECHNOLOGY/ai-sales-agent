@@ -153,6 +153,7 @@ def review_case(llm: LLMProvider, case: LearningCase, *, now: datetime) -> CaseR
             temperature=0.0,
             max_output_tokens=400,
             response_schema=_schema(),
+            purpose="learning_review",
         )
         data = _load(llm.complete(request))  # a provider error propagates: the case is retried
         said_unknown = bool(data.get("unknown"))

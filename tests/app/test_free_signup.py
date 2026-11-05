@@ -69,7 +69,7 @@ def world(tmp_path):
         ("retired", "Retired", 9, 10, 1, False),
     ):
         application.plans.create_plan(
-            Plan(plan_id, name, Decimal(price), "USD", credits, quota, active, NOW, NOW, "test")
+            Plan(plan_id, name, Decimal(price), "USD", credits, credits // 30, quota, active, NOW, NOW, "test")
         )
     yield application
     application.close()

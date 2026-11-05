@@ -15,12 +15,17 @@ placed around the channel so a mode cannot forget it. Rules, all fail-closed:
 
 This module knows no database: it holds the ports, the guard, the channel wrapper and in-memory
 doubles that are for tests only (a restart forgets them). The Admin may set a cap above the plan's
-quota; it is the effective cap (below) that is applied, never the cap alone.
+quota.
 
-**The effective cap** (`SendLimits`) is `min(the Admin's cap, the daily quota of the client's current
-plan)`. A plan is not required to send: a client with no plan is held by the Admin's cap alone; a
-client with a plan can never send more than its quota, whatever the cap says. The Admin's cap itself
-is always required. If the plan cannot be read (store down, plan gone) the send is refused.
+**The effective cap** (`SendLimits`) is the Admin's cap, always required: it bounds every e-mail a
+client sends (replies and follow-ups included).
+
+**The commercial quota** is a different limit, the plan's daily quota of *new commercial contacts*:
+the first message of a first-contact action (`OutboundMessage.new_contact`). Follow-ups, reminders,
+callbacks and replies are never counted against it, and it does not touch the credits. It is counted
+(`NewContactQuotaChannel`) on any channel, in the same shared counter under `COMMERCIAL_CHANNEL`,
+only when the message is really accepted; a client on no plan has no such quota. If the plan cannot
+be read (store down, plan gone) a new contact is refused.
 
 A refusal is reported as a transient failure marked "deferred" (`DEFERRED_KEY`): the Engine keeps the
 action approved with the reason visible and does not count the try, so a day's worth of refusals
@@ -44,12 +49,15 @@ CAP_NOT_CONFIGURED = "send_cap_not_configured"
 CAP_REACHED = "send_cap_reached"
 CAP_UNAVAILABLE = "send_cap_unavailable"
 UPGRADE_REQUIRED = "upgrade_required"
+COMMERCIAL_QUOTA_REACHED = "commercial_quota_reached"
+COMMERCIAL_CHANNEL = "commercial_new"  # the counter's channel name: not a channel, a count of contacts
 
 _REFUSAL_TEXTS = {
     CAP_NOT_CONFIGURED: "the daily send cap is not configured",
     CAP_REACHED: "the daily send cap is reached",
     CAP_UNAVAILABLE: "the daily send cap cannot be checked",
     UPGRADE_REQUIRED: "a free account cannot send: upgrade your plan to activate your agent",
+    COMMERCIAL_QUOTA_REACHED: "the daily quota of new commercial contacts is reached",
 }
 
 
@@ -283,9 +291,59 @@ class FirstContactCapChannel:
         return result
 
 
+class NewContactQuotaChannel:
+    """Any `MessagingChannel`, behind the plan's daily quota of new commercial contacts. Only a
+    message marked `new_contact` takes a place; everything else passes untouched. No quota (the
+    client is on no plan): nothing is counted. A place is given back when the send certainly failed
+    (including a refusal by the channel's own cap), kept when the channel raised."""
+
+    def __init__(self, inner, guard: DailySendGuard, quota: Callable[[], int | None]) -> None:
+        self._inner = inner
+        self._guard = guard
+        self._quota = quota
+
+    def __repr__(self) -> str:
+        return "NewContactQuotaChannel()"
+
+    @property
+    def channel(self) -> Channel:
+        return self._inner.channel
+
+    def send(self, message: OutboundMessage) -> SendResult:
+        if not message.new_contact:
+            return self._inner.send(message)
+        try:
+            if self._quota() is None:
+                return self._inner.send(message)
+        except Exception as error:  # noqa: BLE001 - a plan that cannot be read: no new contact
+            log.warning("commercial quota check failed: %s", type(error).__name__)
+            return _deferred(CAP_UNAVAILABLE)
+        reserved = self._guard.reserve()
+        if isinstance(reserved, Refusal):
+            return _deferred(
+                COMMERCIAL_QUOTA_REACHED if reserved.code == CAP_REACHED else reserved.code
+            )
+        result = self._inner.send(message)  # if it raises, the message may have left: place kept
+        if not result.ok:
+            self._guard.release(reserved)
+        return result
+
+
+def _deferred(code: str) -> SendResult:
+    return SendResult(
+        status=SendStatus.FAILED_TRANSIENT,
+        timestamp=datetime.now(UTC),
+        error_code=code,
+        error_message=_REFUSAL_TEXTS[code],
+        metadata={DEFERRED_KEY: DEFERRED_VALUE},
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class EffectiveCap:
-    """What limits a client's e-mails today. `effective` is None when no valid Admin cap exists."""
+    """What limits a client's e-mails today. `effective` is None when no valid Admin cap exists.
+    `plan_quota` is the plan's quota of new commercial contacts, shown next to the cap: it is a
+    separate limit (`NewContactQuotaChannel`) and does not lower the cap."""
 
     admin_cap: int | None
     plan_quota: int | None
@@ -293,15 +351,9 @@ class EffectiveCap:
 
 
 def combine_caps(admin_cap: object, plan_quota: object) -> EffectiveCap:
-    """`min(Admin cap, plan quota)`. No valid Admin cap: no effective cap. A plan quota that is not a
-    whole number of at least 1 is a plan we cannot trust: no effective cap either (fail closed)."""
+    """The Admin's cap is the effective one; none valid: no effective cap."""
     cap = valid_cap(admin_cap)
-    if plan_quota is None:
-        return EffectiveCap(cap, None, cap)
-    quota = valid_cap(plan_quota)
-    if cap is None or quota is None:
-        return EffectiveCap(cap, quota, None)
-    return EffectiveCap(cap, quota, min(cap, quota))
+    return EffectiveCap(cap, valid_cap(plan_quota), cap)
 
 
 class SendLimits:
@@ -313,14 +365,14 @@ class SendLimits:
         caps: SendCapStore,
         counter: SendCounter,
         clock: Clock,
-        plan_quota: Callable[[str], int | None] | None = None,
+        commercial_quota: Callable[[str], int | None] | None = None,
         observer: QuotaObserver | None = None,
     ) -> None:
         self._observer = observer
         self._caps = caps
         self._counter = counter
         self._clock = clock
-        self._plan_quota = plan_quota  # None: this deployment has no plans
+        self._commercial_quota = commercial_quota  # None: this deployment has no plans
 
     def __repr__(self) -> str:
         return "SendLimits()"
@@ -331,11 +383,29 @@ class SendLimits:
 
     def cap_of(self, client_id: str) -> EffectiveCap:
         """Raises whatever the stores raise: the callers turn it into a refusal / "unavailable"."""
-        quota = self._plan_quota(client_id) if self._plan_quota is not None else None
-        return combine_caps(self._caps.get(client_id), quota)
+        return combine_caps(self._caps.get(client_id), self.commercial_quota(client_id))
+
+    def commercial_quota(self, client_id: str) -> int | None:
+        """The plan's daily quota of new commercial contacts now; None: no plan, no such quota."""
+        return self._commercial_quota(client_id) if self._commercial_quota is not None else None
+
+    def commercial_guard(self, client_id: str) -> DailySendGuard:
+        """Takes a place of the day's quota of new contacts (limit: the plan's, read at each use)."""
+        return DailySendGuard(
+            client_id,
+            COMMERCIAL_CHANNEL,
+            lambda: self.commercial_quota(client_id),
+            self._clock,
+            self._counter,
+        )
+
+    def commercial_channel(self, inner, client_id: str) -> "NewContactQuotaChannel":
+        return NewContactQuotaChannel(
+            inner, self.commercial_guard(client_id), lambda: self.commercial_quota(client_id)
+        )
 
     def effective(self, client_id: str) -> int | None:
-        return self.cap_of(client_id).effective
+        return valid_cap(self._caps.get(client_id))  # the plan is not read: it does not lower it
 
     def guard(self, client_id: str, channel: str) -> DailySendGuard:
         return DailySendGuard(

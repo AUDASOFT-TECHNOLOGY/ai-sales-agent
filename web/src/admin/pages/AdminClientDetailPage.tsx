@@ -552,8 +552,9 @@ function ClientPlanCard({ clientId }: { clientId: string }) {
       {current ? (
         <dl>
           <Field label="Monthly price" value={`${current.monthly_price} ${current.currency}`} />
-          <Field label="Included credits" value={String(current.included_credits)} />
-          <Field label="Daily quota" value={String(current.daily_quota)} />
+          <Field label="Monthly credits" value={String(current.included_credits)} />
+          <Field label="Daily credits" value={String(current.daily_credits)} />
+          <Field label="Daily commercial action quota" value={String(current.daily_quota)} />
           <Field label="Since" value={new Date(current.started_at).toLocaleDateString()} />
         </dl>
       ) : (

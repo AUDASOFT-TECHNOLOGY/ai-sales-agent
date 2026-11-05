@@ -22,6 +22,7 @@ export function PlanFacts({ plan }: { plan: PublicPlan }) {
   return (
     <ul className="plan-facts">
       <li>{t("lp.pricing.credits", { n: n(plan.included_credits) })}</li>
+      <li>{t("lp.pricing.dailyCredits", { n: n(plan.daily_credits) })}</li>
       <li>{t("lp.pricing.quota", { n: n(plan.daily_quota) })}</li>
     </ul>
   );

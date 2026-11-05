@@ -138,6 +138,7 @@ def test_the_commercial_journey_of_two_clients(world):
             "monthly_price": "31.00",
             "currency": "usd",
             "included_credits": 1000,
+            "daily_credits": 100,
             "daily_quota": 200,
             "active": True,
         },
@@ -149,8 +150,8 @@ def test_the_commercial_journey_of_two_clients(world):
         assert given["current"]["started_at"] == "2026-01-15T09:00:00Z"
 
     # The daily e-mail cap is the Admin's, per client, set through the Admin API. Every e-mail of
-    # the client counts against it (prospecting, answers, follow-ups, the report), and it is held
-    # to the plan's daily quota (200 here): the effective cap is the smaller of the two.
+    # the client counts against it (prospecting, answers, follow-ups, the report). The plan's
+    # daily quota (200 here) is another limit: it counts new commercial contacts only.
     cap_url = "/admin/v1/clients/{}/send-cap"
     done = root.put(cap_url.format("alpha"), json={"daily_cap": 4}).json()
     assert (done["daily_cap"], done["plan_daily_quota"], done["effective_cap"]) == (4, 200, 4)
@@ -725,7 +726,7 @@ def test_the_admin_sets_reads_and_removes_the_send_cap_over_http(world):
     assert root.put(CAP_URL.format("alpha"), json={}).status_code == 422
     assert SqlSendCapStore(j.engine).get("alpha") is None
 
-    # the plan holds the cap: effective = min(cap, plan quota)
+    # the plan's quota is for new contacts: it does not lower the e-mail cap
     root.post(
         "/admin/v1/plans",
         json={
@@ -733,13 +734,14 @@ def test_the_admin_sets_reads_and_removes_the_send_cap_over_http(world):
             "monthly_price": "10",
             "currency": "usd",
             "included_credits": 10,
+            "daily_credits": 5,
             "daily_quota": 3,
             "active": True,
         },
     )
     assert root.put("/admin/v1/clients/alpha/plan", json={"plan_id": "small"}).status_code == 200
     done = root.put(CAP_URL.format("alpha"), json={"daily_cap": 50}).json()
-    assert (done["daily_cap"], done["plan_daily_quota"], done["effective_cap"]) == (50, 3, 3)
+    assert (done["daily_cap"], done["plan_daily_quota"], done["effective_cap"]) == (50, 3, 50)
     done = root.put(CAP_URL.format("alpha"), json={"daily_cap": 2}).json()
     assert (done["daily_cap"], done["effective_cap"], done["remaining_today"]) == (2, 2, 2)
 

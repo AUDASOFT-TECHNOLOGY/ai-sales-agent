@@ -316,31 +316,29 @@ class TestQuotas:
         assert len(rig.notes_of(CLIENT)) == 4
 
     def test_status_reports_day_and_month_from_the_real_counters(self):
-        rig = Rig(cap=10, plan_quota=4)  # the plan quota is lower: it wins
+        rig = Rig(cap=10, plan_quota=4)  # the plan's quota is for new contacts: the cap stays 10
         for _ in range(3):
             rig.send()
         rig.counter.try_increment("alpha", "email", date(2026, 5, 1), 99)  # same day, still counted
         status = rig.quotas.status("alpha")
-        assert (status.daily_limit, status.plan_daily_quota, status.admin_cap) == (4, 4, 10)
-        assert status.daily_used == 4 and status.state == "reached" and status.daily_percent == 100
+        assert (status.daily_limit, status.plan_daily_quota, status.admin_cap) == (10, 4, 10)
+        assert status.daily_used == 4 and status.state == "ok" and status.daily_percent == 40
         assert status.month_used == 4 and status.usage_basis == MEASURED
         assert status.credits_used is None and status.credits_basis == UNAVAILABLE
-        assert "reached" in status.message and status.action
+        assert (status.commercial_quota, status.commercial_done) == (4, 0)
 
-    def test_credits_come_from_the_model_register_a_credit_being_a_thousand_tokens(self):
-        from sales_app.llm_usage import InMemoryLLMUsageStore, LLMUsageRecord
-
-        rig = Rig(cap=10)
-        store = InMemoryLLMUsageStore("alpha")
-        for at, tin, tout in ((NOW, 1200, 300), (NOW, None, None), (datetime(2026, 4, 30, tzinfo=UTC), 9000, 0)):
-            store.record(LLMUsageRecord("alpha", at, "openai", "m", "ok", tin, tout))
-        quotas = QuotaService(rig.limits, rig.notes, rig.clock, rig.plans, lambda _c: store)
+    def test_the_commercial_actions_count_apart_from_the_messages(self):
+        rig = Rig(cap=10, plan_quota=4)
+        rig.limits.commercial_guard("alpha").reserve()
+        rig.limits.commercial_guard("alpha").reserve()
         rig.send()
-        status = quotas.status("alpha")
-        assert (status.included_credits, status.credits_used, status.credits_today) == (5000, 2, 2)
-        assert (status.credits_remaining, status.calls, status.calls_without_figures) == (4998, 2, 1)
-        assert status.credits_basis == MEASURED and status.month_limit == 310
-        assert status.month_actions_used == 1 and status.days[0]["actions"] == 1
+        status = rig.quotas.status("alpha")
+        assert (status.commercial_quota, status.commercial_done, status.commercial_remaining) == (
+            4,
+            2,
+            2,
+        )
+        assert status.daily_used == 1 and status.month_used == 1  # not mixed with the messages
 
     def test_the_effective_cap_refuses_without_burning_attempts(self):
         rig = Rig(cap=2)
@@ -526,6 +524,69 @@ class TestApi:
         assert fx.client.get("/client/v1/usage").status_code == 401
         beta = session(fx, "beta", "client").get("/client/v1/usage").json()
         assert beta["client_id"] == "beta" and beta["daily_used"] == 2
+
+    def test_credits_and_commercial_actions_reach_the_client_and_the_admin(self, fx):
+        from sales_app.credits import CreditService
+        from sales_app.free_accounts import InMemoryFreeAccountStore
+        from sales_app.llm_usage import RecordingLLMProvider
+        from sales_app.persistence.credit_rows import SqlCreditStore
+        from sales_app.persistence.llm_pricing_rows import SqlLLMPricingStore
+        from sales_app.persistence.plan_rows import SqlPlanStore
+        from sales_app.plans import Plan
+        from sales_core.contracts import LLMMessage, LLMRequest, LLMResponse, LLMRole
+
+        engine, application = fx.engine, fx.application
+        plans = SqlPlanStore(engine)
+        plans.create_plan(
+            Plan("starter", "Starter", Decimal(59), "USD", 25_000, 800, 10, True, NOW, NOW, "t")
+        )
+        plans.assign("alpha", "starter", at=NOW, by="root")
+        prices = SqlLLMPricingStore(engine)
+        prices.set_price(validate_price("openai", "m", "0.20", "1.20", "USD", updated_at=NOW, updated_by="t"))
+        credits = CreditService(SqlCreditStore(engine), plans, prices, InMemoryFreeAccountStore(), fx.clock)
+        application.credits = credits
+        rig = fx.rig
+        rig.limits._commercial_quota = lambda _client: 10
+        application.quotas = QuotaService(
+            rig.limits, application.notifications, fx.clock, plans, credits=credits
+        )
+
+        class Model:
+            def complete(self, _request):
+                return LLMResponse(text="ok", model="m", input_tokens=5000, output_tokens=1000)
+
+        RecordingLLMProvider(
+            Model(), SqlLLMUsageStore(engine, "alpha"), client_id="alpha", provider="openai",
+            model="m", now=fx.clock.now, credits=credits,
+        ).complete(
+            LLMRequest(
+                messages=(LLMMessage(role=LLMRole.USER, content="Hi"),),
+                max_output_tokens=50,
+                purpose="commercial_message",
+            )
+        )
+        for _ in range(3):  # three new contacts made today; replies would not be counted
+            rig.limits.commercial_guard("alpha").reserve()
+        body = session(fx, "alpha", "client").get("/client/v1/usage").json()
+        # 5 000 input tokens = 5 credits, 1 000 output tokens = 6 credits
+        assert (body["included_credits"], body["credits_used"], body["credits_remaining"]) == (
+            25_000, 11, 24_989,
+        )
+        assert (body["daily_credits"], body["credits_today"], body["daily_credits_remaining"]) == (
+            800, 11, 789,
+        )
+        assert (body["commercial_quota"], body["commercial_done"], body["commercial_remaining"]) == (
+            10, 3, 7,
+        )
+        assert body["credits_basis"] == "measured"
+        root = session(fx, "root")
+        assert root.get("/admin/v1/clients/alpha/quota").json()["credits_used"] == 11
+        [line] = root.get("/admin/v1/clients/alpha/credits/history").json()["entries"]
+        assert (line["input_tokens"], line["output_tokens"], line["credits"]) == (5000, 1000, "11")
+        assert line["cost_usd"] == "0.0022" and line["operation"] == "commercial_message"
+        assert line["model"] == "m" and line["call_id"] and line["occurred_at"]
+        assert session(fx, "alice").get("/admin/v1/clients/beta/credits/history").status_code == 404
+        assert fx.client.get("/admin/v1/clients/alpha/credits/history").status_code == 401
 
     def test_the_admin_reads_a_clients_quota_within_its_scope(self, fx):
         fx.rig.send("alpha")

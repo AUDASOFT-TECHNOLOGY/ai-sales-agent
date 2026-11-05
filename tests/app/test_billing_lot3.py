@@ -50,6 +50,7 @@ def make_plan(plan_id="pro", price="30.00", currency="USD", period="monthly", qu
         Decimal(price),
         currency,
         1000,
+        1000,
         quota,
         True,
         at(1, 1),

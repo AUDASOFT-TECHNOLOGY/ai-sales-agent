@@ -33,6 +33,7 @@ from sales_app.conversation_control import (
     ConversationControlHub,
     InMemoryControlRows,
 )
+from sales_app.credits import CreditService
 from sales_app.daily_report import DailyReportService
 from sales_app.email_activation import EmailActivationService
 from sales_app.email_platform import AuthLedger
@@ -56,6 +57,7 @@ from sales_app.payment_confirmation import PAYMENT_WEBHOOK_SECRET
 from sales_app.payment_provider import PaymentProvider, SignedWebhookProvider
 from sales_app.persistence import AccountStores, build_account_stores
 from sales_app.persistence.agent_activity_rows import SqlActivityStore
+from sales_app.persistence.credit_rows import SqlCreditStore
 from sales_app.persistence.free_account_rows import SqlFreeAccountStore
 from sales_app.persistence.invoice_rows import SqlInvoiceStore
 from sales_app.persistence.learning_rows import SqlLearningStore
@@ -223,6 +225,8 @@ class Application:
     # provider; None without a database. See `sales_app.quotas` and `sales_app.provider_costs`.
     quotas: QuotaService | None = None
     costs: CostService | None = None
+    # The AI credits of every client (balance, ledger); None without a database. `sales_app.credits`.
+    credits: CreditService | None = None
     # Automatic monthly invoicing, run periodically under a database lease (see
     # `sales_app.billing_service`), and the financial aggregations read by the Admin dashboards (see
     # `sales_app.finance`). None without a database.
@@ -436,6 +440,7 @@ def _assemble(
         _control_rows(account_stores), notifications=notification_service, audit=audit_service
     )
     send_caps, send_limits = _send_limits(account_stores, plans, clock)
+    credits = _credit_service(account_stores, plans, access.free, clock)
     quotas = None
     if send_limits is not None:
         quotas = QuotaService(
@@ -444,7 +449,7 @@ def _assemble(
             clock,
             plans,
             _llm_usage_stores(account_stores),
-            access.free,
+            credits,
         )
         send_limits.attach_observer(quotas.observe)  # before any guard is built
     # Resolved at each use from the Admin's credentials: no restart when they change.
@@ -519,6 +524,10 @@ def _assemble(
         builders = replace(builders, signals=OperationalSignals(notification_service))
     if builders.send_allowed is None:
         builders = replace(builders, send_allowed=lambda client_id: not access.blocked(client_id))
+    if builders.quota_channel is None and send_limits is not None:
+        builders = replace(builders, quota_channel=send_limits.commercial_channel)
+    if builders.credits is None and credits is not None:
+        builders = replace(builders, credits=credits)
     if builders.send_guards is None and send_limits is not None:
         # Builders given by the caller still obey the deployment's cap (their metered channels).
         builders = replace(builders, send_guards=send_limits.guard)
@@ -650,6 +659,7 @@ def _assemble(
         read_models=_read_models(account_stores),
         metrics_readers=_metrics_readers(account_stores),
         quotas=quotas,
+        credits=credits,
         costs=_cost_service(account_stores, clock),
         billing_loop=_billing_loop(auto_billing, clock, shared.leases),
         finance=_finance(account_stores),
@@ -793,6 +803,19 @@ def _send_limits(
     return caps, SendLimits(caps, SqlSendCounter(engine), clock, quota)
 
 
+def _credit_service(
+    account_stores: AccountStores | None,
+    plans: PlanStore | None,
+    free: FreeAccountStore | None,
+    clock: Clock,
+) -> CreditService | None:
+    """The AI credits of a deployment with a database: gated and priced from the Admin's price list."""
+    engine = account_stores.engine if account_stores is not None else None
+    if engine is None:
+        return None
+    return CreditService(SqlCreditStore(engine), plans, SqlLLMPricingStore(engine), free, clock)
+
+
 def _llm_pricing_store(account_stores: AccountStores | None) -> LLMPricingStore | None:
     engine = account_stores.engine if account_stores is not None else None
     return SqlLLMPricingStore(engine) if engine is not None else None
@@ -912,10 +935,11 @@ def _learning_services(
         if quotas is None:
             return True
         try:
-            percent = quotas.status(client_id).credits_percent
+            status = quotas.status(client_id)
         except Exception:  # noqa: BLE001 - credits that cannot be read: do not spend any
             return False
-        return percent is None or percent < 100
+        percents = (status.credits_percent, status.daily_credits_percent)
+        return all(p is None or p < 100 for p in percents)
 
     return lambda client_id: LearningService(
         client_id, open_store(client_id), may_spend=lambda: credits_left(client_id)

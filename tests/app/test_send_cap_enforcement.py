@@ -5,7 +5,8 @@ a metered channel (e-mail) goes behind `SendCapChannel` there, whichever adapter
 mailbox, a Gmail mailbox). These tests prove, with doubles only (no network, no real send):
 
 * nothing reaches SMTP without a cap, over the cap, or when the store cannot be read;
-* the effective cap is `min(Admin cap, plan daily quota)`, per client, per UTC day;
+* the effective cap is the Admin's cap, per client, per UTC day: the plan's quota never lowers it;
+* the plan's daily quota counts new commercial contacts only (never follow-ups, reminders, replies);
 * a certain failure gives the place back, an ambiguous one (the channel raised) does not;
 * the counter and the cap survive a restart (SQL), and clients never share them;
 * without a guard (no database) a metered channel sends nothing; a non-metered one is untouched.
@@ -29,6 +30,8 @@ from sales_app.send_cap import (
     CAP_NOT_CONFIGURED,
     CAP_REACHED,
     CAP_UNAVAILABLE,
+    COMMERCIAL_CHANNEL,
+    COMMERCIAL_QUOTA_REACHED,
     InMemorySendCapStore,
     InMemorySendCounter,
     InvalidSendCapError,
@@ -68,8 +71,9 @@ class Smtp:
         pass
 
 
-def message(client="alpha", n=1):
+def message(client="alpha", n=1, new_contact=False):
     return OutboundMessage(
+        new_contact=new_contact,
         client_id=client,
         prospect_id=f"p{n}",
         channel=Channel.EMAIL,
@@ -130,9 +134,11 @@ class World:
             self.caps, self.counter, self.clock, lambda client: self.plan_quotas.get(client)
         )
 
-    def channel(self, client, build, *, metered=True, guards=True):
-        class Builders:  # the only attribute `_metered` reads
+    def channel(self, client, build, *, metered=True, guards=True, commercial=False):
+        class Builders:  # the attributes `_metered` reads
             send_guards = self.limits.guard if guards else None
+            quota_channel = self.limits.commercial_channel if commercial else None
+            send_allowed = None
 
         return _metered(provider(build, metered=metered), Config(client), Builders)
 
@@ -146,8 +152,8 @@ class World:
 @pytest.mark.parametrize(
     ("admin", "plan", "effective"),
     [
-        (10, 3, 3),  # the plan holds a generous cap
-        (2, 200, 2),  # the cap holds a generous plan
+        (10, 3, 10),  # the plan's quota of new contacts does not lower the e-mail cap
+        (2, 200, 2),
         (5, 5, 5),
         (4, None, 4),  # no plan: the Admin's cap alone
         (None, 200, None),  # a plan is not a cap: no Admin cap, nothing is sent
@@ -156,12 +162,14 @@ class World:
         (-1, 5, None),
         (True, 5, None),
         ("5", 5, None),
-        (5, 0, None),  # a plan quota that cannot be trusted refuses
-        (5, "9", None),
-        (5, True, None),
+        (5, 0, 5),
+        (5, "9", 5),
+        (5, True, 5),
     ],
 )
-def test_the_effective_cap_is_the_smaller_of_the_cap_and_the_plan_quota(admin, plan, effective):
+def test_the_effective_cap_is_the_admin_cap_and_the_plan_quota_never_lowers_it(
+    admin, plan, effective
+):
     assert combine_caps(admin, plan).effective == effective
 
 
@@ -209,22 +217,71 @@ def test_the_cap_is_reached_then_refused_in_both_modes_with_one_shared_count():
     assert gmail_channel.send(message(n=5)).ok
 
 
-def test_the_plan_quota_holds_a_larger_cap_and_follows_a_plan_change():
+def test_the_plan_quota_counts_new_contacts_only_and_follows_a_plan_change():
     w = World()
     w.plan_quotas["alpha"] = 2
     w.cap("alpha", 50)
     wire = Smtp()
-    channel = w.channel("alpha", lambda c: dedicated(wire))
-    assert channel.send(message(n=1)).ok and channel.send(message(n=2)).ok
-    assert channel.send(message(n=3)).error_code == CAP_REACHED
+    channel = w.channel("alpha", lambda c: dedicated(wire), commercial=True)
+    day = NOW.date()
+    assert channel.send(message(n=1, new_contact=True)).ok
+    assert channel.send(message(n=2, new_contact=True)).ok
+    refused = channel.send(message(n=3, new_contact=True))
+    assert refused.error_code == COMMERCIAL_QUOTA_REACHED
+    assert refused.metadata[DEFERRED_KEY] == DEFERRED_VALUE
+    # follow-ups, reminders and replies (not new contacts) pass and are not counted in the quota
+    assert channel.send(message(n=4)).ok and channel.send(message(n=5)).ok
+    assert w.counter.used("alpha", COMMERCIAL_CHANNEL, day) == 2
+    assert w.counter.used("alpha", "email", day) == 4  # the e-mail cap still counts every message
     w.plan_quotas["alpha"] = 3  # a bigger plan is applied at once
-    assert channel.send(message(n=3)).ok
-    del w.plan_quotas["alpha"]  # off any plan: the Admin's cap alone
-    assert channel.send(message(n=4)).ok
-    assert len(wire.sent) == 4
+    assert channel.send(message(n=3, new_contact=True)).ok
+    del w.plan_quotas["alpha"]  # off any plan: no quota of new contacts, the Admin's cap alone
+    assert channel.send(message(n=6, new_contact=True)).ok
+    assert w.counter.used("alpha", COMMERCIAL_CHANNEL, day) == 3
+    w.clock.advance(timedelta(days=1))  # a new UTC day starts again
+    w.plan_quotas["alpha"] = 1
+    assert channel.send(message(n=7, new_contact=True)).ok
+    assert channel.send(message(n=8, new_contact=True)).error_code == COMMERCIAL_QUOTA_REACHED
 
 
-def test_a_plan_that_cannot_be_read_refuses():
+def test_a_new_contact_that_fails_gives_its_place_back_and_a_refused_one_costs_nothing():
+    w = World()
+    w.plan_quotas["alpha"] = 5
+    w.cap("alpha", 1)
+    day = NOW.date()
+    refusing = Smtp(fail=smtplib.SMTPRecipientsRefused({"x": (550, b"no")}))
+    assert not w.channel("alpha", lambda c: dedicated(refusing), commercial=True).send(
+        message(n=1, new_contact=True)
+    ).ok
+    assert w.counter.used("alpha", COMMERCIAL_CHANNEL, day) == 0
+    channel = w.channel("alpha", lambda c: dedicated(Smtp()), commercial=True)
+    assert channel.send(message(n=2, new_contact=True)).ok  # takes the only e-mail place too
+    # refused by the e-mail cap: the commercial place it took is given back
+    assert channel.send(message(n=3, new_contact=True)).error_code == CAP_REACHED
+    assert w.counter.used("alpha", COMMERCIAL_CHANNEL, day) == 1
+
+
+def test_concurrent_new_contacts_never_exceed_the_quota(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    engine = create_database_engine(f"sqlite:///{tmp_path / 'race.db'}")
+    upgrade_database(engine)
+    try:
+        w = World(caps=SqlSendCapStore(engine), counter=SqlSendCounter(engine))
+        w.plan_quotas["alpha"] = 5
+        w.cap("alpha", 100)
+        channel = w.channel("alpha", lambda c: dedicated(Smtp()), commercial=True)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(
+                pool.map(lambda n: channel.send(message(n=n, new_contact=True)), range(20))
+            )
+        assert sum(r.ok for r in results) == 5
+        assert w.counter.used("alpha", COMMERCIAL_CHANNEL, NOW.date()) == 5
+    finally:
+        engine.dispose()
+
+
+def test_a_plan_that_cannot_be_read_refuses_new_contacts_only():
     w = World()
     w.cap("alpha", 10)
 
@@ -233,8 +290,10 @@ def test_a_plan_that_cannot_be_read_refuses():
 
     w.limits = SendLimits(w.caps, w.counter, w.clock, broken)
     wire = Smtp()
-    refused = w.channel("alpha", lambda c: dedicated(wire)).send(message())
+    channel = w.channel("alpha", lambda c: dedicated(wire), commercial=True)
+    refused = channel.send(message(new_contact=True))
     assert refused.error_code == CAP_UNAVAILABLE and wire.sent == []
+    assert channel.send(message(n=2)).ok  # a reply does not need the plan
 
 
 def test_a_store_that_cannot_be_read_refuses():

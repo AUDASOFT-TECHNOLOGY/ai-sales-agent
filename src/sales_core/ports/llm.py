@@ -28,6 +28,11 @@ class LLMModelError(LLMError):
     """The model does not exist for this account, or it refused the request's parameters."""
 
 
+class LLMCreditsExhaustedError(LLMError):
+    """The client's AI credits (daily or monthly) cannot cover the call, or cannot be checked: the
+    model was not called. Nothing is retried until the credits are renewed."""
+
+
 class LLMOutputError(LLMError):
     """The model answered, but not with a usable answer (empty, refused, cut off, not the
     requested structure). A Brain may ask again."""

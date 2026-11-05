@@ -956,6 +956,7 @@ class Engine:
             draft=action.draft,
             idempotency_key=action.idempotency_key,
             first_contact=not self._wrote_first(prospect, channel),
+            new_contact=action.action_type is SalesActionType.FIRST_CONTACT,
         )
         sending = replace(action, status=ActionStatus.SENDING)
         # Persist SENDING before the channel call. If this write fails we raise: nothing was sent.

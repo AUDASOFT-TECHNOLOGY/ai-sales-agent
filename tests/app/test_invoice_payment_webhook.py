@@ -162,6 +162,7 @@ def make_invoice(client="alpha", period="2026-04-01", price="30"):
         monthly_price=Decimal(price),
         currency="USD",
         included_credits=1,
+        daily_credits=1,
         daily_quota=1,
         started_at=datetime(2026, 1, 1, tzinfo=UTC),
         assigned_by="root",

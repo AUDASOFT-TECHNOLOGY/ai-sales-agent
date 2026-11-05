@@ -22,6 +22,8 @@ class LLMRequest:
     temperature: float | None = None
     max_output_tokens: int | None = None
     response_schema: Mapping[str, object] | None = None  # JSON Schema for structured output
+    # What the call is for, a short label kept with its cost (the credit ledger's "operation").
+    purpose: str = "completion"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", tuple(self.messages))

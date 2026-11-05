@@ -244,7 +244,11 @@ class _Builder:
                     "daily_used": s.daily_used,
                     "daily_percent": s.daily_percent,
                     "month_used": s.month_used,
-                    "credits": not_tracked("no credit-per-message rule is defined"),
+                    "credits": (
+                        indicator(s.credits_used)
+                        if s.credits_used is not None
+                        else not_tracked("the credits cannot be read")
+                    ),
                     "availability": MEASURED,
                 }
             )

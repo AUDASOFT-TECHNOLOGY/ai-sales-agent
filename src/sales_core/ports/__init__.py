@@ -12,6 +12,7 @@ from sales_core.ports.conversation_control import (
 from sales_core.ports.facts import FactsReader, FactsWriter
 from sales_core.ports.llm import (
     LLMAuthError,
+    LLMCreditsExhaustedError,
     LLMError,
     LLMModelError,
     LLMOutputError,
@@ -36,6 +37,7 @@ __all__ = [
     "FactsWriter",
     "InvalidSignatureError",
     "LLMAuthError",
+    "LLMCreditsExhaustedError",
     "LLMError",
     "LLMModelError",
     "LLMOutputError",

@@ -19,7 +19,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
@@ -321,5 +321,56 @@ def create_admin_costs_router(application: Application) -> APIRouter:
             raise HTTPException(503, "usage needs the database (set SALES_AGENT_DATABASE_URL)")
         status = await run_in_threadpool(application.quotas.status, client_id)
         return usage_response(status)
+
+    class LedgerLine(BaseModel):
+        call_id: str | None
+        occurred_at: datetime
+        provider: str
+        model: str
+        operation: str | None
+        input_tokens: int | None
+        output_tokens: int | None
+        cost_usd: str | None  # the real API cost; null: not priced (no USD price for this model)
+        credits: str | None  # null: not priced
+
+    class LedgerResponse(BaseModel):
+        client_id: str
+        entries: list[LedgerLine]
+
+    @router.get("/clients/{client_id}/credits/history", response_model=LedgerResponse)
+    async def client_credit_history(
+        client_id: str,
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+        admin: AdminUser = Depends(get_current_admin),
+    ) -> LedgerResponse:
+        """Every model call of the client with its tokens, real cost and credits, newest first. The
+        balance is on `/clients/{client_id}/quota`."""
+        existing_client(admin, client_id)
+        if application.credits is None:
+            raise HTTPException(503, "credits need the database (set SALES_AGENT_DATABASE_URL)")
+        try:
+            found = await run_in_threadpool(
+                lambda: application.credits.history(client_id, limit=limit, offset=offset)
+            )
+        except StoreUnavailableError:
+            raise unavailable() from None
+        return LedgerResponse(
+            client_id=client_id,
+            entries=[
+                LedgerLine(
+                    call_id=e.call_id,
+                    occurred_at=e.occurred_at,
+                    provider=e.provider,
+                    model=e.model,
+                    operation=e.operation,
+                    input_tokens=e.input_tokens,
+                    output_tokens=e.output_tokens,
+                    cost_usd=None if e.cost_usd is None else format(e.cost_usd, "f"),
+                    credits=None if e.credits is None else format(e.credits, "f"),
+                )
+                for e in found
+            ],
+        )
 
     return router

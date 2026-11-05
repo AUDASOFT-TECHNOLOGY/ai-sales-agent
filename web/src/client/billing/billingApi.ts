@@ -48,6 +48,7 @@ export interface SubscriptionPlan {
   currency: string;
   billing_period: "monthly" | "annual";
   included_credits: number;
+  daily_credits: number;
   daily_quota: number;
   since: string;
 }

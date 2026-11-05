@@ -1,6 +1,6 @@
 /** "Usage": what the plan allows and what has been consumed. The credits of the month come first (what
- *  is left, the pace, when they would run out), then the commercial actions of today and of the month,
- *  then a day-by-day chart with the detail in a fold. Read-only; every figure comes from
+ *  is left, the pace, when they would run out), then the credits of today and the daily commercial
+ *  actions (new prospect contacts), then a day-by-day chart with the detail in a fold. Read-only; every figure comes from
  *  `GET /client/v1/usage`. */
 
 import { useCallback, useEffect, useState } from "react";
@@ -22,6 +22,9 @@ function Bar({ percent, level, label }: { percent: number | null; level: Level; 
     </div>
   );
 }
+
+const commercialPercent = (u: ClientUsage): number | null =>
+  u.commercial_quota == null || u.commercial_done == null ? null : u.commercial_quota <= 0 ? 100 : Math.min(100, Math.floor((u.commercial_done * 100) / u.commercial_quota));
 
 function Credits({ usage }: { usage: ClientUsage }) {
   const { t, n } = useI18n();
@@ -144,8 +147,8 @@ export function UsagePage() {
           <Credits usage={usage} />
 
           <div className="rv-usage__quotas">
-            <Quota testId="usage-daily" title={t("rv.usage.daily")} used={usage.daily_used} limit={usage.daily_limit} percent={usage.daily_percent} hint={t("rv.usage.daily.hint", { h: reset.hours, m: reset.minutes })} />
-            <Quota testId="usage-month" title={t("rv.usage.month")} used={usage.month_actions_used} limit={usage.month_limit} percent={usage.month_percent} hint={t("rv.usage.month.hint")} />
+            <Quota testId="usage-daily-credits" title={t("rv.usage.dailyCredits")} used={usage.credits_today} limit={usage.daily_credits} percent={usage.daily_credits_percent} hint={t("rv.usage.daily.hint", { h: reset.hours, m: reset.minutes })} />
+            <Quota testId="usage-commercial" title={t("rv.usage.commercial")} used={usage.commercial_done} limit={usage.commercial_quota} percent={commercialPercent(usage)} hint={t("rv.usage.commercial.hint")} />
           </div>
 
           <Glass level={1} className="rv-card rv-usage__days">

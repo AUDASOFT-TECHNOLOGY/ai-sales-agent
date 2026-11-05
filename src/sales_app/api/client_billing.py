@@ -70,6 +70,7 @@ class SubscriptionPlan(BaseModel):
     currency: str
     billing_period: str  # "monthly" | "annual"
     included_credits: int
+    daily_credits: int
     daily_quota: int
     since: datetime
 
@@ -188,8 +189,9 @@ def create_client_billing_router(application: Application) -> APIRouter:
                     monthly_price=format(assignment.monthly_price, "f"),
                     currency=assignment.currency,
                     billing_period=current.billing_period if current else "monthly",
-                    included_credits=assignment.included_credits,
-                    daily_quota=assignment.daily_quota,
+                    included_credits=current.included_credits if current else assignment.included_credits,
+                    daily_credits=current.daily_credits if current else assignment.daily_credits,
+                    daily_quota=current.daily_quota if current else assignment.daily_quota,
                     since=assignment.started_at,
                 )
             unpaid = [i for i in mine if i.status in (InvoiceStatus.PENDING, InvoiceStatus.FAILED)]

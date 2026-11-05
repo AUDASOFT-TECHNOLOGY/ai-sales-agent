@@ -220,6 +220,7 @@ def build_llm_request(
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         response_schema=response_schema(context),
+        purpose="commercial_message",
     )
 
 

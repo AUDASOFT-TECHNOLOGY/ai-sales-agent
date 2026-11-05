@@ -259,6 +259,7 @@ PLAN = {
     "monthly_price": "49.90",
     "currency": "usd",
     "included_credits": 1000,
+    "daily_credits": 40,
     "daily_quota": 200,
     "active": True,
 }

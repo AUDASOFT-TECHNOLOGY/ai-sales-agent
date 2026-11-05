@@ -28,6 +28,9 @@ class OutboundMessage:
     # True when this opens a conversation the person has not started themselves (the first message
     # to someone who never wrote to us): a channel that rations such messages counts it.
     first_contact: bool = False
+    # True when this message is a new commercial contact (the action is a first contact), not a
+    # follow-up, a reminder, a callback or a reply: only these count in the daily commercial quota.
+    new_contact: bool = False
 
     def __post_init__(self) -> None:
         require_text(self.client_id, "client_id")

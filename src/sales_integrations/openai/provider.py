@@ -43,6 +43,12 @@ def _translate(error: Exception) -> LLMError | None:
     return None
 
 
+def _request_id(response: Any) -> dict[str, str]:
+    """The provider's own id of this answer: the credit ledger's unique id of the call."""
+    found = getattr(response, "id", None)
+    return {"request_id": found} if isinstance(found, str) and found else {}
+
+
 class OpenAIProvider:
     """Implements `sales_core.ports.LLMProvider` on the Chat Completions API.
 
@@ -128,6 +134,7 @@ class OpenAIProvider:
             model=getattr(response, "model", None),
             input_tokens=getattr(usage, "prompt_tokens", None),
             output_tokens=getattr(usage, "completion_tokens", None),
+            metadata=_request_id(response),
         )
 
     @staticmethod

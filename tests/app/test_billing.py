@@ -55,6 +55,7 @@ def assignment(
         monthly_price=Decimal(price),
         currency=currency,
         included_credits=credits,
+        daily_credits=credits,
         daily_quota=quota,
         started_at=start,
         assigned_by="root",
@@ -274,13 +275,13 @@ def test_editing_a_plan_afterwards_changes_no_invoice_and_no_assignment_snapshot
     upgrade_database(engine)
     plans, invoices = SqlPlanStore(engine), SqlInvoiceStore(engine)
     plans.create_plan(
-        Plan("pro", "Pro", Decimal(31), "USD", 100, 10, True, at(1, 1), at(1, 1), "r")
+        Plan("pro", "Pro", Decimal(31), "USD", 100, 10, 10, True, at(1, 1), at(1, 1), "r")
     )
     plans.assign("alpha", "pro", at=at(1, 1), by="root")
     kept = invoices.create(build(plans.current_assignment("alpha")))
 
     plans.update_plan(
-        Plan("pro", "Pro v2", Decimal(999), "EUR", 1, 1, False, at(1, 1), at(6, 1), "r")
+        Plan("pro", "Pro v2", Decimal(999), "EUR", 1, 1, 1, False, at(1, 1), at(6, 1), "r")
     )
     plans.assign("alpha", None, at=at(6, 2), by="root")
 
@@ -298,7 +299,7 @@ def test_editing_a_plan_afterwards_changes_no_invoice_and_no_assignment_snapshot
 
 def test_assignments_between_returns_only_those_in_force_in_the_window():
     plans = InMemoryPlanStore()
-    plans.create_plan(Plan("pro", "Pro", Decimal(1), "USD", 1, 1, True, at(1, 1), at(1, 1), "r"))
+    plans.create_plan(Plan("pro", "Pro", Decimal(1), "USD", 1, 1, 1, True, at(1, 1), at(1, 1), "r"))
     plans.assign("alpha", "pro", at=at(1, 1), by="r")
     plans.assign("alpha", None, at=at(4, 1), by="r")
     plans.assign("beta", "pro", at=at(5, 20), by="r")

@@ -8,10 +8,11 @@ action's attempts. This module only **reads** that real consumption (day and mon
 - `QuotaService.status(client_id)`: today's and this month's consumption against the limit, with a
   state (`ok`, `warning` from 80%, `reached`, `not_configured`, `unavailable`) and a plain message
   with the action to take. Every figure is `measured` (a real counter). The month's quota is the
-  effective daily cap times the days of the month. The credits consumed are read from the LLM usage
-  register: `TOKENS_PER_CREDIT` tokens make one credit (5 000 credits = 5M tokens), out of the plan's
-  `included_credits` (`DEFAULT_CREDITS` while the client is on no plan). Without a register, or when
-  it cannot be read, the credits are `unavailable`: no figure is invented.
+  effective daily cap times the days of the month. The credits are the real ones of `sales_app.credits`
+  (monthly and daily consumed, allowance and remaining; a client on no plan has no allowance and no
+  limit). The daily commercial actions are the new contacts really made today against the plan's
+  quota (`commercial_*`), independent of the credits. Without the credit service, or when it cannot
+  be read, the credits are `unavailable`: no figure is invented.
 - `QuotaService.observe(...)`: called by the send guard after each reservation attempt. It opens a
   `QUOTA_REACHED` notification for the client and for the Admin the first time a threshold (80, 100)
   is crossed for a client, channel and UTC day, with a message and a suggested action. The
@@ -25,19 +26,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 
-from sales_app.free_accounts import FreeAccountStore
+from sales_app.credits import CreditBalance, CreditService, to_credits
 from sales_app.llm_usage import LLMUsageStore
 from sales_app.notifications import ADMIN, CLIENT, INFO, QUOTA_REACHED, WARNING, NotificationService
 from sales_app.plans import PlanStore
 from sales_app.provider_costs import MEASURED, UNAVAILABLE
-from sales_app.send_cap import SendLimits, utc_day
+from sales_app.send_cap import COMMERCIAL_CHANNEL, SendLimits, utc_day
 from sales_core.ports import Clock
 
 log = logging.getLogger(__name__)
 
 THRESHOLDS = (80, 100)
-TOKENS_PER_CREDIT = 1000  # 5 000 credits = 5M tokens
-DEFAULT_CREDITS = 5000  # until the Admin's plans carry the exact figure
 OK, WARNING_STATE, REACHED, NOT_CONFIGURED, UNAVAILABLE_STATE = (
     "ok",
     "warning",
@@ -46,7 +45,7 @@ OK, WARNING_STATE, REACHED, NOT_CONFIGURED, UNAVAILABLE_STATE = (
     "unavailable",
 )
 CAP_CHANNEL = "email"  # the channel the Admin cap and the plan quota bound
-CAP_CHANNELS_EXCLUDED = frozenset({"telegram_new"})  # a sub-count of Telegram, not a message total
+CAP_CHANNELS_EXCLUDED = frozenset({"telegram_new", COMMERCIAL_CHANNEL})  # a sub-count of Telegram, not a message total
 
 _LABEL = {"email": "email", "whatsapp": "WhatsApp", "telegram": "Telegram"}
 
@@ -68,8 +67,8 @@ class QuotaStatus:
     daily_remaining: int | None
     daily_percent: int | None
     month_used: int | None  # every metered channel, this calendar month (UTC)
-    included_credits: int | None
-    credits_used: int | None  # this month, from the LLM usage register; None: unavailable
+    included_credits: float | None  # the monthly allowance; None: the client is not limited
+    credits_used: float | None  # this month; None: unavailable
     credits_basis: str
     usage_basis: str  # measured: read from the real counters
     state: str
@@ -78,9 +77,15 @@ class QuotaStatus:
     month_limit: int | None = None  # the effective daily cap times the days of the month
     month_actions_used: int | None = None  # the metered sends of the cap's channel this month
     month_percent: int | None = None
-    credits_today: int | None = None
-    credits_remaining: int | None = None
-    credits_percent: int | None = None
+    credits_today: float | None = None  # the daily credits consumed
+    credits_remaining: float | None = None  # monthly
+    credits_percent: int | None = None  # monthly
+    daily_credits: float | None = None  # the plan's daily allowance
+    daily_credits_remaining: float | None = None
+    daily_credits_percent: int | None = None
+    commercial_quota: int | None = None  # new contacts a day the plan allows; None: no plan
+    commercial_done: int | None = None  # new contacts really made today (UTC)
+    commercial_remaining: int | None = None
     tokens_used: int | None = None
     calls: int | None = None
     calls_without_figures: int | None = None
@@ -88,18 +93,27 @@ class QuotaStatus:
     days: tuple[dict[str, object], ...] = field(default_factory=tuple)
 
 
-def _credits(tokens: int) -> int:
-    return -(-tokens // TOKENS_PER_CREDIT)  # a started credit counts
+def _figure(value) -> float | None:
+    """A credit amount for display: four decimals, which is finer than any price can matter."""
+    return None if value is None else float(round(value, 4))
 
 
 @dataclass(frozen=True, slots=True)
 class _Spent:
     tokens: int
-    credits: int
-    today: int
-    by_day: dict[date, int]
+    by_day: dict[date, float]  # credits per day, from the ledger
     calls: int
     without_figures: int
+
+
+def _credit_percent(balance: CreditBalance | None, *, daily: bool) -> int | None:
+    if balance is None:
+        return None
+    allowance = balance.daily_allowance if daily else balance.monthly_allowance
+    used = balance.daily_consumed if daily else balance.monthly_consumed
+    if allowance is None:
+        return None
+    return 100 if allowance <= 0 else min(100, int(used * 100 / allowance))
 
 
 def _percent(used: int, limit: int) -> int:
@@ -138,9 +152,9 @@ class QuotaService:
         clock: Clock,
         plans: PlanStore | None = None,
         llm_usage: Callable[[str], LLMUsageStore] | None = None,
-        free_accounts: FreeAccountStore | None = None,
+        credits: CreditService | None = None,
     ) -> None:
-        self._free = free_accounts
+        self._credits = credits
         self._llm_usage = llm_usage
         self._limits = limits
         self._notifications = notifications
@@ -163,7 +177,7 @@ class QuotaService:
             if today.month == 12
             else date(today.year, today.month + 1, 1)
         )
-        plan_name, credits = None, None
+        plan_name = None
         base = dict(
             client_id=client_id,
             day_utc=today.isoformat(),
@@ -174,10 +188,7 @@ class QuotaService:
             if self._plans is not None:
                 assignment = self._plans.current_assignment(client_id)
                 if assignment is not None:
-                    plan_name, credits = assignment.plan_name, assignment.included_credits
-            if credits is None and self._free is not None:
-                free = self._free.get(client_id)  # the free credits: for preparing the agent
-                credits = free.credits if free is not None else None
+                    plan_name = assignment.plan_name
             figures = self._limits.cap_of(client_id)
             by_day = self._limits.usage_between(client_id, month_start, month_end)
         except Exception as error:  # noqa: BLE001 - say "cannot be read", never the store's text
@@ -193,7 +204,7 @@ class QuotaService:
                 daily_remaining=None,
                 daily_percent=None,
                 month_used=None,
-                included_credits=credits or DEFAULT_CREDITS,
+                included_credits=None,
                 credits_used=None,
                 credits_basis=UNAVAILABLE,
                 state=UNAVAILABLE_STATE,
@@ -210,12 +221,16 @@ class QuotaService:
             remaining = max(limit - daily_used, 0)
             state = REACHED if daily_used >= limit else WARNING_STATE if percent >= 80 else OK
         message, action = _texts(state)
-        included = credits or DEFAULT_CREDITS
         month_actions = sum(n for (ch, _), n in by_day.items() if ch == CAP_CHANNEL)
         days_in_month = calendar.monthrange(today.year, today.month)[1]
         month_limit = None if limit is None else limit * days_in_month
         month_percent = None if not month_limit else _percent(month_actions, month_limit)
-        spent = self._credit_figures(client_id, month_start, month_end, today)
+        spent = self._credit_figures(client_id, month_start, month_end)
+        balance = self._balance(client_id)
+        commercial_done = sum(
+            n for (ch, d), n in by_day.items() if d == today and ch == COMMERCIAL_CHANNEL
+        )
+        commercial_quota = figures.plan_quota
         per_day: dict[date, int] = {}
         for (ch, d), n in by_day.items():
             if ch == CAP_CHANNEL:
@@ -230,11 +245,20 @@ class QuotaService:
         )
         return QuotaStatus(
             **base,
-            credits_used=None if spent is None else spent.credits,
-            credits_basis=UNAVAILABLE if spent is None else MEASURED,
-            credits_today=None if spent is None else spent.today,
-            credits_remaining=None if spent is None else max(included - spent.credits, 0),
-            credits_percent=None if spent is None else _percent(spent.credits, included),
+            included_credits=None if balance is None else _figure(balance.monthly_allowance),
+            credits_used=None if balance is None else _figure(balance.monthly_consumed),
+            credits_basis=UNAVAILABLE if balance is None else MEASURED,
+            credits_today=None if balance is None else _figure(balance.daily_consumed),
+            credits_remaining=None if balance is None else _figure(balance.monthly_remaining),
+            credits_percent=_credit_percent(balance, daily=False),
+            daily_credits=None if balance is None else _figure(balance.daily_allowance),
+            daily_credits_remaining=None if balance is None else _figure(balance.daily_remaining),
+            daily_credits_percent=_credit_percent(balance, daily=True),
+            commercial_quota=commercial_quota,
+            commercial_done=commercial_done,
+            commercial_remaining=(
+                None if commercial_quota is None else max(commercial_quota - commercial_done, 0)
+            ),
             tokens_used=None if spent is None else spent.tokens,
             calls=None if spent is None else spent.calls,
             calls_without_figures=None if spent is None else spent.without_figures,
@@ -250,16 +274,24 @@ class QuotaService:
             daily_remaining=remaining,
             daily_percent=percent,
             month_used=month_used,
-            included_credits=included,
             state=state,
             message=message,
             action=action,
         )
 
-    def _credit_figures(
-        self, client_id: str, month_start: date, month_end: date, today: date
-    ) -> _Spent | None:
-        """The month's model consumption, or None when there is no register or it cannot be read."""
+    def _balance(self, client_id: str) -> CreditBalance | None:
+        """The client's credits, or None when there is no credit service or it cannot be read."""
+        if self._credits is None:
+            return None
+        try:
+            return self._credits.balance(client_id)
+        except Exception as error:  # noqa: BLE001 - say "unavailable", never the store's text
+            log.warning("credits unreadable: %s", type(error).__name__)
+            return None
+
+    def _credit_figures(self, client_id: str, month_start: date, month_end: date) -> _Spent | None:
+        """The month's model calls (tokens, credits per day), or None when there is no register or
+        it cannot be read."""
         if self._llm_usage is None:
             return None
         try:
@@ -267,7 +299,8 @@ class QuotaService:
         except Exception as error:  # noqa: BLE001 - say "unavailable", never the store's text
             log.warning("credit usage unreadable: %s", type(error).__name__)
             return None
-        tokens_by_day: dict[date, int] = {}
+        tokens = 0
+        by_day: dict[date, float] = {}
         calls = without_figures = 0
         for record in records:
             day = utc_day(record.occurred_at)
@@ -277,17 +310,10 @@ class QuotaService:
             if record.input_tokens is None and record.output_tokens is None:
                 without_figures += 1
                 continue
-            used = (record.input_tokens or 0) + (record.output_tokens or 0)
-            tokens_by_day[day] = tokens_by_day.get(day, 0) + used
-        tokens = sum(tokens_by_day.values())
-        return _Spent(
-            tokens=tokens,
-            credits=_credits(tokens),
-            today=_credits(tokens_by_day.get(today, 0)),
-            by_day={d: _credits(n) for d, n in tokens_by_day.items()},
-            calls=calls,
-            without_figures=without_figures,
-        )
+            tokens += (record.input_tokens or 0) + (record.output_tokens or 0)
+            if record.credits_nano is not None:
+                by_day[day] = by_day.get(day, 0) + float(to_credits(record.credits_nano))
+        return _Spent(tokens=tokens, by_day=by_day, calls=calls, without_figures=without_figures)
 
     # ---- alerts -------------------------------------------------------------------------------
 

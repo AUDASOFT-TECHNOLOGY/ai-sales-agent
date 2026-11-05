@@ -1098,7 +1098,7 @@ on("GET", "/subscription", () => {
   const paid = data.invoices.find((i) => i.status === "PAID");
   return ok({
     status: "active",
-    plan: { plan_id: "plan-pro", name: "Plan Pro", monthly_price: "149.00", currency: "EUR", billing_period: "monthly", included_credits: 5000, daily_quota: 100, since: data.invoices[data.invoices.length - 1]!.issued_on },
+    plan: { plan_id: "plan-pro", name: "Plan Pro", monthly_price: "149.00", currency: "EUR", billing_period: "monthly", included_credits: 25000, daily_credits: 800, daily_quota: 10, since: data.invoices[data.invoices.length - 1]!.issued_on },
     next_billing_at: new Date(Date.now() + 9 * 86_400_000).toISOString(),
     unpaid_invoices: pending,
     overdue_invoices: 0,
@@ -1121,8 +1121,11 @@ on("GET", "/usage", () => {
     plan_name: "Plan Pro", day_utc: last.day, month: last.day.slice(0, 7),
     daily_limit: 20, daily_used: last.actions, daily_remaining: 20 - last.actions, daily_percent: Math.round((last.actions * 100) / 20),
     month_limit: 20 * daysInMonth, month_actions_used: actions, month_percent: Math.round((actions * 100) / (20 * daysInMonth)),
-    included_credits: 5000, credits_used: credits, credits_today: last.credits, credits_remaining: 5000 - credits,
-    credits_percent: Math.round((credits * 100) / 5000), credits_basis: "measured", calls: days.length * 14, calls_without_figures: 0,
+    included_credits: 25000, credits_used: credits, credits_today: last.credits, credits_remaining: 25000 - credits,
+    credits_percent: Math.round((credits * 100) / 25000), credits_basis: "measured", calls: days.length * 14, calls_without_figures: 0,
+    daily_credits: 800, daily_credits_remaining: 800 - (last.credits ?? 0),
+    daily_credits_percent: Math.round(((last.credits ?? 0) * 100) / 800),
+    commercial_quota: 10, commercial_done: last.actions % 11, commercial_remaining: 10 - (last.actions % 10),
     state: "ok", message: "", action: "", days,
   });
 });

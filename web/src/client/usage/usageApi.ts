@@ -23,12 +23,20 @@ export interface ClientUsage {
   month_limit: number | null;
   month_actions_used: number | null;
   month_percent: number | null;
-  /** Credits included in the plan for the month, and what this month has consumed. */
+  /** Monthly credits of the plan, and what this month has consumed (fractions of a credit are kept). */
   included_credits: number | null;
   credits_used: number | null;
   credits_today: number | null;
   credits_remaining: number | null;
   credits_percent: number | null;
+  /** The plan's daily credits and what is left of them today. */
+  daily_credits: number | null;
+  daily_credits_remaining: number | null;
+  daily_credits_percent: number | null;
+  /** Daily commercial actions: new prospect contacts made today against the plan's quota (null quota: no plan). */
+  commercial_quota: number | null;
+  commercial_done: number | null;
+  commercial_remaining: number | null;
   credits_basis: "measured" | "unavailable";
   calls: number | null;
   calls_without_figures: number | null;

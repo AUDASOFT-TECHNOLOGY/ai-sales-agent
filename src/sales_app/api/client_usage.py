@@ -1,8 +1,10 @@
 """Client API: the client's own usage against its plan's quota.
 
 `GET /client/v1/usage`. It takes no client id: the session decides it. Every figure is read from the
-real send counters (`usage_basis: measured`); the credits consumed this month come from the LLM
-usage register (`credits_basis: measured`, `unavailable` when it cannot be read). `state` is `ok`, `warning` (from 80%), `reached`, `not_configured` or `unavailable`, with
+real send counters (`usage_basis: measured`); the credits consumed this month come from the
+credit counters (`credits_basis: measured`, `unavailable` when they cannot be read): monthly and daily
+credits against the plan's allowance, and the daily commercial actions (new contacts only) against
+the plan's quota. `state` is `ok`, `warning` (from 80%), `reached`, `not_configured` or `unavailable`, with
 a plain `message` and the `action` to take. Nothing technical (no store, token or cost) is shown.
 """
 
@@ -26,8 +28,8 @@ class UsageResponse(BaseModel):
     daily_remaining: int | None
     daily_percent: int | None
     month_used: int | None
-    included_credits: int | None
-    credits_used: int | None  # this month; null: not available
+    included_credits: float | None  # the monthly allowance; null: not limited
+    credits_used: float | None  # this month; null: not available
     credits_basis: str  # measured | unavailable
     usage_basis: str  # measured
     state: str
@@ -38,9 +40,15 @@ class UsageResponse(BaseModel):
     month_limit: int | None = None
     month_actions_used: int | None = None
     month_percent: int | None = None
-    credits_today: int | None = None
-    credits_remaining: int | None = None
-    credits_percent: int | None = None
+    credits_today: float | None = None  # the daily credits used
+    credits_remaining: float | None = None  # monthly
+    credits_percent: int | None = None  # monthly
+    daily_credits: float | None = None  # the daily allowance
+    daily_credits_remaining: float | None = None
+    daily_credits_percent: int | None = None
+    commercial_quota: int | None = None  # new contacts a day; null: no plan
+    commercial_done: int | None = None
+    commercial_remaining: int | None = None
     calls: int | None = None
     calls_without_figures: int | None = None
     days: list[dict[str, object]] = []
@@ -73,6 +81,12 @@ def usage_response(status: QuotaStatus, *, admin: bool = True) -> UsageResponse:
         credits_today=status.credits_today,
         credits_remaining=status.credits_remaining,
         credits_percent=status.credits_percent,
+        daily_credits=status.daily_credits,
+        daily_credits_remaining=status.daily_credits_remaining,
+        daily_credits_percent=status.daily_credits_percent,
+        commercial_quota=status.commercial_quota,
+        commercial_done=status.commercial_done,
+        commercial_remaining=status.commercial_remaining,
         calls=status.calls,
         calls_without_figures=status.calls_without_figures,
         days=list(status.days),

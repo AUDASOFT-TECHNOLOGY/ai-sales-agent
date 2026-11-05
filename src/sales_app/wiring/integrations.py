@@ -106,6 +106,12 @@ class IntegrationBuilders:
     # Whether a client may act commercially at all (`sales_app.free_accounts`): a Free account
     # prepares its agent and sends nothing, whatever the channel. None: no restriction is known.
     send_allowed: Callable[[str], bool] | None = None
+    # Puts a channel behind the client's plan quota of new commercial contacts
+    # (`SendLimits.commercial_channel`), whatever the channel; None: no plans, nothing counted.
+    quota_channel: Callable[[Any, str], Any] | None = None
+    # The AI credits (`sales_app.credits`): gates and prices each model call of every client; None:
+    # no database, model calls are neither limited nor priced.
+    credits: Any | None = None
     # One client's conversation control (who is in charge of each conversation: the agent or a
     # person), or None: the Engine is then built without it and no conversation can be taken over.
     conversation_control: Callable[[str], Any] | None = None

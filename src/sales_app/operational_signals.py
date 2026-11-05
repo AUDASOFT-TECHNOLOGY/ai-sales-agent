@@ -21,12 +21,17 @@ from sales_app.notifications import (
     NotificationService,
 )
 from sales_core.contracts.messaging import DEFERRED_KEY
-from sales_core.ports.llm import LLMAuthError, LLMModelError, LLMRateLimitError
+from sales_core.ports.llm import (
+    LLMAuthError,
+    LLMCreditsExhaustedError,
+    LLMModelError,
+    LLMRateLimitError,
+)
 
 log = logging.getLogger(__name__)
 
 _CHANNEL_LABEL = {"email": "Email", "telegram": "Telegram", "whatsapp": "WhatsApp"}
-LLM_KEYS = ("llm:quota", "llm:auth", "llm:model")
+LLM_KEYS = ("llm:quota", "llm:auth", "llm:model", "llm:credits")
 
 
 def _label(channel: str) -> str:
@@ -106,7 +111,13 @@ class OperationalSignals:
             self._n.resolve_both(client_id, key)
 
     def llm_failed(self, client_id: str, error: Exception) -> None:
-        if isinstance(error, LLMRateLimitError):
+        if isinstance(error, LLMCreditsExhaustedError):
+            kind, key = QUOTA_REACHED, "llm:credits"
+            title = "Your AI credits are used up for now"
+            message = "The agent paused its writing: the daily or monthly AI credits are used up."
+            client_action = "The credits renew automatically; ask Revansa to change your plan."
+            admin_action = "Check the client's credits and plan if the usage is unexpected."
+        elif isinstance(error, LLMRateLimitError):
             kind, key = QUOTA_REACHED, "llm:quota"
             title = "The AI provider quota or rate limit was reached"
             message = "The language model provider is throttling or its quota is used up."

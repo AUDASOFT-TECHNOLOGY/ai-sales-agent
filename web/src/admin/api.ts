@@ -680,7 +680,10 @@ export interface Plan {
   name: string;
   monthly_price: string;
   currency: string;
+  /** Monthly AI credits. */
   included_credits: number;
+  daily_credits: number;
+  /** Daily commercial action quota: new prospect contacts per day (follow-ups, reminders and replies excluded). */
   daily_quota: number;
   active: boolean;
   created_at: string;
@@ -695,6 +698,7 @@ export interface PlanInput {
   monthly_price: string;
   currency: string;
   included_credits: number;
+  daily_credits: number;
   daily_quota: number;
   active: boolean;
 }
@@ -706,6 +710,7 @@ export interface PlanAssignment {
   monthly_price: string;
   currency: string;
   included_credits: number;
+  daily_credits: number;
   daily_quota: number;
   started_at: string;
   ended_at: string | null;

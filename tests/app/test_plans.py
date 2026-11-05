@@ -27,7 +27,7 @@ T2 = T0 + timedelta(days=2)
 
 
 def make_plan(plan_id="pro", name="Pro", price="49.90", credits=1000, quota=200, active=True):
-    return Plan(plan_id, name, Decimal(price), "USD", credits, quota, active, T0, T0, "root")
+    return Plan(plan_id, name, Decimal(price), "USD", credits, credits, quota, active, T0, T0, "root")
 
 
 # ---- migration 0008 -----------------------------------------------------------------------------
@@ -48,29 +48,30 @@ def test_0008_adds_the_plan_tables_and_nothing_else():
 
 
 def test_valid_terms_are_normalised():
-    assert clean_terms("  Pro   Plus ", "49.9", " usd", 0, 1) == (
+    assert clean_terms("  Pro   Plus ", "49.9", " usd", 0, 0, 1) == (
         "Pro Plus",
         Decimal("49.90"),
         "USD",
         0,
+        0,
         1,
     )
-    assert clean_terms("Free", 0, "EUR", 0, 10)[1] == 0  # a free plan is a real zero price
+    assert clean_terms("Free", 0, "EUR", 0, 0, 10)[1] == 0  # a free plan is a real zero price
 
 
 @pytest.mark.parametrize(
     "args",
     [
-        ("", 1, "USD", 1, 1),
-        ("x" * 81, 1, "USD", 1, 1),
-        ("!!!", 1, "USD", 1, 1),
-        ("A", -1, "USD", 1, 1),
-        ("A", "abc", "USD", 1, 1),
-        ("A", True, "USD", 1, 1),
-        ("A", "NaN", "USD", 1, 1),
-        ("A", 1, "dollars", 1, 1),
-        ("A", 1, "USD", -1, 1),
-        ("A", 1, "USD", 1, 0),
+        ("", 1, "USD", 1, 1, 1),
+        ("x" * 81, 1, "USD", 1, 1, 1),
+        ("!!!", 1, "USD", 1, 1, 1),
+        ("A", -1, "USD", 1, 1, 1),
+        ("A", "abc", "USD", 1, 1, 1),
+        ("A", True, "USD", 1, 1, 1),
+        ("A", "NaN", "USD", 1, 1, 1),
+        ("A", 1, "dollars", 1, 1, 1),
+        ("A", 1, "USD", -1, 0, 1),
+        ("A", 1, "USD", 1, 1, 0),
     ],
 )
 def test_invalid_terms_are_refused(args):
@@ -98,7 +99,7 @@ def test_plans_are_created_listed_by_name_and_updated(store):
     store.create_plan(make_plan("pro", "Pro"))
     store.create_plan(make_plan("basic", "basic", price="9"))
     assert [p.plan_id for p in store.list_plans()] == ["basic", "pro"]
-    store.update_plan(Plan("pro", "Pro 2", Decimal(59), "EUR", 5, 6, False, T2, T1, "other"))
+    store.update_plan(Plan("pro", "Pro 2", Decimal(59), "EUR", 5, 2, 6, False, T2, T1, "other"))
     kept = store.get_plan("pro")
     assert (kept.name, kept.monthly_price, kept.currency, kept.active) == (
         "Pro 2",
@@ -141,7 +142,7 @@ def test_a_client_is_put_on_a_plan_with_a_snapshot_of_its_terms(store):
 def test_editing_a_plan_does_not_change_what_an_assignment_recorded(store):
     store.create_plan(make_plan())
     store.assign("alpha", "pro", at=T0, by="root")
-    store.update_plan(Plan("pro", "Pro", Decimal(99), "EUR", 1, 1, True, T0, T1, "root"))
+    store.update_plan(Plan("pro", "Pro", Decimal(99), "EUR", 1, 1, 1, True, T0, T1, "root"))
     current = store.current_assignment("alpha")
     assert (current.monthly_price, current.currency, current.included_credits) == (
         Decimal("49.90"),

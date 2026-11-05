@@ -123,6 +123,7 @@ def _with_feedback(
         temperature=request.temperature,
         max_output_tokens=request.max_output_tokens,
         response_schema=request.response_schema,
+        purpose=request.purpose,
     )
 
 

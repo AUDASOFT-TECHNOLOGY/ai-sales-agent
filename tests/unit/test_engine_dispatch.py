@@ -3,7 +3,7 @@
 from dataclasses import replace
 from datetime import timedelta
 
-from engine_harness import FU, REM, Crash, ScriptedBrain, build, due, prospect, send
+from engine_harness import CB, FIRST, FU, REM, Crash, ScriptedBrain, build, due, prospect, send
 from factories import NOW, make_action
 
 from sales_core.approval import ApprovalMode
@@ -361,3 +361,24 @@ class TestBookkeepingAfterSend:
         assert any("append_message failed after send" in e for e in report.errors)
         assert "action.bookkeeping_failed" in h.event_types()
         assert len(h.channel.sent) == 1  # and never resent
+
+
+class TestOnlyNewContactsAreMarkedAsNewCommercialContacts:
+    """The daily commercial quota counts the first message of a first-contact action, nothing else."""
+
+    def sent_for(self, kind):
+        h = build(
+            prospects=[prospect("p1")] if kind is FIRST else [due("p1", kind)],
+            brain=ScriptedBrain(lambda r: send("Hi!", follow_up_in=timedelta(days=5))),
+        )
+        h.engine.prepare()
+        h.approve("p1")
+        h.engine.dispatch()
+        (sent,) = h.channel.sent
+        return sent
+
+    def test_a_first_contact_is_a_new_contact(self):
+        assert self.sent_for(FIRST).new_contact is True
+
+    def test_follow_ups_reminders_and_callbacks_are_not(self):
+        assert [self.sent_for(kind).new_contact for kind in (FU, REM, CB)] == [False] * 3

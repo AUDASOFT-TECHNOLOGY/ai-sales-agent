@@ -11,6 +11,7 @@ BODY = {
     "monthly_price": "49.90",
     "currency": "usd",
     "included_credits": 1000,
+    "daily_credits": 40,
     "daily_quota": 200,
     "active": True,
 }
@@ -54,6 +55,8 @@ class TestPlans:
             {"currency": "dollars"},
             {"included_credits": -5},
             {"daily_quota": 0},
+            {"daily_credits": 2000},  # above the monthly credits
+            {"daily_credits": -1},
         ):
             assert create(client, **change).status_code == 422
         assert client.get(PLANS).json() == {"plans": []}

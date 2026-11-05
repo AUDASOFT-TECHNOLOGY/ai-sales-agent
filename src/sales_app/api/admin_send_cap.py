@@ -2,8 +2,8 @@
 
 `PUT/GET/DELETE /admin/v1/clients/{client_id}/send-cap`. The cap is the Admin's alone: a client never
 sets it. There is no default and no "unlimited": a client without a cap cannot send any e-mail.
-What really limits the client is the *effective* cap, `min(cap, daily quota of its current plan)`,
-which the response shows together with today's use (UTC day), so the Admin sees what blocks.
+The effective cap is that cap; the plan's daily quota (new commercial contacts only, a separate
+limit) is shown next to it, together with today's use (UTC day), so the Admin sees what blocks.
 
 Reading is open to any admin who can reach the client; setting or removing is the owner's (like
 assigning a model or a plan). A client the admin cannot reach is a 404, like everywhere else. The
@@ -39,8 +39,8 @@ class SendCapResponse(BaseModel):
     client_id: str
     channel: str = EMAIL
     daily_cap: int | None  # the Admin's cap; None: not set, nothing is sent
-    plan_daily_quota: int | None  # the current plan's quota; None: no plan
-    effective_cap: int | None  # min of the two; None: nothing is sent
+    plan_daily_quota: int | None  # the current plan's quota of new contacts; None: no plan
+    effective_cap: int | None  # the e-mail cap in force; None: nothing is sent
     used_today: int | None  # e-mails counted today (UTC day), all kinds
     remaining_today: int | None
     day_utc: str

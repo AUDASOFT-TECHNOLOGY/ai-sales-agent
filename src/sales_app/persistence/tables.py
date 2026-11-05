@@ -347,7 +347,38 @@ op_llm_usage = Table(
     Column("input_tokens", Integer),
     Column("output_tokens", Integer),
     Column("status", String(16), nullable=False),
+    # The credit ledger (`sales_app.credits`): what the call really cost, in whole units (a
+    # trillionth of a dollar; a billionth of a credit), so a sum is exact. NULL: not priced.
+    Column("call_id", String(96)),
+    Column("operation", String(32)),
+    Column("cost_pico_usd", BigInteger),
+    Column("credits_nano", BigInteger),
     Index("ix_op_llm_usage_client", "client_id", "occurred_at"),
+    Index("uq_op_llm_usage_call", "client_id", "call_id", unique=True),
+)
+
+# What each client has consumed of its credits, per period ("D:2026-11-01", "M:2026-11", "L" for the
+# one-time credits of a Free account). A new period is a new row: that is the reset. `held` is what
+# calls in flight have reserved. Never above the plan's allowance: the database refuses it.
+op_credit_counters = Table(
+    "op_credit_counters",
+    metadata,
+    Column("client_id", String(64), ForeignKey("clients.client_id"), primary_key=True),
+    Column("period", String(16), primary_key=True),
+    Column("consumed_nano", BigInteger, nullable=False, server_default="0"),
+    Column("held_nano", BigInteger, nullable=False, server_default="0"),
+)
+
+# A call's reservation, until it settles (or expires, if the process died in between).
+op_credit_holds = Table(
+    "op_credit_holds",
+    metadata,
+    Column("hold_id", String(96), primary_key=True),
+    Column("client_id", String(64), ForeignKey("clients.client_id"), nullable=False),
+    Column("periods", String(64), nullable=False),
+    Column("amount_nano", BigInteger, nullable=False),
+    Column("created_at", UtcDateTime, nullable=False),
+    Index("ix_op_credit_holds_client", "client_id", "created_at"),
 )
 
 # What a client's agent is doing right now, step by step (kept two days). A step holds a kind, the
@@ -457,6 +488,7 @@ plans = Table(
     Column("monthly_price", Numeric(18, 2), nullable=False),
     Column("currency", String(3), nullable=False),
     Column("included_credits", Integer, nullable=False),
+    Column("daily_credits", Integer, nullable=False),
     Column("daily_quota", Integer, nullable=False),
     Column("active", Boolean, nullable=False),
     Column("created_at", UtcDateTime, nullable=False),
@@ -475,6 +507,7 @@ client_plan_assignments = Table(
     Column("monthly_price", Numeric(18, 2), nullable=False),
     Column("currency", String(3), nullable=False),
     Column("included_credits", Integer, nullable=False),
+    Column("daily_credits", Integer, nullable=False),
     Column("daily_quota", Integer, nullable=False),
     Column("started_at", UtcDateTime, nullable=False),
     Column("ended_at", UtcDateTime),

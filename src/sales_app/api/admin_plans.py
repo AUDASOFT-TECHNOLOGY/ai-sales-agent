@@ -22,6 +22,7 @@ from sales_app.api.admin_billing import issue_after_assignment
 from sales_app.api.admin_clients import client_wiring_and_document
 from sales_app.bootstrap import Application
 from sales_app.plans import (
+    DEFAULT_CURRENCY,
     NAME_MAX,
     InvalidPlanError,
     Plan,
@@ -38,9 +39,10 @@ from sales_app.sourcing.errors import StoreUnavailableError
 class PlanBody(BaseModel):
     name: str = Field(max_length=NAME_MAX * 2)
     monthly_price: Decimal
-    currency: str = Field(max_length=3)
-    included_credits: int
-    daily_quota: int
+    currency: str = Field(default=DEFAULT_CURRENCY, max_length=3)  # the form prices in USD
+    included_credits: int  # monthly credits
+    daily_credits: int
+    daily_quota: int  # daily commercial action quota (new contacts only)
     active: bool = True
 
 
@@ -50,6 +52,7 @@ class PlanResponse(BaseModel):
     monthly_price: str
     currency: str
     included_credits: int
+    daily_credits: int
     daily_quota: int
     active: bool
     created_at: datetime
@@ -70,6 +73,7 @@ class AssignmentResponse(BaseModel):
     monthly_price: str
     currency: str
     included_credits: int
+    daily_credits: int
     daily_quota: int
     started_at: datetime
     ended_at: datetime | None
@@ -93,6 +97,7 @@ def _assignment_response(a: PlanAssignment) -> AssignmentResponse:
         monthly_price=format(a.monthly_price, "f"),
         currency=a.currency,
         included_credits=a.included_credits,
+        daily_credits=a.daily_credits,
         daily_quota=a.daily_quota,
         started_at=a.started_at,
         ended_at=a.ended_at,
@@ -118,6 +123,7 @@ def create_admin_plans_router(application: Application) -> APIRouter:
             monthly_price=format(plan.monthly_price, "f"),
             currency=plan.currency,
             included_credits=plan.included_credits,
+            daily_credits=plan.daily_credits,
             daily_quota=plan.daily_quota,
             active=plan.active,
             created_at=plan.created_at,
@@ -133,6 +139,7 @@ def create_admin_plans_router(application: Application) -> APIRouter:
                 body.monthly_price,
                 body.currency,
                 body.included_credits,
+                body.daily_credits,
                 body.daily_quota,
             )
         except InvalidPlanError as error:
@@ -150,7 +157,7 @@ def create_admin_plans_router(application: Application) -> APIRouter:
     async def create_plan(
         body: PlanBody, admin: AdminUser = Depends(require_owner)
     ) -> PlanResponse:
-        name, price, currency, credits, quota = terms(body)
+        name, price, currency, credits, daily_credits, quota = terms(body)
         plans = store()
 
         def create() -> Plan:
@@ -166,6 +173,7 @@ def create_admin_plans_router(application: Application) -> APIRouter:
                 price,
                 currency,
                 credits,
+                daily_credits,
                 quota,
                 body.active,
                 now,
@@ -198,7 +206,7 @@ def create_admin_plans_router(application: Application) -> APIRouter:
     async def update_plan(
         plan_id: str, body: PlanBody, admin: AdminUser = Depends(require_owner)
     ) -> PlanResponse:
-        name, price, currency, credits, quota = terms(body)
+        name, price, currency, credits, daily_credits, quota = terms(body)
         plans = store()
 
         def update() -> Plan:
@@ -211,6 +219,7 @@ def create_admin_plans_router(application: Application) -> APIRouter:
                 price,
                 currency,
                 credits,
+                daily_credits,
                 quota,
                 body.active,
                 current.created_at,

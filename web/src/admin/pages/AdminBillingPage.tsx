@@ -112,10 +112,13 @@ function PlansPanel() {
                   Monthly price
                 </th>
                 <th scope="col" className="admin-table__num">
-                  Included credits
+                  Monthly credits
                 </th>
                 <th scope="col" className="admin-table__num">
-                  Daily quota
+                  Daily credits
+                </th>
+                <th scope="col" className="admin-table__num">
+                  Daily commercial actions
                 </th>
                 <th scope="col" className="admin-table__num">
                   Clients
@@ -136,6 +139,7 @@ function PlansPanel() {
                     {p.monthly_price} {p.currency}
                   </td>
                   <td className="admin-table__num tabular">{p.included_credits}</td>
+                  <td className="admin-table__num tabular">{p.daily_credits}</td>
                   <td className="admin-table__num tabular">{p.daily_quota}</td>
                   <td className="admin-table__num tabular">{p.client_count}</td>
                   <td>
@@ -171,8 +175,8 @@ function PlanModal({ plan, onClose, onSaved }: { plan: Plan | null; onClose: () 
   const formId = useId();
   const [name, setName] = useState(plan?.name ?? "");
   const [price, setPrice] = useState(plan?.monthly_price ?? "");
-  const [currency, setCurrency] = useState(plan?.currency ?? "USD");
   const [credits, setCredits] = useState(plan ? String(plan.included_credits) : "");
+  const [dailyCredits, setDailyCredits] = useState(plan ? String(plan.daily_credits) : "");
   const [quota, setQuota] = useState(plan ? String(plan.daily_quota) : "");
   const [active, setActive] = useState(plan?.active ?? true);
   const [saving, setSaving] = useState(false);
@@ -185,8 +189,9 @@ function PlanModal({ plan, onClose, onSaved }: { plan: Plan | null; onClose: () 
     const body: PlanInput = {
       name: name.trim(),
       monthly_price: price.trim(),
-      currency: currency.trim().toUpperCase(),
+      currency: "USD",
       included_credits: creditsValue ?? 0,
+      daily_credits: dailyCreditsValue ?? 0,
       daily_quota: quotaValue ?? 0,
       active,
     };
@@ -199,8 +204,19 @@ function PlanModal({ plan, onClose, onSaved }: { plan: Plan | null; onClose: () 
   }
 
   const creditsValue = toInteger(credits);
+  const dailyCreditsValue = toInteger(dailyCredits);
   const quotaValue = toInteger(quota);
-  const ready = Boolean(name.trim() && price.trim() && currency.trim().length === 3 && creditsValue !== null && quotaValue !== null);
+  // The same rules for a new plan and an edited one (they are the server's too).
+  const dailyAboveMonthly = creditsValue !== null && dailyCreditsValue !== null && dailyCreditsValue > creditsValue;
+  const ready = Boolean(
+    name.trim() &&
+      price.trim() &&
+      creditsValue !== null &&
+      dailyCreditsValue !== null &&
+      !dailyAboveMonthly &&
+      quotaValue !== null &&
+      quotaValue >= 1,
+  );
 
   return (
     <Modal
@@ -223,42 +239,44 @@ function PlanModal({ plan, onClose, onSaved }: { plan: Plan | null; onClose: () 
       <form id={formId} className="admin-form" onSubmit={(e) => void onSubmit(e)}>
         <TextInput label="Plan name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} required autoComplete="off" />
         <TextInput
-          label="Monthly price"
+          label="Monthly price (USD)"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
           inputMode="decimal"
-          placeholder="49.90"
+          placeholder="59"
           required
           autoComplete="off"
         />
         <TextInput
-          label="Currency"
-          value={currency}
-          onChange={(e) => setCurrency(e.target.value)}
-          maxLength={3}
-          placeholder="USD"
-          required
-          autoComplete="off"
-          helper="3-letter code."
-        />
-        <TextInput
-          label="Included credits"
+          label="Monthly credits"
           value={credits}
           onChange={(e) => setCredits(e.target.value)}
           inputMode="numeric"
           required
           autoComplete="off"
+          helper="AI credits per month. Unused credits are not carried over."
         />
         <TextInput
-          label="Maximum daily quota"
+          label="Daily credits"
+          value={dailyCredits}
+          onChange={(e) => setDailyCredits(e.target.value)}
+          inputMode="numeric"
+          required
+          autoComplete="off"
+          error={dailyAboveMonthly ? "Cannot be more than the monthly credits." : undefined}
+          helper="AI credits per day."
+        />
+        <TextInput
+          label="Daily commercial action quota"
           value={quota}
           onChange={(e) => setQuota(e.target.value)}
           inputMode="numeric"
           required
           autoComplete="off"
-          helper="Actions per day."
+          helper="New prospect contacts per day. Follow-ups, reminders and replies are not counted."
         />
-        <Switch checked={active} onChange={setActive} label="Active" />
+        <Switch checked={active} onChange={setActive} label="Plan status" />
+        <p className="c-3 t-body-sm">{active ? "Active" : "Inactive"}</p>
         {!active ? (
           <p className="c-3 t-body-sm">
             An inactive plan cannot be given to a client. Clients already on it stay on it until you move them.

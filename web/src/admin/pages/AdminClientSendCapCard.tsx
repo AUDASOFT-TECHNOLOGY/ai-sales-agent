@@ -83,9 +83,6 @@ export function AdminClientSendCapCard({ clientId }: { clientId: string }) {
     if (valid && parsed !== null) void run(() => adminSetSendCap(clientId, parsed), "Could not save the limit.");
   }
 
-  const limited =
-    cap.plan_daily_quota !== null && cap.daily_cap !== null && cap.plan_daily_quota < cap.daily_cap;
-
   return (
     <form className="admin-llm-config" onSubmit={onSubmit} aria-label="Daily email limit">
       <p id={statusId} data-testid="send-cap-status" role="status" className={cap.status === "ok" ? "c-success" : "c-3"}>
@@ -93,13 +90,10 @@ export function AdminClientSendCapCard({ clientId }: { clientId: string }) {
       </p>
       <dl>
         <Row label="Limit set by the admin" value={cap.daily_cap} />
-        <Row label="Daily quota of the plan" value={cap.plan_daily_quota} />
+        <Row label="Daily commercial action quota of the plan (new contacts)" value={cap.plan_daily_quota} />
         <Row label="Effective limit" value={cap.effective_cap} />
         <Row label={`Sent today (${cap.day_utc}, UTC)`} value={cap.used_today} />
       </dl>
-      {limited ? (
-        <p className="c-3 t-body-sm">The plan&apos;s daily quota is lower than the limit: the quota applies.</p>
-      ) : null}
       <TextInput
         label="Daily limit (emails per day)"
         inputMode="numeric"

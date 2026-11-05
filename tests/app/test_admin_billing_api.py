@@ -23,6 +23,7 @@ def make_plan(plan_id="pro", price="30.00", currency="USD", credits=1000, quota=
         Decimal(price),
         currency,
         credits,
+        credits,
         quota,
         active,
         at(1, 1),
