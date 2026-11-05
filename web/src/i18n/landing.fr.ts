@@ -17,8 +17,8 @@ export const frLanding: Record<keyof typeof enLanding, string> = {
   "lp.cta.start": "Commencer gratuitement",
   "lp.cta.see": "Voir comment ça marche",
 
-  "lp.hero.eyebrow": "Votre meilleur commercial, en copie",
-  "lp.hero.title": "Il prospecte, relance et conclut. Sans jamais s'arrêter.",
+  "lp.hero.eyebrow": "Un véritable agent commercial IA",
+  "lp.hero.title": "Votre meilleur commercial. Il prospecte et vend à votre place.",
   "lp.hero.sub": "Entraînez-le une fois. Il contacte vos prospects sur WhatsApp, Telegram et e-mail, vend à votre place et vous envoie le rapport.",
 
   "lp.trust.card": "Sans carte bancaire",
@@ -45,6 +45,20 @@ export const frLanding: Record<keyof typeof enLanding, string> = {
   "lp.values.3.text": "Nuit, week-end. Aucun prospect n'attend.",
   "lp.values.4.title": "Sur nos serveurs",
   "lp.values.4.text": "Rien à laisser allumé.",
+
+  "lp.edge.eyebrow": "Ce qui rend Revansa unique",
+  "lp.edge.title": "Il ne se contente pas de répondre. Il vend.",
+  "lp.edge.1.t": "Vente autonome",
+  "lp.edge.1.d": "Il lance les conversations et les mène jusqu'à la vente, seul.",
+  "lp.edge.2.t": "Qualifié, puis suivi jusqu'à la vente",
+  "lp.edge.2.d": "Il trie vos prospects, puis reste avec chacun jusqu'à l'achat.",
+  "lp.edge.3.t": "Décide de sa prochaine action",
+  "lp.edge.3.d": "À qui écrire, quand, et quoi dire : il lit la situation et choisit.",
+  "lp.edge.4.t": "Prospects, CRM et suivi au même endroit",
+  "lp.edge.4.d": "Il trouve les prospects, tient le CRM à jour et suit chaque affaire.",
+  "lp.edge.5.t": "Tout le cycle commercial",
+  "lp.edge.5.d": "Du premier message au paiement, puis le rapport.",
+  "lp.edge.punch": "Un véritable agent commercial IA qui prospecte et mène les échanges. Pas une simple boîte de réception, ni un CRM garni d'automatisations.",
 
   "lp.how.eyebrow": "Fonctionnement",
   "lp.how.title": "Vous l'entraînez. Il fait tout le reste.",

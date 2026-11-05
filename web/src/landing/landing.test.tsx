@@ -86,7 +86,7 @@ describe("Landing page", () => {
   it("states the hero, the Meta billing caveat and that the example is fictional", async () => {
     serve({ "/public/plans": json({ plans: PLANS }) });
     at("/", <LandingPage />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("It prospects, follows up and closes. Without ever stopping.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your best salesperson. It prospects and sells for you.");
     expect(screen.getAllByText("Start for Free").length).toBeGreaterThan(0);
     expect(await screen.findByText(/billed separately/)).toBeInTheDocument();
     expect(screen.getAllByText(/Example · fictional data/).length).toBeGreaterThan(0);

@@ -15,8 +15,8 @@ export const enLanding = {
   "lp.cta.start": "Start for Free",
   "lp.cta.see": "See How It Works",
 
-  "lp.hero.eyebrow": "Your best salesperson, cloned",
-  "lp.hero.title": "It prospects, follows up and closes. Without ever stopping.",
+  "lp.hero.eyebrow": "A true AI sales agent",
+  "lp.hero.title": "Your best salesperson. It prospects and sells for you.",
   "lp.hero.sub": "Train it once. It contacts your prospects on WhatsApp, Telegram and Email, sells in your place, and sends you the report.",
 
   "lp.trust.card": "No card needed",
@@ -43,6 +43,20 @@ export const enLanding = {
   "lp.values.3.text": "Nights, weekends. No lead waits.",
   "lp.values.4.title": "Runs on our servers",
   "lp.values.4.text": "Nothing to keep switched on.",
+
+  "lp.edge.eyebrow": "What makes Revansa different",
+  "lp.edge.title": "It doesn't just answer. It sells.",
+  "lp.edge.1.t": "Autonomous selling",
+  "lp.edge.1.d": "It starts the conversations and carries them to the close, on its own.",
+  "lp.edge.2.t": "Qualified, then followed to the sale",
+  "lp.edge.2.d": "It sorts your prospects, then stays with each one until they buy.",
+  "lp.edge.3.t": "Decides its own next move",
+  "lp.edge.3.d": "Who to write to, when, and what to say: it reads the situation and chooses.",
+  "lp.edge.4.t": "Prospects, CRM and follow-up in one place",
+  "lp.edge.4.d": "It finds the leads, keeps the CRM up to date and tracks every deal.",
+  "lp.edge.5.t": "The whole sales cycle",
+  "lp.edge.5.d": "From the first message to payment, then the report.",
+  "lp.edge.punch": "A true AI sales agent that prospects and runs the conversations. Not just an inbox, nor a CRM with automations bolted on.",
 
   "lp.how.eyebrow": "How it works",
   "lp.how.title": "You train it. It does the rest.",

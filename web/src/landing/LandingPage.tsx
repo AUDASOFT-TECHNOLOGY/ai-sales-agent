@@ -10,6 +10,7 @@ import {
   BarChart3,
   BellRing,
   Check,
+  Compass,
   CreditCard,
   FileText,
   Flame,
@@ -18,15 +19,19 @@ import {
   Mail,
   MessageCircle,
   MessagesSquare,
+  Layers,
   Mic,
   MoonStar,
   Package,
   PenLine,
   Radar,
+  Rocket,
+  Route,
   Send,
   ShieldCheck,
   Sparkles,
   ShoppingBag,
+  Trophy,
   RefreshCw,
   UserPlus,
 } from "lucide-react";
@@ -442,6 +447,39 @@ function How() {
   );
 }
 
+/** What sets the agent apart, stated as five plain claims. */
+function Edge() {
+  const { t } = useI18n();
+  const rows: Array<{ n: number; Icon: ComponentType<{ size?: number }> }> = [
+    { n: 1, Icon: Rocket },
+    { n: 2, Icon: Route },
+    { n: 3, Icon: Compass },
+    { n: 4, Icon: Layers },
+    { n: 5, Icon: Trophy },
+  ];
+  return (
+    <Section eyebrow={t("lp.edge.eyebrow")} title={t("lp.edge.title")} className="lp-reveal lp-section--edge">
+      <ul className="lp-edge">
+        {rows.map(({ n, Icon }) => (
+          <li key={n} className="lp-glass lp-edge__item" style={{ ["--i" as string]: n }}>
+            <span className="lp-path__ico" aria-hidden>
+              <Icon size={20} />
+            </span>
+            <span>
+              <b>{t(`lp.edge.${n}.t` as MessageKey)}</b>
+              <small>{t(`lp.edge.${n}.d` as MessageKey)}</small>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="lp-edge__punch">
+        <Sparkles size={22} aria-hidden />
+        <span>{t("lp.edge.punch")}</span>
+      </p>
+    </Section>
+  );
+}
+
 function Control() {
   const { t } = useI18n();
   return (
@@ -679,6 +717,7 @@ export function LandingPage() {
         <Values />
         <Pipeline />
         <How />
+        <Edge />
         <Control />
         <Pricing />
         <Faq />
