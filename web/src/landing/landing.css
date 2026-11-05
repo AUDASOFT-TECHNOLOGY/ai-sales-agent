@@ -431,7 +431,14 @@
 .lp-ctx li:nth-child(3) svg { color: #ff9a5c; }
 @keyframes lp-chip { 0%, 3% { opacity: 0; transform: translateY(4px); } 8%, 94% { opacity: 1; transform: none; } 100% { opacity: 0; } }
 .lp-pill { display: inline-flex; align-items: center; gap: 10px; padding: 7px 18px 7px 8px; border-radius: 999px; font-size: 14.5px; font-weight: 700; letter-spacing: 0.04em; color: #fff; border: 1px solid transparent; background: linear-gradient(rgb(18 20 44 / 0.92), rgb(18 20 44 / 0.92)) padding-box, var(--lp-grad) border-box; box-shadow: 0 0 34px -8px rgb(122 99 240 / 0.8), inset 0 1px 0 rgb(255 255 255 / 0.08); }
-.lp-pill svg { box-sizing: content-box; padding: 6px; border-radius: 50%; color: #fff; background: var(--lp-grad); }
+.lp-pill { text-shadow: 0 0 12px rgb(190 175 255 / 0.9); animation: lp-pill-glow 2.8s ease-in-out infinite; }
+.lp-pill svg { box-sizing: content-box; padding: 6px; border-radius: 50%; color: #fff; background: var(--lp-grad); box-shadow: 0 0 16px rgb(122 99 240 / 0.9); }
+.lp-pill__hl { color: #ffd479; text-shadow: 0 0 14px rgb(255 190 80 / 0.75); }
+@keyframes lp-pill-glow {
+  0%, 100% { box-shadow: 0 0 34px -8px rgb(122 99 240 / 0.8), inset 0 1px 0 rgb(255 255 255 / 0.08); }
+  50% { box-shadow: 0 0 48px -2px rgb(150 125 255 / 1), 0 0 90px -10px rgb(122 99 240 / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.15); }
+}
+@media (prefers-reduced-motion: reduce) { .lp-pill { animation: none; } }
 @keyframes lp-tick { 0%, 4% { transform: scale(0); } 10%, 85% { transform: scale(1); } 95%, 100% { transform: scale(0); } }
 
 /* ── Final: wake up to the night report ── */

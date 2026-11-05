@@ -15,7 +15,8 @@ export const enLanding = {
   "lp.cta.start": "Start for Free",
   "lp.cta.see": "See How It Works",
 
-  "lp.hero.eyebrow": "A true AI sales agent",
+  "lp.hero.eyebrow": "A true",
+  "lp.hero.eyebrow.hl": "AI sales agent",
   "lp.hero.title": "Your best salesperson. It prospects and sells for you.",
   "lp.hero.sub": "Train it once. It contacts your prospects on WhatsApp, Telegram and Email, sells in your place, and sends you the report.",
 

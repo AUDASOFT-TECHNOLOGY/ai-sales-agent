@@ -16,7 +16,8 @@ export const arLanding: Record<keyof typeof enLanding, string> = {
   "lp.cta.start": "ابدأ مجانًا",
   "lp.cta.see": "اكتشف كيف يعمل",
 
-  "lp.hero.eyebrow": "وكيل مبيعات ذكي حقيقي",
+  "lp.hero.eyebrow": "",
+  "lp.hero.eyebrow.hl": "وكيل مبيعات ذكي حقيقي",
   "lp.hero.title": "أفضل مندوب مبيعات لديك. يبحث عن العملاء ويبيع نيابةً عنك.",
   "lp.hero.sub": "درّبه مرة واحدة. يتواصل مع عملائك عبر واتساب وتيليغرام والبريد، يبيع بدلًا منك، ويرسل لك التقرير.",
 

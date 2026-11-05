@@ -17,8 +17,9 @@ export const frLanding: Record<keyof typeof enLanding, string> = {
   "lp.cta.start": "Commencer gratuitement",
   "lp.cta.see": "Voir comment ça marche",
 
-  "lp.hero.eyebrow": "Un véritable agent commercial IA",
-  "lp.hero.title": "Votre meilleur commercial. Il prospecte et vend à votre place.",
+  "lp.hero.eyebrow": "Un véritable",
+  "lp.hero.eyebrow.hl": "agent commercial IA",
+  "lp.hero.title": "Il prospecte et vend à votre place.",
   "lp.hero.sub": "Entraînez-le une fois. Il contacte vos prospects sur WhatsApp, Telegram et e-mail, vend à votre place et vous envoie le rapport.",
 
   "lp.trust.card": "Sans carte bancaire",

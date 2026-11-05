@@ -270,7 +270,7 @@ function Hero() {
     <section className="lp-hero lp-wrap" aria-labelledby="lp-hero-title">
       <div className="lp-hero__copy">
         <p className="lp-pill">
-          <Sparkles size={14} aria-hidden /> {t("lp.hero.eyebrow")}
+          <Sparkles size={14} aria-hidden /> <span>{t("lp.hero.eyebrow")} <span className="lp-pill__hl">{t("lp.hero.eyebrow.hl")}</span></span>
         </p>
         <h1 id="lp-hero-title" className="lp-h1">
           {t("lp.hero.title")}
