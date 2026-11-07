@@ -241,6 +241,20 @@ class GmailPlatformStatus(BaseModel):
     note: str
 
 
+class GoogleSheetsPlatformStatus(BaseModel):
+    """Whether "Connect Google Sheets" is offered to the clients. It runs on the same Google OAuth
+    application as Gmail (no second set of credentials); only the callback and the scopes differ.
+    `configured` is NOT "verified": Google accepts the application only after a real consent."""
+
+    configured: bool
+    missing: list[str]
+    redirect_uri: str | None  # to register on the Google Cloud OAuth client; not a secret
+    scopes: list[str]  # to declare on the Google consent screen
+    shares_credentials_with: str = "gmail"
+    verified: bool = False
+    note: str
+
+
 class HubSpotPlatformStatus(BaseModel):
     """Whether the HubSpot application clients connect their account with is set. `configured`
     means the credentials are stored and the public URL is usable: NOT that HubSpot accepts them."""
@@ -645,6 +659,31 @@ def create_admin_integrations_router(
             note=(
                 "Stored is not verified: Google accepts the application only after a consent has "
                 "succeeded, and for other people's accounts only once Google has verified it."
+            ),
+        )
+
+    @router.get(
+        "/settings/integrations/google-sheets/status", response_model=GoogleSheetsPlatformStatus
+    )
+    def google_sheets_platform_status(
+        _admin: AdminUser = Depends(get_current_admin),
+    ) -> GoogleSheetsPlatformStatus:
+        """Config-only (no network). Same Google application as Gmail; values are never returned."""
+        from sales_integrations.google_oauth import SHEETS_SCOPES
+
+        access = application.sheets_access
+        missing = access.missing() if access is not None else ["Google Sheets service"]
+        return GoogleSheetsPlatformStatus(
+            configured=not missing,
+            missing=missing,
+            redirect_uri=redirect_uri_for(
+                application.settings.public_base_url, sheets_callback_path
+            ),
+            scopes=list(SHEETS_SCOPES),
+            note=(
+                "Stored is not verified: Google accepts the application only after a consent has "
+                "succeeded. The spreadsheets scope is sensitive: Google must verify the "
+                "application before people outside your test users can connect."
             ),
         )
 

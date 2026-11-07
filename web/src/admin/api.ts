@@ -469,6 +469,20 @@ export function adminGmailPlatformStatus(): Promise<GmailPlatformStatus> {
   return request<GmailPlatformStatus>("/settings/integrations/gmail/status");
 }
 
+// "Connect Google Sheets": same Google application as Gmail (no second set of credentials).
+export interface GoogleSheetsPlatformStatus {
+  configured: boolean;
+  missing: string[];
+  redirect_uri: string | null; // to register on the Google Cloud OAuth client; not a secret
+  scopes: string[]; // to declare on the Google consent screen
+  verified: boolean;
+  note: string;
+}
+
+export function adminGoogleSheetsPlatformStatus(): Promise<GoogleSheetsPlatformStatus> {
+  return request<GoogleSheetsPlatformStatus>("/settings/integrations/google-sheets/status");
+}
+
 // The platform's HubSpot application, which the clients connect their own account with. Config-only:
 // "configured" is not "verified" (HubSpot accepts the application only after a real consent).
 export interface HubSpotPlatformStatus {

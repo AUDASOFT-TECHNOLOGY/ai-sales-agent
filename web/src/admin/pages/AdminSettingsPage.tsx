@@ -439,8 +439,9 @@ function GmailSection({ canEdit }: { canEdit: boolean }) {
         </span>
       </div>
       <p className="c-2 t-body-sm">
-        The Google application that lets a client connect its own Gmail. The clients type no password: Google asks for their
-        permission on its own page. Stored is not verified: nothing is checked against Google until a client connects.
+        The Google OAuth application used by Revansa to connect each client&apos;s own Google account. The same OAuth credentials are
+        shared by both integrations: Gmail (reading and sending emails) and Google Sheets (reading and writing spreadsheet data).
+        Clients never enter technical credentials or passwords; they simply authorize access through Google&apos;s consent page.
       </p>
       <CredentialGroup store={store} fields={GMAIL_FIELDS} canEdit={canEdit} />
       {status && status.missing.length > 0 ? (
@@ -465,8 +466,9 @@ function GmailSection({ canEdit }: { canEdit: boolean }) {
         </p>
       )}
       <p className="c-3 t-body-sm">
-        Reading and sending mail uses a restricted Google scope: until Google has verified the application, only the test users
-        you list in Google Cloud (at most 100) can connect.
+        Google OAuth scopes are shared by the Gmail and Google Sheets integrations. Gmail uses the permissions required for email
+        access, while Google Sheets uses openid, email and spreadsheets. Google verification may be required before production use.
+        Until verification, access is restricted according to Google&apos;s testing-mode rules.
       </p>
     </Glass>
   );

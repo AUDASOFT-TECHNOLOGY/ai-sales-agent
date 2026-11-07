@@ -270,6 +270,13 @@ def create_client_source_router(
     def platform_sheets_file(client_id: str) -> str | None:
         return sheets_credentials_file(application, client_id)
 
+    def reads_with_own_account(client_id: str) -> bool:
+        access = application.sheets_access
+        return access is not None and access.connection.status(client_id).state in (
+            "connected",
+            "reauth_required",
+        )
+
     def sheets_probe_for(client_id: str) -> SheetsProbe | None:
         """What reads the client's spreadsheet for a test: their own Google authorisation when they
         have connected one, else the deployment's file (the older way). None: nothing to read with."""
@@ -498,6 +505,7 @@ def create_client_source_router(
                 api=sheets_probe_for(client_id),
                 spreadsheet_id=spreadsheet_id,
                 prospects_tab=prospects_tab,
+                own_account=reads_with_own_account(client_id),
             )
         if provider == hubspot.KEY:
             return check_hubspot(access_token=hubspot_token(client_id), http=http)
@@ -519,6 +527,7 @@ def create_client_source_router(
                     spreadsheet_id=str(settings.get("spreadsheet_id", "")) or None,
                     prospects_tab=str(settings.get("prospects_tab", "Prospects")),
                     writeback_headers=_writeback_headers(settings),
+                    own_account=reads_with_own_account(client_id),
                 )
             elif provider == hubspot.KEY:
                 result = check_hubspot(access_token=hubspot_token(client_id), http=http)

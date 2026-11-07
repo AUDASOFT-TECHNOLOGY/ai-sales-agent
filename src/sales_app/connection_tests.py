@@ -309,12 +309,29 @@ _SHEETS_REFUSALS = {
 }
 
 
+# When the client reads with their own Google account, a refusal means that account has no right on
+# the file (a link alone grants nothing), not that the platform's address is missing.
+_SHEETS_REFUSALS_OWN_ACCOUNT = {
+    **_SHEETS_REFUSALS,
+    401: "Google no longer accepts your authorisation: authorise Revansa again.",
+    403: (
+        "The Google account you connected cannot open this spreadsheet. Open it with that "
+        "account, or ask its owner to share it with you (editor), then test again."
+    ),
+    404: (
+        "Spreadsheet not found for the Google account you connected: check the link, "
+        "and that this account can open the file."
+    ),
+}
+
+
 def check_google_sheets(
     *,
     api: SheetsProbe | None,
     spreadsheet_id: str | None,
     prospects_tab: str | None,
     writeback_headers: Sequence[str] = (),
+    own_account: bool = False,
 ) -> ConnectionResult:
     """Reads the spreadsheet's tab list with the platform's service account and checks that the
     prospects tab is there. Nothing is written and no cell is read. A failure never carries what
@@ -329,7 +346,7 @@ def check_google_sheets(
     try:
         meta = api.metadata(spreadsheet_id)
     except Exception as error:  # noqa: BLE001 - whatever failed, the answer is a fixed sentence
-        return _sheets_failure(error)
+        return _sheets_failure(error, own_account=own_account)
     titles = getattr(meta, "titles", None)
     if not isinstance(titles, (tuple, list)):
         return ConnectionResult(False, "Google Sheets answered, but not with a list of tabs.")
@@ -340,7 +357,9 @@ def check_google_sheets(
             {"missing_tab": prospects_tab[:128]},
         )
     if writeback_headers and prospects_tab:
-        problem = _writeback_columns(api, spreadsheet_id, prospects_tab, writeback_headers)
+        problem = _writeback_columns(
+            api, spreadsheet_id, prospects_tab, writeback_headers, own_account=own_account
+        )
         if problem is not None:
             return problem
     return ConnectionResult(
@@ -349,7 +368,7 @@ def check_google_sheets(
 
 
 def _writeback_columns(
-    api: Any, spreadsheet_id: str, tab: str, headers: Sequence[str]
+    api: Any, spreadsheet_id: str, tab: str, headers: Sequence[str], *, own_account: bool = False
 ) -> ConnectionResult | None:
     """The columns chosen for write-back must each be in the tab's header row, once. Only the header
     row is read, and nothing of it is returned but the names the operator chose. None: all there."""
@@ -359,7 +378,7 @@ def _writeback_columns(
     try:
         (values,) = read(spreadsheet_id, ["'" + tab.replace("'", "''") + "'!1:1"])
     except Exception as error:  # noqa: BLE001 - whatever failed, the answer is a fixed sentence
-        return _sheets_failure(error)
+        return _sheets_failure(error, own_account=own_account)
 
     def norm(text: object) -> str:
         return re.sub(r"\s+", " ", str(text)).strip().casefold()
@@ -377,11 +396,12 @@ def _writeback_columns(
     return None
 
 
-def _sheets_failure(error: Exception) -> ConnectionResult:
+def _sheets_failure(error: Exception, *, own_account: bool = False) -> ConnectionResult:
     status = getattr(error, "status", None)
+    refusals = _SHEETS_REFUSALS_OWN_ACCOUNT if own_account else _SHEETS_REFUSALS
     if isinstance(status, int) and not isinstance(status, bool):
-        if status in _SHEETS_REFUSALS:
-            return ConnectionResult(False, _SHEETS_REFUSALS[status], {"status": str(status)})
+        if status in refusals:
+            return ConnectionResult(False, refusals[status], {"status": str(status)})
         if status >= 500:
             return ConnectionResult(
                 False, "Google Sheets answered with an error.", {"status": str(status)}

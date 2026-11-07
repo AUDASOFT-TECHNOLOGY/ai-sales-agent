@@ -292,6 +292,25 @@ def ready_alpha(j, cap=5):
 # ---- the platform's side -------------------------------------------------------------------------
 
 
+def test_admin_google_sheets_status_shares_the_gmail_credentials(world):
+    root = world.admin()
+    url = f"{ADMIN_INT}/google-sheets/status"
+    before = root.get(url).json()
+    assert before["configured"] is False and before["verified"] is False
+    world.configure_google(root)
+    after = root.get(url).json()
+    assert after["configured"] is True and after["missing"] == []
+    assert after["redirect_uri"] == "https://revansa.example/client/v1/sheets-access/callback"
+    assert after["scopes"] == [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "openid",
+        "email",
+    ]
+    for secret in (CLIENT_ID, CLIENT_SECRET, STATE_KEY):
+        assert secret not in str(after)
+    assert not world.factory_calls
+
+
 def test_admin_status_is_honest_configured_is_not_verified(world):
     root = world.admin()
     before = root.get(f"{ADMIN_INT}/gmail/status").json()

@@ -173,6 +173,23 @@ class TestGoogleSheets:
         assert result.details == {"status": str(status)}
         assert SECRET_PATH not in everything_said(result)
 
+    @pytest.mark.parametrize(
+        ("status", "words"),
+        [
+            (401, "authorise Revansa again"),
+            (403, "account you connected cannot open this spreadsheet"),
+            (404, "for the Google account you connected"),
+        ],
+    )
+    def test_with_the_clients_own_account_a_refusal_speaks_of_that_account(self, status, words):
+        error = SheetsError(f"Google Sheets API error {status}: {SECRET_PATH}", status=status)
+        result = check_google_sheets(
+            api=Probe(raises=error), spreadsheet_id="s", prospects_tab="Prospects", own_account=True
+        )
+        assert not result.ok and words in result.message
+        assert "platform" not in result.message
+        assert SECRET_PATH not in everything_said(result)
+
     def test_a_timeout_is_a_failure(self):
         result = check_google_sheets(
             api=Probe(raises=TimeoutError(SECRET_PATH)), spreadsheet_id="s", prospects_tab="P"
